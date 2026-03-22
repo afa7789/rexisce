@@ -81,6 +81,14 @@ impl ChatScreen {
         std::mem::take(&mut self.pending_commands)
     }
 
+    /// B6: Get the ID of the last message in a conversation (for mark-read).
+    pub fn last_message_id(&self, jid: &str) -> Option<String> {
+        self.conversations
+            .get(jid)
+            .and_then(|cv| cv.messages().last())
+            .map(|m| m.id.clone())
+    }
+
     pub fn update(&mut self, msg: Message) -> Task<Message> {
         match msg {
             Message::Sidebar(smsg) => {

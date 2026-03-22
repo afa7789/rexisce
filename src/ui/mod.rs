@@ -49,6 +49,8 @@ pub enum Message {
     // J1: toast messages
     ShowToast(String, ToastKind),
     DismissToast(u64),
+    // B6: mark a conversation as read
+    MarkRead(String, String),
 }
 
 enum Screen {
@@ -101,6 +103,15 @@ impl App {
             Message::DismissToast(id) => {
                 self.toasts.retain(|t| t.id != id);
                 Task::none()
+            }
+
+            Message::MarkRead(jid, last_id) => {
+                let pool = self.db.clone();
+                return Task::future(async move {
+                    let _ = crate::store::conversation_repo::mark_read(&pool, &jid, &last_id).await;
+                    Message::GoToBenchmark
+                })
+                .discard();
             }
 
             Message::ToggleTheme => {
@@ -161,12 +172,30 @@ impl App {
 
             Message::Chat(msg) => {
                 if let Screen::Chat(ref mut chat) = self.screen {
+                    // B6: if SelectContact, fire MarkRead for that JID
+                    let mark_read_task: Task<Message> = if let chat::Message::Sidebar(
+                        crate::ui::sidebar::Message::SelectContact(ref jid)
+                    ) = msg {
+                        if let Some(last_id) = chat.last_message_id(jid) {
+                            let jid = jid.clone();
+                            let pool = self.db.clone();
+                            Task::future(async move {
+                                let _ = crate::store::conversation_repo::mark_read(&pool, &jid, &last_id).await;
+                                Message::GoToBenchmark
+                            }).discard()
+                        } else {
+                            Task::none()
+                        }
+                    } else {
+                        Task::none()
+                    };
                     let task = chat.update(msg).map(Message::Chat);
                     let cmds = chat.drain_commands();
                     if !cmds.is_empty() {
                         if let Some(ref tx) = self.xmpp_tx {
                             let tx = tx.clone();
                             return Task::batch([
+                                mark_read_task,
                                 task,
                                 Task::future(async move {
                                     for cmd in cmds {
@@ -178,7 +207,7 @@ impl App {
                             ]);
                         }
                     }
-                    task
+                    Task::batch([mark_read_task, task])
                 } else {
                     Task::none()
                 }
