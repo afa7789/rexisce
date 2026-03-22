@@ -1,4 +1,5 @@
 // Task P0.1 — Scroll benchmark screen (go/no-go spike for iced 0.13 with 10k items)
+// Task P0.4 — Validate virtual scrolling strategy
 
 use iced::{
     widget::{button, column, container, row, scrollable, text},
@@ -6,6 +7,11 @@ use iced::{
 };
 
 const MESSAGE_COUNT: usize = 10_000;
+
+/// Scrollable widget identifier — used for programmatic scroll_to().
+fn scrollable_id() -> scrollable::Id {
+    scrollable::Id::new("benchmark-list")
+}
 
 /// A single synthetic message in the benchmark list.
 #[derive(Debug, Clone)]
@@ -20,11 +26,14 @@ pub struct BenchmarkMessage {
 #[derive(Debug, Clone)]
 pub struct BenchmarkScreen {
     messages: Vec<BenchmarkMessage>,
+    scroll_offset: scrollable::AbsoluteOffset,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Back,
+    Scrolled(scrollable::AbsoluteOffset),
+    ScrollToBottom,
 }
 
 /// Cycle through a small set of avatar colors for visual variety.
@@ -64,23 +73,45 @@ impl BenchmarkScreen {
             })
             .collect();
 
-        Self { messages }
+        Self {
+            messages,
+            scroll_offset: scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },
+        }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Back => Task::none(), // caller handles screen transition
+            Message::Scrolled(offset) => {
+                self.scroll_offset = offset;
+                Task::none()
+            }
+            Message::ScrollToBottom => {
+                // Scroll to a very large y value; iced clamps to content height.
+                let bottom = scrollable::AbsoluteOffset {
+                    x: 0.0,
+                    y: f32::MAX,
+                };
+                scrollable::scroll_to(scrollable_id(), bottom)
+            }
         }
     }
 
     pub fn view(&self) -> Element<Message> {
         let back_btn = button("← Back").on_press(Message::Back).padding([6, 16]);
+        let scroll_to_bottom_btn = button("Scroll to bottom")
+            .on_press(Message::ScrollToBottom)
+            .padding([6, 16]);
+
+        let scroll_label = text(format!("Scroll: {:.0}px", self.scroll_offset.y)).size(14);
 
         let header = container(
             row![
                 back_btn,
                 text(format!("Scroll Benchmark — {} messages", self.messages.len()))
                     .size(18),
+                scroll_label,
+                scroll_to_bottom_btn,
             ]
             .spacing(16)
             .align_y(iced::Alignment::Center),
@@ -110,6 +141,8 @@ impl BenchmarkScreen {
         });
 
         let list = scrollable(column(rows).spacing(6).padding(8))
+            .id(scrollable_id())
+            .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset()))
             .width(Length::Fill)
             .height(Length::Fill);
 
@@ -151,5 +184,23 @@ mod tests {
         let cloned = msg.clone();
         // If Debug is not derived this line won't compile.
         let _ = format!("{:?}", cloned);
+    }
+
+    #[test]
+    fn test_scroll_offset_updates() {
+        let mut screen = BenchmarkScreen::new();
+        assert_eq!(screen.scroll_offset.y, 0.0);
+
+        let offset = scrollable::AbsoluteOffset { x: 0.0, y: 1234.5 };
+        let _ = screen.update(Message::Scrolled(offset));
+
+        assert_eq!(screen.scroll_offset.y, 1234.5);
+        assert_eq!(screen.scroll_offset.x, 0.0);
+    }
+
+    #[test]
+    fn test_generates_10k_messages() {
+        let screen = BenchmarkScreen::new();
+        assert_eq!(screen.messages.len(), 10_000);
     }
 }
