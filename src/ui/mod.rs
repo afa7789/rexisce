@@ -14,6 +14,7 @@ mod login;
 pub mod muc_panel;
 pub mod sidebar;
 pub mod styling;
+pub mod toast;
 
 pub use benchmark::BenchmarkScreen;
 pub use chat::ChatScreen;
@@ -21,6 +22,7 @@ pub use login::LoginScreen;
 
 use crate::config::{self, Settings, Theme};
 use crate::xmpp::{self, XmppCommand, XmppEvent};
+use toast::{Toast, ToastKind};
 
 /// Top-level application state.
 pub struct App {
@@ -28,6 +30,9 @@ pub struct App {
     xmpp_tx: Option<mpsc::Sender<XmppCommand>>,
     settings: Settings,
     db: Arc<SqlitePool>,
+    // J1: toast notifications
+    toasts: Vec<Toast>,
+    next_toast_id: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +45,9 @@ pub enum Message {
     ToggleTheme,
     XmppReady(mpsc::Sender<XmppCommand>),
     XmppEvent(XmppEvent),
+    // J1: toast messages
+    ShowToast(String, ToastKind),
+    DismissToast(u64),
 }
 
 enum Screen {
@@ -62,6 +70,8 @@ impl App {
                 xmpp_tx: None,
                 settings,
                 db,
+                toasts: vec![],
+                next_toast_id: 0,
             },
             Task::none(),
         )
@@ -76,6 +86,22 @@ impl App {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::ShowToast(body, kind) => {
+                let id = self.next_toast_id;
+                self.next_toast_id += 1;
+                self.toasts.push(Toast { id, body, kind });
+                // J1: auto-dismiss after 3 seconds
+                Task::future(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    Message::DismissToast(id)
+                })
+            }
+
+            Message::DismissToast(id) => {
+                self.toasts.retain(|t| t.id != id);
+                Task::none()
+            }
+
             Message::ToggleTheme => {
                 self.settings.theme = match self.settings.theme {
                     Theme::Dark => Theme::Light,
@@ -183,6 +209,12 @@ impl App {
                         if matches!(self.screen, Screen::Chat(_)) {
                             self.screen = Screen::Login(LoginScreen::new());
                         }
+                        // J1: show disconnect toast
+                        let msg = Message::ShowToast(
+                            format!("Disconnected: {}", reason),
+                            ToastKind::Error,
+                        );
+                        return self.update(msg);
                     }
                     XmppEvent::Reconnecting { attempt } => {
                         tracing::info!("XMPP: reconnecting (attempt {attempt})");
@@ -273,11 +305,61 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        match &self.screen {
+        use iced::widget::{column, container, row, stack, text, button};
+        use iced::{Alignment, Length, Color};
+
+        let screen_view: Element<Message> = match &self.screen {
             Screen::Login(login) => login.view().map(Message::Login),
             Screen::Benchmark(bench) => bench.view().map(Message::Benchmark),
             Screen::Chat(chat) => chat.view().map(Message::Chat),
+        };
+
+        if self.toasts.is_empty() {
+            return screen_view;
         }
+
+        // J1: build toast column at bottom-right
+        let toast_items: Vec<Element<Message>> = self
+            .toasts
+            .iter()
+            .map(|t| {
+                let bg = match t.kind {
+                    ToastKind::Error => Color::from_rgb(0.8, 0.2, 0.2),
+                    ToastKind::Success => Color::from_rgb(0.2, 0.7, 0.3),
+                    ToastKind::Info => Color::from_rgb(0.2, 0.4, 0.8),
+                };
+                let dismiss_btn = button(text("x").size(10))
+                    .on_press(Message::DismissToast(t.id))
+                    .padding([2, 4]);
+                let toast_row = row![
+                    text(t.body.clone()).size(12).color(Color::WHITE).width(Length::Fill),
+                    dismiss_btn,
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center);
+                container(toast_row)
+                    .padding([6, 10])
+                    .width(280)
+                    .style(move |_theme: &iced::Theme| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(bg)),
+                        ..Default::default()
+                    })
+                    .into()
+            })
+            .collect();
+
+        let toast_col = toast_items
+            .into_iter()
+            .fold(column![].spacing(4), iced::widget::Column::push);
+
+        let toast_overlay = container(toast_col)
+            .align_x(Alignment::End)
+            .align_y(Alignment::End)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(12);
+
+        stack![screen_view, toast_overlay].into()
     }
 
     pub fn subscription() -> Subscription<Message> {
