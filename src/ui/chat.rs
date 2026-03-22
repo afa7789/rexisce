@@ -68,6 +68,7 @@ impl ChatScreen {
             body: msg.body,
             own: false,
             timestamp: chrono::Utc::now().timestamp_millis(),
+            reply_preview: None,
         });
 
         // B5: increment unread if not the currently active conversation
@@ -181,6 +182,7 @@ impl ChatScreen {
                                 body: body.clone(),
                                 own: true,
                                 timestamp: chrono::Utc::now().timestamp_millis(),
+                                reply_preview: None,
                             });
                             self.pending_commands.push(XmppCommand::SendMessage {
                                 to: jid.clone(),

@@ -34,6 +34,8 @@ pub struct DisplayMessage {
     pub body: String,
     pub own: bool,         // true if sent by this account
     pub timestamp: i64,   // unix milliseconds (G5)
+    /// G3: quoted message preview (id, preview text)
+    pub reply_preview: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +49,8 @@ pub struct ConversationView {
     own_jid: String,
     /// C4: whether the peer is currently blocked (shown in header)
     pub peer_blocked: bool,
+    /// G3: current reply-to (msg_id, preview text)
+    reply_to: Option<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +65,8 @@ pub enum Message {
     UnblockPeer,             // C4: unblock the peer JID
     ComposingStarted,        // G2: user started typing
     ComposingPaused,         // G2: user stopped typing
+    ReplyTo(String, String), // G3: (msg_id, preview)
+    CancelReply,             // G3: cancel current reply
 }
 
 impl ConversationView {
@@ -73,6 +79,7 @@ impl ConversationView {
             scroll_offset: AbsoluteOffset::default(),
             own_jid,
             peer_blocked: false,
+            reply_to: None,
         }
     }
 
@@ -108,6 +115,7 @@ impl ConversationView {
             }
             Message::Send => {
                 self.composer.clear();
+                self.reply_to = None;
                 Task::none()
             }
             Message::Scrolled(offset) => {
@@ -124,6 +132,14 @@ impl ConversationView {
             Message::UnblockPeer => Task::none(),        // handled by ChatScreen → engine
             Message::ComposingStarted => Task::none(),   // bubbled to ChatScreen
             Message::ComposingPaused => Task::none(),    // bubbled to ChatScreen
+            Message::ReplyTo(id, preview) => {
+                self.reply_to = Some((id, preview));
+                Task::none()
+            }
+            Message::CancelReply => {
+                self.reply_to = None;
+                Task::none()
+            }
         }
     }
 
@@ -183,8 +199,16 @@ impl ConversationView {
             let copy_btn = button(text("Copy").size(10))
                 .on_press(Message::CopyToClipboard(m.body.clone()))
                 .padding([2, 6]);
+            // G3: reply button
+            let msg_id = m.id.clone();
+            let preview: String = m.body.chars().take(60).collect();
+            let reply_btn = button(text("↩").size(10))
+                .on_press(Message::ReplyTo(msg_id, preview))
+                .padding([2, 4]);
 
             let align = if m.own { Alignment::End } else { Alignment::Start };
+
+        // G3: quoted block rendered inline in text_col below
 
             let row_elem: Element<Message> = if is_me_action(&m.body) {
                 // /me: centered italic, no avatar, no sender label
@@ -211,16 +235,23 @@ impl ConversationView {
                     .align_y(Alignment::Center);
 
                 let text_col = if show_sender {
-                    column![
-                        row![text(sender.clone()).size(11), copy_btn]
+                    let mut col = column![
+                        row![text(sender.clone()).size(11), copy_btn, reply_btn]
                             .spacing(8)
                             .align_y(Alignment::Center),
-                        body_widget
                     ]
                     .spacing(2)
-                    .padding([0, 6])
+                    .padding([0, 6]);
+                    if let Some(preview) = m.reply_preview.as_ref() {
+                        col = col.push(container(text(format!("↩ {}", preview)).size(11)).padding([2, 6]));
+                    }
+                    col.push(body_widget)
                 } else {
-                    column![body_widget].spacing(2).padding([0, 6])
+                    let mut col = column![].spacing(2).padding([0, 6]);
+                    if let Some(preview) = m.reply_preview.as_ref() {
+                        col = col.push(container(text(format!("↩ {}", preview)).size(11)).padding([2, 6]));
+                    }
+                    col.push(body_widget)
                 };
 
                 let bubble = row![avatar, text_col].spacing(6).align_y(Alignment::Start);
@@ -233,7 +264,7 @@ impl ConversationView {
                 // Own message: right-aligned, no avatar
                 let text_col = if show_sender {
                     column![
-                        row![text(sender.clone()).size(11), copy_btn]
+                        row![text(sender.clone()).size(11), copy_btn, reply_btn]
                             .spacing(8)
                             .align_y(Alignment::Center),
                         body_widget
@@ -275,6 +306,21 @@ impl ConversationView {
             .padding([2, 8]);
 
         // ---- Composer ----
+        // G3: reply quote strip
+        let reply_strip: Option<Element<Message>> = self.reply_to.as_ref().map(|(_id, preview)| {
+            let cancel_btn = button(text("✕").size(10))
+                .on_press(Message::CancelReply)
+                .padding([2, 4]);
+            let strip = row![
+                text(format!("↩ {}", preview)).size(11).width(Length::Fill),
+                cancel_btn,
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .padding([4, 8]);
+            container(strip).width(Length::Fill).into()
+        });
+
         let can_send = !self.composer.trim().is_empty();
         let send_btn = if can_send {
             button("Send").on_press(Message::Send)
@@ -314,7 +360,11 @@ impl ConversationView {
         .padding([8, 12])
         .width(Length::Fill);
 
-        column![header, scroll_area, scroll_bar, composer_row].into()
+        let mut col = column![header, scroll_area, scroll_bar];
+        if let Some(strip) = reply_strip {
+            col = col.push(strip);
+        }
+        col.push(composer_row).into()
     }
 }
 
@@ -359,6 +409,7 @@ mod tests {
             body: body.into(),
             own,
             timestamp: 0,
+            reply_preview: None,
         }
     }
 

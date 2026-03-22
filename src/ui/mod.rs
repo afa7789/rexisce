@@ -119,6 +119,7 @@ impl App {
                                 body: r.body.unwrap_or_default(),
                                 own: r.from_jid == own_jid,
                                 timestamp: r.timestamp,
+                                reply_preview: None,
                             })
                             .collect();
                         convo.load_history(display);
