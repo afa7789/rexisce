@@ -9,19 +9,20 @@ pub mod benchmark;
 pub mod chat;
 pub mod conversation;
 pub mod sidebar;
+pub mod styling;
 
 pub use login::LoginScreen;
 pub use benchmark::BenchmarkScreen;
 pub use chat::ChatScreen;
 
+use crate::config::{self, Settings, Theme};
 use crate::xmpp::{self, XmppCommand, XmppEvent};
 
 /// Top-level application state.
-/// iced 0.13 uses standalone update/view functions instead of Application trait.
 pub struct App {
     screen: Screen,
-    /// Command channel to the XMPP engine (available after XmppReady).
     xmpp_tx: Option<mpsc::Sender<XmppCommand>>,
+    settings: Settings,
 }
 
 #[derive(Debug, Clone)]
@@ -30,7 +31,7 @@ pub enum Message {
     Benchmark(benchmark::Message),
     Chat(chat::Message),
     GoToBenchmark,
-    /// Subscription is ready; stores the command sender.
+    ToggleTheme,
     XmppReady(mpsc::Sender<XmppCommand>),
     XmppEvent(XmppEvent),
 }
@@ -43,38 +44,66 @@ enum Screen {
 
 impl App {
     pub fn new() -> (Self, Task<Message>) {
+        Self::new_with_settings(Settings::default())
+    }
+
+    pub fn new_with_settings(settings: Settings) -> (Self, Task<Message>) {
+        let password = config::load_password(&settings.last_jid).unwrap_or_default();
+        let login = LoginScreen::with_saved(
+            settings.last_jid.clone(),
+            password,
+            settings.last_server.clone(),
+        );
         (
             App {
-                screen: Screen::Login(LoginScreen::new()),
+                screen: Screen::Login(login),
                 xmpp_tx: None,
+                settings,
             },
             Task::none(),
         )
     }
 
+    pub fn iced_theme(&self) -> iced::Theme {
+        match self.settings.theme {
+            Theme::Dark => iced::Theme::Dark,
+            Theme::Light => iced::Theme::Light,
+        }
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::ToggleTheme => {
+                self.settings.theme = match self.settings.theme {
+                    Theme::Dark => Theme::Light,
+                    Theme::Light => Theme::Dark,
+                };
+                let _ = config::save(&self.settings);
+                Task::none()
+            }
+
             Message::GoToBenchmark => {
                 self.screen = Screen::Benchmark(BenchmarkScreen::new());
                 Task::none()
             }
 
             Message::Login(msg) => {
-                // Intercept Connect: extract credentials and tell the engine.
                 if matches!(msg, login::Message::Connect) {
                     if let Screen::Login(ref mut login) = self.screen {
-                        let config = login.connect_config();
+                        let cfg = login.connect_config();
                         if let Some(ref tx) = self.xmpp_tx {
                             let tx = tx.clone();
+                            self.settings.last_jid = cfg.jid.clone();
+                            self.settings.last_server = cfg.server.clone();
+                            let _ = config::save(&self.settings);
                             return Task::future(async move {
-                                let _ = tx.send(XmppCommand::Connect(config)).await;
+                                let _ = tx.send(XmppCommand::Connect(cfg)).await;
                                 Message::Login(login::Message::Connecting)
                             });
                         }
                     }
                 }
 
-                // Lift login-level GoToBenchmark to the top-level variant.
                 if matches!(msg, login::Message::GoToBenchmark) {
                     self.screen = Screen::Benchmark(BenchmarkScreen::new());
                     return Task::none();
@@ -103,20 +132,20 @@ impl App {
             Message::Chat(msg) => {
                 if let Screen::Chat(ref mut chat) = self.screen {
                     let task = chat.update(msg).map(Message::Chat);
-                    // Flush any pending engine commands (e.g. SendMessage).
                     let cmds = chat.drain_commands();
                     if !cmds.is_empty() {
                         if let Some(ref tx) = self.xmpp_tx {
                             let tx = tx.clone();
-                            let flush = Task::future(async move {
-                                for cmd in cmds {
-                                    let _ = tx.send(cmd).await;
-                                }
-                                // No message to emit.
-                                Message::GoToBenchmark // dummy — won't switch screen
-                            });
-                            // Return both tasks combined.
-                            return Task::batch([task, flush]).discard();
+                            return Task::batch([
+                                task,
+                                Task::future(async move {
+                                    for cmd in cmds {
+                                        let _ = tx.send(cmd).await;
+                                    }
+                                    Message::GoToBenchmark
+                                })
+                                .discard(),
+                            ]);
                         }
                     }
                     task
@@ -135,7 +164,13 @@ impl App {
                 match event {
                     XmppEvent::Connected { ref bound_jid } => {
                         tracing::info!("XMPP: online as {bound_jid}");
-                        // Transition Login → Chat.
+                        // Save password to keychain on first successful login.
+                        if let Screen::Login(ref login) = self.screen {
+                            let cfg = login.connect_config();
+                            if !cfg.password.is_empty() {
+                                let _ = config::save_password(&cfg.jid, &cfg.password);
+                            }
+                        }
                         self.screen = Screen::Chat(ChatScreen::new(bound_jid.clone()));
                     }
                     XmppEvent::Disconnected { ref reason } => {
@@ -143,7 +178,6 @@ impl App {
                         if let Screen::Login(ref mut login) = self.screen {
                             login.on_error(reason.clone());
                         }
-                        // If we're in Chat, go back to Login.
                         if matches!(self.screen, Screen::Chat(_)) {
                             self.screen = Screen::Login(LoginScreen::new());
                         }
