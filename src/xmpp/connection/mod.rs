@@ -23,6 +23,8 @@ pub struct ConnectConfig {
     pub password: String,
     /// Optional server override (empty → SRV resolution from JID domain).
     pub server: String,
+    /// J2: Custom presence status message.
+    pub status_message: Option<String>,
 }
 
 /// Parsed server input from the login screen.

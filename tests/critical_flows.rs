@@ -200,9 +200,11 @@ fn settings_json_round_trip() {
         font_size: 16,
         show_timestamps: false,
         notifications_enabled: true,
+        sound_enabled: true,
         last_jid: "test@example.com".into(),
         last_server: "xmpp.example.com".into(),
         muted_jids: std::collections::HashSet::new(),
+        status_message: Some("In a meeting".into()),
     };
 
     let json = serde_json::to_string(&original).unwrap();
@@ -212,4 +214,5 @@ fn settings_json_round_trip() {
     assert_eq!(restored.theme, Theme::Light);
     assert_eq!(restored.font_size, 16);
     assert!(!restored.show_timestamps);
+    assert_eq!(restored.status_message, Some("In a meeting".into()));
 }

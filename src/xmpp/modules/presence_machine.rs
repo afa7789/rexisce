@@ -51,6 +51,8 @@ pub struct PresenceMachine {
     pre_auto_away_status: PresenceStatus,
     /// True when the session is connected.
     online: bool,
+    /// J2: Custom status message (e.g. "In a meeting").
+    status_message: Option<String>,
 }
 
 impl PresenceMachine {
@@ -61,6 +63,7 @@ impl PresenceMachine {
             auto_state: AutoState::Active,
             pre_auto_away_status: PresenceStatus::Available,
             online: false,
+            status_message: None,
         }
     }
 
@@ -71,6 +74,16 @@ impl PresenceMachine {
         self.user_status = status.clone();
         self.pre_auto_away_status = status;
         self.auto_state = AutoState::Active;
+    }
+
+    /// J2: Set the custom status message.
+    pub fn set_status_message(&mut self, message: Option<String>) {
+        self.status_message = message;
+    }
+
+    /// J2: Get the current status message.
+    pub fn status_message(&self) -> Option<&str> {
+        self.status_message.as_deref()
     }
 
     /// OS reported idle — transition to AutoAway unless DND or already deeper.
@@ -143,7 +156,7 @@ impl PresenceMachine {
     /// ```xml
     /// <presence xmlns="jabber:client">
     ///   <show>away</show>   <!-- away | xa | dnd — omitted for available -->
-    ///   <status>Away</status>
+    ///   <status>In a meeting</status>   <!-- J2: custom status message -->
     /// </presence>
     /// ```
     /// Available produces an empty `<presence/>` (no `<show>`, no `<status>`).
@@ -155,7 +168,7 @@ impl PresenceMachine {
 
         let builder = Element::builder("presence", NS_CLIENT);
 
-        let el = match status {
+        let mut el = match status {
             PresenceStatus::Available => builder.build(),
             PresenceStatus::Away => builder
                 .append(Element::builder("show", NS_CLIENT).append("away").build())
@@ -168,6 +181,13 @@ impl PresenceMachine {
                 .build(),
             PresenceStatus::Offline => unreachable!("handled above"),
         };
+
+        if let Some(ref msg) = self.status_message {
+            let status_el = Element::builder("status", NS_CLIENT)
+                .append(msg.as_str())
+                .build();
+            el.append_child(status_el);
+        }
 
         Some(el)
     }

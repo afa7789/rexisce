@@ -20,7 +20,11 @@ mod tests {
 
     #[test]
     fn toast_fields() {
-        let t = Toast { id: 1, body: "hello".into(), kind: ToastKind::Info };
+        let t = Toast {
+            id: 1,
+            body: "hello".into(),
+            kind: ToastKind::Info,
+        };
         assert_eq!(t.id, 1);
         assert_eq!(t.body, "hello");
         assert_eq!(t.kind, ToastKind::Info);

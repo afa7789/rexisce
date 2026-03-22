@@ -25,15 +25,14 @@ use tokio_xmpp::{
 
 use super::{
     connection::ConnectConfig,
-
-    modules::stream_mgmt::StreamMgmt,
+    modules::avatar::AvatarManager,
     modules::blocking::BlockingManager,
-    modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery},
     modules::catchup::CatchupManager,
-    modules::presence_machine::PresenceMachine,
     modules::disco::{DiscoIdentity, DiscoManager},
     modules::file_upload::FileUploadManager,
-    modules::avatar::AvatarManager,
+    modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery},
+    modules::presence_machine::PresenceMachine,
+    modules::stream_mgmt::StreamMgmt,
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
 };
 
@@ -144,10 +143,16 @@ async fn run_session(
     let mut catchup_mgr = CatchupManager::new();
     // C2: XEP-0153/presence state machine
     let mut presence_machine = PresenceMachine::new();
+    // J2: Set custom status message from config
+    presence_machine.set_status_message(config.status_message.clone());
     // C5: XEP-0115/XEP-0030 service discovery + caps
     let mut disco_mgr = DiscoManager::new(
         "https://github.com/xmpp-start",
-        &[DiscoIdentity { category: "client".to_string(), kind: "pc".to_string(), name: "xmpp-start".to_string() }],
+        &[DiscoIdentity {
+            category: "client".to_string(),
+            kind: "pc".to_string(),
+            name: "xmpp-start".to_string(),
+        }],
         &["urn:xmpp:mam:2", "urn:xmpp:carbons:2"],
     );
     // E4: XEP-0363 file upload manager
@@ -173,10 +178,12 @@ async fn run_session(
             }
             // F1: emit sent stanza to debug console
             let xml_str = String::from(&stanza);
-            let _ = event_tx.send(XmppEvent::ConsoleEntry {
-                direction: "sent".into(),
-                xml: xml_str,
-            }).await;
+            let _ = event_tx
+                .send(XmppEvent::ConsoleEntry {
+                    direction: "sent".into(),
+                    xml: xml_str,
+                })
+                .await;
             if let Err(e) = client.send_stanza(stanza).await {
                 tracing::warn!("send_stanza failed: {e}");
             }
@@ -308,7 +315,10 @@ async fn handle_client_event(
 
             // Announce presence (C2: track state, C5: with XEP-0115 caps).
             presence_machine.on_connected();
-            outbox.push_back(make_presence_with_caps(disco_mgr));
+            outbox.push_back(make_presence_with_caps(
+                disco_mgr,
+                presence_machine.status_message(),
+            ));
 
             // C4: fetch blocklist (XEP-0191)
             outbox.push_back(blocking_mgr.build_fetch_iq());
@@ -317,8 +327,16 @@ async fn handle_client_event(
             let (server_query_id, mam_query) = catchup_mgr.start("__server__", None);
             let catchup_query = MamQuery {
                 query_id: mam_query.query_id.clone(),
-                filter: MamFilter { with: None, start: None, end: None },
-                rsm: RsmQuery { max: 50, after: None, before: None },
+                filter: MamFilter {
+                    with: None,
+                    start: None,
+                    end: None,
+                },
+                rsm: RsmQuery {
+                    max: 50,
+                    after: None,
+                    before: None,
+                },
             };
             outbox.push_back(mam_mgr.build_query_iq(catchup_query));
             tracing::info!("mam: triggered post-connect catchup (query_id={server_query_id})");
@@ -348,13 +366,25 @@ async fn handle_client_event(
         }
 
         tokio_xmpp::Event::Stanza(el) => {
-
             // C1: record inbound stanza and maybe send coalesced ack
             sm.on_stanza_received();
             if let Some(ack) = sm.maybe_send_ack() {
                 outbox.push_back(ack);
             }
-            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox, own_jid_str, mam_mgr, catchup_mgr, disco_mgr, file_upload_mgr, avatar_mgr).await;
+            dispatch_stanza(
+                el,
+                event_tx,
+                blocking_mgr,
+                sm,
+                outbox,
+                own_jid_str,
+                mam_mgr,
+                catchup_mgr,
+                disco_mgr,
+                file_upload_mgr,
+                avatar_mgr,
+            )
+            .await;
         }
     }
 }
@@ -375,10 +405,12 @@ async fn dispatch_stanza(
 ) {
     // F1: emit received stanza to debug console before routing
     let xml_str = String::from(&el);
-    let _ = event_tx.send(XmppEvent::ConsoleEntry {
-        direction: "recv".into(),
-        xml: xml_str,
-    }).await;
+    let _ = event_tx
+        .send(XmppEvent::ConsoleEntry {
+            direction: "recv".into(),
+            xml: xml_str,
+        })
+        .await;
 
     // XEP-0198: handle server <a h='...'> acks
     if el.name() == "a" && el.ns() == "urn:xmpp:sm:3" {
@@ -395,34 +427,56 @@ async fn dispatch_stanza(
         return;
     }
     match el.name() {
-        "iq" => handle_iq(el, event_tx, blocking_mgr, mam_mgr, catchup_mgr, disco_mgr, file_upload_mgr, avatar_mgr).await,
+        "iq" => {
+            handle_iq(
+                el,
+                event_tx,
+                blocking_mgr,
+                mam_mgr,
+                catchup_mgr,
+                disco_mgr,
+                file_upload_mgr,
+                avatar_mgr,
+            )
+            .await
+        }
         "message" => {
             // C3: XEP-0313 MAM result wrapper — extract forwarded message
             if let Some(mam_msg) = mam_mgr.on_mam_message(&el) {
                 if !mam_msg.body.is_empty() {
-                    let bare_from = mam_msg.forwarded_from.split('/').next()
-                        .unwrap_or(&mam_msg.forwarded_from).to_string();
+                    let bare_from = mam_msg
+                        .forwarded_from
+                        .split('/')
+                        .next()
+                        .unwrap_or(&mam_msg.forwarded_from)
+                        .to_string();
                     if !blocking_mgr.is_blocked(&bare_from) {
-                        let _ = event_tx.send(XmppEvent::MessageReceived(IncomingMessage {
-                            id: mam_msg.archive_id,
-                            from: mam_msg.forwarded_from,
-                            body: mam_msg.body,
-                        })).await;
+                        let _ = event_tx
+                            .send(XmppEvent::MessageReceived(IncomingMessage {
+                                id: mam_msg.archive_id,
+                                from: mam_msg.forwarded_from,
+                                body: mam_msg.body,
+                            }))
+                            .await;
                     }
                 }
                 return;
             }
             // XEP-0280: carbon <sent> — own message from another device
             if let Some(inner) = extract_carbon(&el, "sent") {
-                let body = inner.children().find(|c| c.name() == "body")
+                let body = inner
+                    .children()
+                    .find(|c| c.name() == "body")
                     .map(Element::text)
                     .unwrap_or_default();
                 if !body.is_empty() {
-                    let _ = event_tx.send(XmppEvent::MessageReceived(IncomingMessage {
-                        id: inner.attr("id").unwrap_or("").to_string(),
-                        from: own_jid_str.to_string(),
-                        body,
-                    })).await;
+                    let _ = event_tx
+                        .send(XmppEvent::MessageReceived(IncomingMessage {
+                            id: inner.attr("id").unwrap_or("").to_string(),
+                            from: own_jid_str.to_string(),
+                            body,
+                        }))
+                        .await;
                 }
                 return;
             }
@@ -460,34 +514,41 @@ async fn handle_iq(
             if let Some((query_id, mam_result)) = mam_mgr.on_fin_iq(&el) {
                 let fetched = mam_result.rsm.count.unwrap_or(0) as usize;
                 // Use on_result to peek at conversation jid, then call on_fin
-                let conv_jid = catchup_mgr.on_result(&query_id, "__server__")
+                let conv_jid = catchup_mgr
+                    .on_result(&query_id, "__server__")
                     .unwrap_or("__server__")
                     .to_string();
                 catchup_mgr.on_fin(&query_id);
-                let _ = event_tx.send(XmppEvent::CatchupFinished {
-                    conversation_jid: conv_jid,
-                    fetched,
-                }).await;
+                let _ = event_tx
+                    .send(XmppEvent::CatchupFinished {
+                        conversation_jid: conv_jid,
+                        fetched,
+                    })
+                    .await;
             }
             return;
         }
     }
     // E4: detect upload slot result
     if let Some(slot) = file_upload_mgr.on_slot_result(&el) {
-        let _ = event_tx.send(XmppEvent::UploadSlotReceived {
-            put_url: slot.put_url,
-            get_url: slot.get_url,
-            headers: slot.put_headers,
-        }).await;
+        let _ = event_tx
+            .send(XmppEvent::UploadSlotReceived {
+                put_url: slot.put_url,
+                get_url: slot.get_url,
+                headers: slot.put_headers,
+            })
+            .await;
         return;
     }
     // H1: detect vCard result and extract PHOTO/BINVAL
     if let Some(avatar_info) = avatar_mgr.on_vcard_result(&el) {
         if !avatar_info.data.is_empty() {
-            let _ = event_tx.send(XmppEvent::AvatarReceived {
-                jid: avatar_info.jid,
-                png_bytes: avatar_info.data,
-            }).await;
+            let _ = event_tx
+                .send(XmppEvent::AvatarReceived {
+                    jid: avatar_info.jid,
+                    png_bytes: avatar_info.data,
+                })
+                .await;
         }
         return;
     }
@@ -502,7 +563,10 @@ async fn handle_iq(
             .any(|c| c.name() == "blocklist" && c.ns() == "urn:xmpp:blocking");
         if has_blocklist {
             blocking_mgr.on_blocklist_result(&el);
-            tracing::debug!("blocking: loaded {} blocked JIDs", blocking_mgr.blocked_list().len());
+            tracing::debug!(
+                "blocking: loaded {} blocked JIDs",
+                blocking_mgr.blocked_list().len()
+            );
             return;
         }
     }
@@ -553,11 +617,14 @@ async fn handle_iq(
 /// Extract the inner forwarded `<message>` from a carbon wrapper.
 /// Returns `None` if the element is not a carbon of the given direction.
 fn extract_carbon(el: &Element, direction: &str) -> Option<Element> {
-    let carbon = el.children()
+    let carbon = el
+        .children()
         .find(|c| c.name() == direction && c.ns() == NS_CARBONS)?;
-    let forwarded = carbon.children()
+    let forwarded = carbon
+        .children()
         .find(|c| c.name() == "forwarded" && c.ns() == NS_FORWARD)?;
-    forwarded.children()
+    forwarded
+        .children()
         .find(|c| c.name() == "message")
         .cloned()
 }
@@ -574,7 +641,10 @@ async fn handle_message(
     blocking_mgr: &BlockingManager,
 ) {
     // E3: detect XEP-0444 reaction stanza before consuming el
-    if let Some(reactions_el) = el.children().find(|c| c.name() == "reactions" && c.ns() == NS_REACTIONS) {
+    if let Some(reactions_el) = el
+        .children()
+        .find(|c| c.name() == "reactions" && c.ns() == NS_REACTIONS)
+    {
         if let Some(msg_id) = reactions_el.attr("id") {
             let from = el.attr("from").unwrap_or("").to_string();
             let bare_from = from.split('/').next().unwrap_or(&from).to_string();
@@ -598,8 +668,12 @@ async fn handle_message(
 
     // G2: detect XEP-0085 chat state notifications from the raw element
     // before consuming el into XmppMessage (which may drop unknown children)
-    let has_composing = el.children().any(|c| c.name() == "composing" && c.ns() == "jabber:x:chatstates");
-    let has_paused = el.children().any(|c| (c.name() == "paused" || c.name() == "inactive") && c.ns() == "jabber:x:chatstates");
+    let has_composing = el
+        .children()
+        .any(|c| c.name() == "composing" && c.ns() == "jabber:x:chatstates");
+    let has_paused = el.children().any(|c| {
+        (c.name() == "paused" || c.name() == "inactive") && c.ns() == "jabber:x:chatstates"
+    });
     let chat_state_from = el.attr("from").map(str::to_string);
 
     let msg = match XmppMessage::try_from(el) {
@@ -702,10 +776,17 @@ fn make_carbons_enable() -> Element {
     .into()
 }
 
-fn make_presence_with_caps(disco_mgr: &DiscoManager) -> Element {
+fn make_presence_with_caps(disco_mgr: &DiscoManager, status_message: Option<&str>) -> Element {
     let caps_el = disco_mgr.build_caps_element();
     let mut raw = Element::builder("presence", "jabber:client").build();
     raw.append_child(caps_el);
+    // J2: Include custom status message if set
+    if let Some(msg) = status_message {
+        let status_el = Element::builder("status", "jabber:client")
+            .append(msg)
+            .build();
+        raw.append_child(status_el);
+    }
     raw
 }
 
@@ -908,8 +989,10 @@ mod tests {
             jid: "user@example.com".into(),
             password: "secret".into(),
             server: "xmpp.example.com:5222".into(),
+            status_message: Some("In a meeting".into()),
         };
         assert_eq!(cfg.jid, "user@example.com");
         assert_eq!(cfg.server, "xmpp.example.com:5222");
+        assert_eq!(cfg.status_message, Some("In a meeting".into()));
     }
 }

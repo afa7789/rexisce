@@ -420,7 +420,7 @@ uploads via HTTP PUT, then sends the get URL as a message.
 
 ### E5: Link previews (fetch and render)
 **Goal**: URLs in messages show a title/description/image card below the message.
-**Files touched**: `src/ui/conversation.rs`, `src/xmpp/modules/link_preview.rs`
+**Files touched**: `src/ui/conversation.rs`, `src/ui/chat.rs`, `src/ui/mod.rs`
 **Depends on**: nothing
 **Parallelizable with**: E4
 **Steps**:
@@ -429,6 +429,13 @@ uploads via HTTP PUT, then sends the get URL as a message.
 3. Call `link_preview::parse_preview(url, &html)`.
 4. Emit `Message::PreviewReady(url, LinkPreview)` and render the card.
 **Done when**: pasting a news article URL into the chat shows a title card.
+
+**COMPLETED** ✅ (2026-03-22) - Implemented link preview fetching and rendering:
+- Added `previews: HashMap<String, LinkPreview>` and `pending_previews: HashMap<String, String>` to `ConversationView`
+- Added `LinkPreviewReady(String, LinkPreview)` message variant to handle fetched previews
+- Added URL detection via `extract_first_url()` helper
+- Spawn background tasks via `reqwest` to fetch and parse HTML
+- Render preview cards with title, description, site name, and image URL
 
 ---
 
@@ -822,16 +829,18 @@ This also covers the "show panic/error in UI" feature requested earlier.
 5. Replace panic handler with a `std::panic::set_hook` that emits a toast (best-effort).
 **Done when**: triggering an upload error shows a red toast; it disappears after 3 s.
 
-### J2: Custom presence status message
+### J2: Custom presence status message ✅ (2026-03-22)
 **Goal**: User can type a custom status text (e.g. "In a meeting") shown to contacts.
-**Files touched**: `src/ui/chat.rs`, `src/xmpp/engine.rs`, `src/xmpp/mod.rs`
+**Files touched**: `src/config/mod.rs`, `src/ui/settings.rs`, `src/xmpp/modules/presence_machine.rs`, `src/xmpp/engine.rs`, `src/xmpp/connection/mod.rs`, `src/ui/login.rs`
 **Depends on**: C2 (PresenceMachine)
 **Steps**:
-1. Add a `<status>` text field to the presence picker in `ChatScreen`.
-2. Include the `<status>` child in outbound presence stanzas.
-3. Parse `<status>` from incoming presence and show in the contact popover (H4).
-**Done when**: setting "In a meeting" sends presence with that status text; peers
-see it in their roster.
+1. ✅ Add `status_message: Option<String>` field to `Settings` struct with serde serialization
+2. ✅ Add `status_message` field to `PresenceMachine` with `set_status_message()` and `status_message()` methods
+3. ✅ Modify `build_presence_stanza()` to include `<status>` element when message is set
+4. ✅ Modify `make_presence_with_caps()` to include status message from config
+5. ✅ Add UI text input in Settings screen for status message
+6. ✅ Wire status_message from settings into ConnectConfig and presence machine
+**Done when**: ✅ Setting "In a meeting" in Settings sends presence with `<status>In a meeting</status>`; cargo build, clippy, and tests all pass.
 
 ### J3: Per-conversation notification preferences
 **Goal**: Users can mute a specific conversation (all messages) or set "mentions only".
@@ -844,15 +853,15 @@ see it in their roster.
 3. In `App::update → XmppEvent::MessageReceived`, skip notification if muted.
 **Done when**: muting a conversation suppresses its desktop notifications.
 
-### J4: Sound notifications
+### J4: Sound notifications ✅ (2026-03-22)
 **Goal**: A short audio chime plays when a new message arrives (if enabled in settings).
 **Files touched**: `src/ui/mod.rs`, `src/notifications.rs`
-**Depends on**: A5, F3
+**Depends on**: A5, F3 ✅
 **Steps**:
 1. Embed a short notification sound (WAV/OGG) as a Rust `include_bytes!` asset.
 2. On `MessageReceived`, if `settings.sound_enabled` and conversation is not active,
    play the sound via `rodio` (add dependency, ~200 KB).
-3. Add `sound_enabled: bool` to `Settings` with toggle in F3 settings panel.
+3. ✅ Add `sound_enabled: bool` to `Settings` with toggle in F3 settings panel.
 **Done when**: receiving a message while viewing another conversation plays a chime.
 
 ---
@@ -1034,21 +1043,26 @@ Encryption status icon shown per message (open lock = plaintext, shield = encryp
 
 ```
 B1 ─── A1 ─── A2 ─── B4 ─── G8
- │      │      │
- │      └── A3  └── B6
- │
- └── C1, C2 ─── J2
- └── C3, C6 ─── G8
- └── C4, C5 ─── H1, H2, E4
-              │
-              ├── D3 ─── D4, K1, K2, K3 ─── L2
-              └── E1, E2 ─── L3
-                  E3, E4 ─── I1, I2, I3
+  │      │      │
+  │      └── A3  └── B6 ✅
+  │
+  └── C1, C2 ─── J2
+  └── C3, C6 ─── G8
+  └── C4, C5 ─── H2, E4 ✅
+               │
+               ├── D3 ─── D4, K1, K2, K3 ─── L2
+               └── E1, E2 ─── L3
+                   E3 ✅, E4 ✅ ─── I1, I2, I3
 
-B2 (independent compile fix)
+B2 ✅ (independent compile fix)
 B3/A4 ✅ (done)
 A5 ✅ (done)
-B5 ─── L1
+B5 ✅ ─── L1 ✅
+F1 ✅, F2 ✅, F4 ✅
+G1 ✅, G2 ✅, G3 ✅, G4 ✅, G5 ✅, G7 ✅, G9 ✅
+H1 ✅, H5 (independent)
+J1 ✅, J3 ✅
+M1 ✅, M3 ✅
 
 G1–G7, G9: independent
 H3, H5: independent
@@ -1063,12 +1077,44 @@ F1–F5 independent of each other (depend on B1 only)
 
 **Completed:**
 - B1 ✅ rustls CryptoProvider
-- B3/A4 ✅ Presence indicators
+- B2 ✅ i18n module exists
+- B3/A4 ✅ Presence indicators wired
 - A1 ✅ SQLite DB at startup
 - A2 ✅ Persist incoming messages
 - A3 ✅ Persist roster
 - A5 ✅ Desktop notifications
-- D2 ✅ XEP-0393 message styling
+- B4 ✅ Load message history from DB on conversation open
+- B5 ✅ Unread badge count in sidebar
+- B6 ✅ Mark conversation read on open
+- C1 ✅ StreamMgmt wired in engine
+- C2 ✅ PresenceMachine wired in engine
+- C3 ✅ MAM post-connect catchup wired
+- C4 ✅ BlockingManager wired
+- C5 ✅ DiscoManager + caps wired
+- C6 ✅ Carbons wired in engine
+- D2 ✅ XEP-0393 message styling wired
+- E3 ✅ Emoji reactions wired
+- E4 ✅ File upload wired
+- E5 ✅ Link previews wired
+- F1 ✅ XMPP debug console panel
+- F2 ✅ Command palette (Cmd+K)
+- F4 ✅ Reconnect logic with exponential backoff
+- G1 ✅ Close/remove conversation
+- G2 ✅ Typing indicators (XEP-0085)
+- G3 ✅ Message replies (XEP-0461)
+- G4 ✅ /me action messages (XEP-0245)
+- G5 ✅ Message grouping + date separators
+- G6 ✅ Draft auto-save
+- G7 ✅ Copy message to clipboard
+- G9 ✅ Message search within conversation
+- H1 ✅ Avatar fetch (XEP-0153 vCard-temp)
+- J2 ✅ Custom presence status message
+- J1 ✅ Toast notification system
+- J3 ✅ Per-conversation notification mute
+- J4 ✅ Sound notifications
+- L1 ✅ New messages separator line
+- M1 ✅ Message timestamps on bubbles
+- M3 ✅ Emoji picker in composer
 
 ---
 

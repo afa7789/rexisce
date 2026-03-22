@@ -27,9 +27,9 @@ pub struct SidebarScreen {
 #[derive(Debug, Clone)]
 pub enum Message {
     SelectContact(String),
-    ToggleAddContact,                 // H3: show/hide add-contact input
-    AddContactInputChanged(String),   // H3: input field changed
-    SubmitAddContact,                 // H3: submit add contact
+    ToggleAddContact,               // H3: show/hide add-contact input
+    AddContactInputChanged(String), // H3: input field changed
+    SubmitAddContact,               // H3: submit add contact
 }
 
 impl Default for SidebarScreen {
@@ -102,13 +102,12 @@ impl SidebarScreen {
     /// G6: render sidebar with optional draft indicators.
     /// `drafts` is a list of JIDs that currently have a non-empty draft.
     pub fn view_with_drafts(&self, drafts: &[String]) -> Element<'_, Message> {
-        let add_btn = button("+").on_press(Message::ToggleAddContact).padding([2, 6]);
-        let header_row = row![
-            text("Contacts").size(16).width(Length::Fill),
-            add_btn,
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center);
+        let add_btn = button("+")
+            .on_press(Message::ToggleAddContact)
+            .padding([2, 6]);
+        let header_row = row![text("Contacts").size(16).width(Length::Fill), add_btn,]
+            .spacing(4)
+            .align_y(Alignment::Center);
 
         let add_contact_row: Option<Element<Message>> = if self.show_add_contact {
             let input = text_input("JID to add…", &self.add_contact_input)
@@ -184,7 +183,10 @@ impl SidebarScreen {
             None
         };
 
-        let mut col = column![header_row].spacing(4).padding(8).width(Length::Fill);
+        let mut col = column![header_row]
+            .spacing(4)
+            .padding(8)
+            .width(Length::Fill);
         if let Some(add_row) = add_contact_row {
             col = col.push(add_row);
         }

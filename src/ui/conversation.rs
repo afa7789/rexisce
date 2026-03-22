@@ -8,26 +8,50 @@ use iced::widget::scrollable::{AbsoluteOffset, Id};
 use iced::widget::text::Span as IcedSpan;
 use iced::{
     font,
-    widget::{button, column, container, rich_text, row, scrollable, span, text, text_input, tooltip},
+    widget::{
+        button, column, container, rich_text, row, scrollable, span, text, text_input, tooltip,
+    },
     Alignment, Color, Element, Font, Length, Task,
 };
 
 use chrono::{TimeZone, Utc};
 
+use crate::xmpp::modules::link_preview::LinkPreview;
+
 // G4: /me action message prefix (XEP-0245)
 const ME_PREFIX: &str = "/me ";
 
+fn extract_first_url(text: &str) -> Option<String> {
+    for word in text.split_whitespace() {
+        if word.starts_with("http://") || word.starts_with("https://") {
+            return Some(word.to_string());
+        }
+    }
+    None
+}
+
 // M3: emoji picker data — common emoji grouped by category
 const EMOJI_LIST: &[(&str, &[&str])] = &[
-    ("Faces", &["😀","😂","😍","😎","🤔","😢","😡","🥳","😴","🤯"]),
-    ("Hands", &["👍","👎","👋","🤝","👏","🙏","✌️","🤞","👌","🤙"]),
-    ("Hearts", &["❤️","🧡","💛","💚","💙","💜","🖤","🤍","💔","❣️"]),
-    ("Objects", &["🎉","🔥","⭐","💡","🎵","📱","💻","🌈","🍕","☕"]),
+    (
+        "Faces",
+        &["😀", "😂", "😍", "😎", "🤔", "😢", "😡", "🥳", "😴", "🤯"],
+    ),
+    (
+        "Hands",
+        &["👍", "👎", "👋", "🤝", "👏", "🙏", "✌️", "🤞", "👌", "🤙"],
+    ),
+    (
+        "Hearts",
+        &["❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "💔", "❣️"],
+    ),
+    (
+        "Objects",
+        &["🎉", "🔥", "⭐", "💡", "🎵", "📱", "💻", "🌈", "🍕", "☕"],
+    ),
 ];
 
 fn is_me_action(body: &str) -> bool {
-    body.len() >= ME_PREFIX.len()
-        && body[..ME_PREFIX.len()].eq_ignore_ascii_case(ME_PREFIX)
+    body.len() >= ME_PREFIX.len() && body[..ME_PREFIX.len()].eq_ignore_ascii_case(ME_PREFIX)
 }
 
 use crate::ui::avatar::{jid_color, jid_initial};
@@ -39,8 +63,8 @@ pub struct DisplayMessage {
     pub id: String,
     pub from: String,
     pub body: String,
-    pub own: bool,         // true if sent by this account
-    pub timestamp: i64,   // unix milliseconds (G5)
+    pub own: bool,      // true if sent by this account
+    pub timestamp: i64, // unix milliseconds (G5)
     /// G3: quoted message preview (id, preview text)
     pub reply_preview: Option<String>,
 }
@@ -67,7 +91,12 @@ pub struct ConversationView {
     /// M3: emoji picker state
     emoji_picker_open: bool,
     /// E3: emoji reactions — msg_id → (jid → emojis)
-    pub reactions: std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
+    pub reactions:
+        std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
+    /// E5: link previews — msg_id → preview
+    previews: std::collections::HashMap<String, LinkPreview>,
+    /// E5: pending URL previews to fetch — msg_id → url
+    pending_previews: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,20 +105,21 @@ pub enum Message {
     Send,
     Scrolled(AbsoluteOffset),
     ScrollToBottom,
-    CopyToClipboard(String), // G7: copy message body to clipboard
-    Close,                   // G1: close this conversation
-    BlockPeer,               // C4: block the peer JID
-    UnblockPeer,             // C4: unblock the peer JID
-    ComposingStarted,        // G2: user started typing
-    ComposingPaused,         // G2: user stopped typing
-    ReplyTo(String, String), // G3: (msg_id, preview)
-    CancelReply,             // G3: cancel current reply
-    ToggleMute,              // J3: toggle notification mute
-    SearchToggled,           // G9: toggle search bar
-    SearchQueryChanged(String), // G9: search input changed
-    EmojiPickerToggled,      // M3: toggle emoji picker
-    EmojiSelected(String),   // M3: insert emoji into composer
+    CopyToClipboard(String),      // G7: copy message body to clipboard
+    Close,                        // G1: close this conversation
+    BlockPeer,                    // C4: block the peer JID
+    UnblockPeer,                  // C4: unblock the peer JID
+    ComposingStarted,             // G2: user started typing
+    ComposingPaused,              // G2: user stopped typing
+    ReplyTo(String, String),      // G3: (msg_id, preview)
+    CancelReply,                  // G3: cancel current reply
+    ToggleMute,                   // J3: toggle notification mute
+    SearchToggled,                // G9: toggle search bar
+    SearchQueryChanged(String),   // G9: search input changed
+    EmojiPickerToggled,           // M3: toggle emoji picker
+    EmojiSelected(String),        // M3: insert emoji into composer
     SendReaction(String, String), // E3: (msg_id, emoji)
+    LinkPreviewReady(String, LinkPreview), // E5: (msg_id, preview)
 }
 
 impl ConversationView {
@@ -109,11 +139,20 @@ impl ConversationView {
             search_query: String::new(),
             emoji_picker_open: false,
             reactions: std::collections::HashMap::new(),
+            previews: std::collections::HashMap::new(),
+            pending_previews: std::collections::HashMap::new(),
         }
     }
 
     pub fn push_message(&mut self, msg: DisplayMessage) {
-        self.messages.push(msg);
+        self.messages.push(msg.clone());
+        if let Some(url) = extract_first_url(&msg.body) {
+            self.pending_previews.insert(msg.id.clone(), url);
+        }
+    }
+
+    pub fn take_pending_previews(&mut self) -> std::collections::HashMap<String, String> {
+        std::mem::take(&mut self.pending_previews)
     }
 
     /// B4: Replace all messages with history loaded from DB.
@@ -156,15 +195,18 @@ impl ConversationView {
                 Task::none()
             }
             Message::ScrollToBottom => {
-                let bottom = AbsoluteOffset { x: 0.0, y: f32::MAX };
+                let bottom = AbsoluteOffset {
+                    x: 0.0,
+                    y: f32::MAX,
+                };
                 scrollable::scroll_to::<Message>(self.scroll_id.clone(), bottom)
             }
             Message::CopyToClipboard(text) => iced::clipboard::write::<Message>(text),
-            Message::Close => Task::none(),              // handled by ChatScreen
-            Message::BlockPeer => Task::none(),          // handled by ChatScreen → engine
-            Message::UnblockPeer => Task::none(),        // handled by ChatScreen → engine
-            Message::ComposingStarted => Task::none(),   // bubbled to ChatScreen
-            Message::ComposingPaused => Task::none(),    // bubbled to ChatScreen
+            Message::Close => Task::none(), // handled by ChatScreen
+            Message::BlockPeer => Task::none(), // handled by ChatScreen → engine
+            Message::UnblockPeer => Task::none(), // handled by ChatScreen → engine
+            Message::ComposingStarted => Task::none(), // bubbled to ChatScreen
+            Message::ComposingPaused => Task::none(), // bubbled to ChatScreen
             Message::ReplyTo(id, preview) => {
                 self.reply_to = Some((id, preview));
                 Task::none()
@@ -173,7 +215,7 @@ impl ConversationView {
                 self.reply_to = None;
                 Task::none()
             }
-            Message::ToggleMute => Task::none(),         // handled by ChatScreen → App
+            Message::ToggleMute => Task::none(), // handled by ChatScreen → App
             Message::SearchToggled => {
                 self.search_open = !self.search_open;
                 if !self.search_open {
@@ -195,6 +237,10 @@ impl ConversationView {
                 Task::none()
             }
             Message::SendReaction(_, _) => Task::none(), // bubbled to ChatScreen
+            Message::LinkPreviewReady(msg_id, preview) => {
+                self.previews.insert(msg_id, preview);
+                Task::none()
+            }
         }
     }
 
@@ -212,7 +258,8 @@ impl ConversationView {
                 continue;
             }
             // L1: insert "New messages" separator before the first unseen message (only when not searching)
-            if query_lower.is_empty() && self.last_seen_count > 0 && msg_idx == self.last_seen_count {
+            if query_lower.is_empty() && self.last_seen_count > 0 && msg_idx == self.last_seen_count
+            {
                 let sep = container(text("── New messages ──").size(11))
                     .width(Length::Fill)
                     .align_x(Alignment::Center)
@@ -245,8 +292,7 @@ impl ConversationView {
 
             // G5: suppress sender label for consecutive same-sender within 120s
             let same_sender = prev_sender.as_deref() == Some(sender.as_str());
-            let within_120s =
-                prev_ts.is_some_and(|pt| (m.timestamp - pt).abs() < 120_000);
+            let within_120s = prev_ts.is_some_and(|pt| (m.timestamp - pt).abs() < 120_000);
             let show_sender = !(same_sender && within_120s);
 
             // G4: /me action rendering
@@ -291,19 +337,20 @@ impl ConversationView {
                 tooltip::Position::Top,
             );
 
-            let align = if m.own { Alignment::End } else { Alignment::Start };
+            let align = if m.own {
+                Alignment::End
+            } else {
+                Alignment::Start
+            };
 
-        // G3: quoted block rendered inline in text_col below
+            // G3: quoted block rendered inline in text_col below
 
             let row_elem: Element<Message> = if is_me_action(&m.body) {
                 // /me: centered italic, no avatar, no sender label
-                container(
-                    container(body_widget)
-                        .padding([4, 12])
-                )
-                .width(Length::Fill)
-                .align_x(Alignment::Center)
-                .into()
+                container(container(body_widget).padding([4, 12]))
+                    .width(Length::Fill)
+                    .align_x(Alignment::Center)
+                    .into()
             } else if !m.own {
                 // H5: avatar + sender + body for incoming messages
                 let from_bare = m.from.split('/').next().unwrap_or(&m.from);
@@ -320,21 +367,28 @@ impl ConversationView {
                     .align_y(Alignment::Center);
 
                 let text_col = if show_sender {
-                    let mut col = column![
-                        row![text(sender.clone()).size(11), copy_btn, reply_btn, react_btn]
-                            .spacing(8)
-                            .align_y(Alignment::Center),
+                    let mut col = column![row![
+                        text(sender.clone()).size(11),
+                        copy_btn,
+                        reply_btn,
+                        react_btn
                     ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),]
                     .spacing(2)
                     .padding([0, 6]);
                     if let Some(preview) = m.reply_preview.as_ref() {
-                        col = col.push(container(text(format!("↩ {}", preview)).size(11)).padding([2, 6]));
+                        col = col.push(
+                            container(text(format!("↩ {}", preview)).size(11)).padding([2, 6]),
+                        );
                     }
                     col.push(body_widget)
                 } else {
                     let mut col = column![].spacing(2).padding([0, 6]);
                     if let Some(preview) = m.reply_preview.as_ref() {
-                        col = col.push(container(text(format!("↩ {}", preview)).size(11)).padding([2, 6]));
+                        col = col.push(
+                            container(text(format!("↩ {}", preview)).size(11)).padding([2, 6]),
+                        );
                     }
                     col.push(body_widget)
                 };
@@ -357,16 +411,23 @@ impl ConversationView {
                 };
                 let text_col = if show_sender {
                     column![
-                        row![text(sender.clone()).size(11), copy_btn, reply_btn, react_btn]
-                            .spacing(8)
-                            .align_y(Alignment::Center),
+                        row![
+                            text(sender.clone()).size(11),
+                            copy_btn,
+                            reply_btn,
+                            react_btn
+                        ]
+                        .spacing(8)
+                        .align_y(Alignment::Center),
                         body_widget,
                         text(own_ts_label).size(10),
                     ]
                     .spacing(2)
                     .padding([6, 10])
                 } else {
-                    column![body_widget, text(own_ts_label).size(10)].spacing(2).padding([2, 10])
+                    column![body_widget, text(own_ts_label).size(10)]
+                        .spacing(2)
+                        .padding([2, 10])
                 };
                 container(text_col)
                     .width(Length::Fill)
@@ -379,29 +440,39 @@ impl ConversationView {
             // E3: render reaction pills below the message bubble
             if let Some(by_jid) = self.reactions.get(&m.id) {
                 // Group emojis across all JIDs and count
-                let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+                let mut counts: std::collections::BTreeMap<&str, usize> =
+                    std::collections::BTreeMap::new();
                 for emojis in by_jid.values() {
                     for e in emojis {
                         *counts.entry(e.as_str()).or_insert(0) += 1;
                     }
                 }
                 if !counts.is_empty() {
-                    let mut pill_row: iced::widget::Row<Message> = row![].spacing(4).padding([0, 8]);
+                    let mut pill_row: iced::widget::Row<Message> =
+                        row![].spacing(4).padding([0, 8]);
                     for (emoji, count) in &counts {
                         let emoji_str = emoji.to_string();
                         let label = format!("{} {}", emoji_str, count);
-                        pill_row = pill_row.push(
-                            container(text(label).size(12)).padding([2, 6])
-                        );
+                        pill_row = pill_row.push(container(text(label).size(12)).padding([2, 6]));
                     }
-                    let pill_align = if m.own { Alignment::End } else { Alignment::Start };
+                    let pill_align = if m.own {
+                        Alignment::End
+                    } else {
+                        Alignment::Start
+                    };
                     rows.push(
                         container(pill_row)
                             .width(Length::Fill)
                             .align_x(pill_align)
-                            .into()
+                            .into(),
                     );
                 }
+            }
+
+            // E5: render link preview card below message
+            if let Some(preview) = self.previews.get(&m.id) {
+                let preview_card = render_preview_card(preview.clone(), m.own);
+                rows.push(preview_card);
             }
 
             prev_sender = Some(sender);
@@ -501,37 +572,58 @@ impl ConversationView {
         .padding([4, 8]);
 
         let close_btn = tooltip(
-            button(text("×").size(14)).on_press(Message::Close).padding([4, 10]),
+            button(text("×").size(14))
+                .on_press(Message::Close)
+                .padding([4, 10]),
             "Close conversation",
             tooltip::Position::Bottom,
         );
         let block_btn = if self.peer_blocked {
             tooltip(
-                button(text("Unblock")).on_press(Message::UnblockPeer).padding([4, 8]),
+                button(text("Unblock"))
+                    .on_press(Message::UnblockPeer)
+                    .padding([4, 8]),
                 "Unblock this contact",
                 tooltip::Position::Bottom,
             )
         } else {
             tooltip(
-                button(text("Block")).on_press(Message::BlockPeer).padding([4, 8]),
+                button(text("Block"))
+                    .on_press(Message::BlockPeer)
+                    .padding([4, 8]),
                 "Block this contact",
                 tooltip::Position::Bottom,
             )
         };
         let mute_label = if self.is_muted { "Unmute" } else { "Mute" };
-        let mute_tip = if self.is_muted { "Unmute notifications" } else { "Mute notifications" };
+        let mute_tip = if self.is_muted {
+            "Unmute notifications"
+        } else {
+            "Mute notifications"
+        };
         let mute_btn = tooltip(
-            button(text(mute_label)).on_press(Message::ToggleMute).padding([4, 8]),
+            button(text(mute_label))
+                .on_press(Message::ToggleMute)
+                .padding([4, 8]),
             mute_tip,
             tooltip::Position::Bottom,
         );
         let search_btn = tooltip(
-            button(text("⌕").size(14)).on_press(Message::SearchToggled).padding([4, 8]),
+            button(text("⌕").size(14))
+                .on_press(Message::SearchToggled)
+                .padding([4, 8]),
             "Search messages",
             tooltip::Position::Bottom,
         );
         let match_count = if !self.search_query.is_empty() {
-            self.messages.iter().filter(|m| m.body.to_lowercase().contains(&self.search_query.to_lowercase())).count()
+            self.messages
+                .iter()
+                .filter(|m| {
+                    m.body
+                        .to_lowercase()
+                        .contains(&self.search_query.to_lowercase())
+                })
+                .count()
         } else {
             0
         };
@@ -575,6 +667,57 @@ impl ConversationView {
         }
         col.push(composer_row).height(Length::Fill).into()
     }
+}
+
+fn render_preview_card(preview: LinkPreview, own: bool) -> Element<'static, Message> {
+    let mut card_col: iced::widget::Column<Message> = column![].spacing(4).padding([8, 10]);
+
+    if let Some(ref site_name) = preview.site_name {
+        card_col = card_col.push(
+            text(site_name.clone())
+                .size(10)
+                .color(Color::from_rgb(0.5, 0.5, 0.5)),
+        );
+    }
+
+    if let Some(ref title) = preview.title {
+        card_col = card_col.push(text(title.clone()).size(13).font(Font {
+            weight: font::Weight::Bold,
+            ..Font::DEFAULT
+        }));
+    }
+
+    if let Some(ref desc) = preview.description {
+        let desc_text: String = desc.chars().take(150).collect();
+        card_col = card_col.push(text(desc_text).size(12));
+    }
+
+    if let Some(ref image_url) = preview.image_url {
+        card_col = card_col.push(
+            text(image_url.clone())
+                .size(10)
+                .color(Color::from_rgb(0.4, 0.6, 1.0)),
+        );
+    }
+
+    let card = container(card_col)
+        .width(300)
+        .style(|_theme: &iced::Theme| iced::widget::container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb(0.15, 0.15, 0.18))),
+            border: iced::Border {
+                color: Color::from_rgb(0.3, 0.3, 0.35),
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        });
+
+    let align = if own {
+        Alignment::End
+    } else {
+        Alignment::Start
+    };
+    container(card).width(Length::Fill).align_x(align).into()
 }
 
 /// Map parsed `Span`s to an iced `rich_text` widget.

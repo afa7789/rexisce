@@ -56,7 +56,8 @@ impl ChatScreen {
     }
 
     /// Route an incoming message to the right conversation bucket.
-    pub fn on_message_received(&mut self, msg: IncomingMessage) {
+    /// Returns a Task for any link preview fetches that need to be spawned.
+    pub fn on_message_received(&mut self, msg: IncomingMessage) -> Option<Task<Message>> {
         let bare_jid = msg.from.split('/').next().unwrap_or(&msg.from).to_string();
         let own_jid = self.own_jid.clone();
         let convo = self
@@ -65,7 +66,7 @@ impl ChatScreen {
             .or_insert_with(|| ConversationView::new(bare_jid.clone(), own_jid));
 
         convo.push_message(DisplayMessage {
-            id: msg.id,
+            id: msg.id.clone(),
             from: msg.from,
             body: msg.body,
             own: false,
@@ -77,6 +78,45 @@ impl ChatScreen {
         if self.active_jid.as_deref() != Some(bare_jid.as_str()) {
             self.sidebar.increment_unread(&bare_jid);
         }
+
+        // E5: spawn link preview fetch tasks for any URLs in the message
+        let pending = convo.take_pending_previews();
+        if pending.is_empty() {
+            return None;
+        }
+
+        let jid = bare_jid;
+        Some(Task::future(async move {
+            for (msg_id, url) in pending {
+                let client = reqwest::Client::new();
+                match client
+                    .get(&url)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .send()
+                    .await
+                {
+                    Ok(resp) => {
+                        if let Ok(html) = resp.text().await {
+                            let preview =
+                                crate::xmpp::modules::link_preview::parse_preview(&url, &html);
+                            if preview.title.is_some()
+                                || preview.description.is_some()
+                                || preview.image_url.is_some()
+                            {
+                                return Message::Conversation(
+                                    jid.clone(),
+                                    super::conversation::Message::LinkPreviewReady(msg_id, preview),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("E5: failed to fetch link preview for {}: {}", url, e);
+                    }
+                }
+            }
+            Message::Conversation(jid.clone(), super::conversation::Message::Send)
+        }))
     }
 
     pub fn on_presence(&mut self, jid: &str, available: bool) {
@@ -88,7 +128,8 @@ impl ChatScreen {
         // Find which conversation contains this msg_id
         for convo in self.conversations.values_mut() {
             if convo.messages().iter().any(|m| m.id == msg_id) {
-                convo.reactions
+                convo
+                    .reactions
                     .entry(msg_id)
                     .or_default()
                     .insert(from, emojis);
@@ -132,7 +173,8 @@ impl ChatScreen {
                 if let sidebar::Message::SubmitAddContact = smsg {
                     let jid = self.sidebar.add_contact_jid().to_owned();
                     if !jid.trim().is_empty() {
-                        self.pending_commands.push(crate::xmpp::XmppCommand::AddContact(jid));
+                        self.pending_commands
+                            .push(crate::xmpp::XmppCommand::AddContact(jid));
                     }
                     let _ = self.sidebar.update(smsg);
                     return Task::none();
@@ -230,11 +272,12 @@ impl ChatScreen {
 
                 // E3: intercept SendReaction to queue a reaction command for the engine.
                 if let super::conversation::Message::SendReaction(ref msg_id, ref emoji) = cmsg {
-                    self.pending_commands.push(crate::xmpp::XmppCommand::SendReaction {
-                        to: jid.clone(),
-                        msg_id: msg_id.clone(),
-                        emojis: vec![emoji.clone()],
-                    });
+                    self.pending_commands
+                        .push(crate::xmpp::XmppCommand::SendReaction {
+                            to: jid.clone(),
+                            msg_id: msg_id.clone(),
+                            emojis: vec![emoji.clone()],
+                        });
                     return Task::none();
                 }
 
@@ -253,6 +296,57 @@ impl ChatScreen {
                                 timestamp: chrono::Utc::now().timestamp_millis(),
                                 reply_preview: None,
                             });
+
+                            // E5: spawn link preview fetch tasks for any URLs in the message
+                            let pending = convo.take_pending_previews();
+                            if !pending.is_empty() {
+                                let jid_for_preview = jid.clone();
+                                let jid_for_cmd = jid.clone();
+                                let body_clone = body.clone();
+                                let preview_task: Task<Message> = Task::future(async move {
+                                    for (msg_id, url) in pending {
+                                        let client = reqwest::Client::new();
+                                        match client
+                                            .get(&url)
+                                            .timeout(std::time::Duration::from_secs(10))
+                                            .send()
+                                            .await
+                                        {
+                                            Ok(resp) => {
+                                                if let Ok(html) = resp.text().await {
+                                                    let preview = crate::xmpp::modules::link_preview::parse_preview(&url, &html);
+                                                    if preview.title.is_some()
+                                                        || preview.description.is_some()
+                                                        || preview.image_url.is_some()
+                                                    {
+                                                        return Message::Conversation(
+                                                                jid_for_preview.clone(),
+                                                                super::conversation::Message::LinkPreviewReady(msg_id, preview),
+                                                            );
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tracing::debug!(
+                                                    "E5: failed to fetch link preview for {}: {}",
+                                                    url,
+                                                    e
+                                                );
+                                            }
+                                        }
+                                    }
+                                    Message::Conversation(
+                                        jid_for_preview,
+                                        super::conversation::Message::Send,
+                                    )
+                                });
+                                self.pending_commands.push(XmppCommand::SendMessage {
+                                    to: jid_for_cmd,
+                                    body: body_clone,
+                                });
+                                return preview_task;
+                            }
+
                             self.pending_commands.push(XmppCommand::SendMessage {
                                 to: jid.clone(),
                                 body,
@@ -302,15 +396,19 @@ impl ChatScreen {
                 if let Some(convo) = self.conversations.get(jid) {
                     let jid2 = jid.clone();
                     // G2: show "is typing" if peer typed in the last 5 seconds
-                    let is_typing = self.typing_peers.get(jid)
+                    let is_typing = self
+                        .typing_peers
+                        .get(jid)
                         .is_some_and(|t| t.elapsed().as_secs() < 5);
-                    let conv_view = convo.view().map(move |m| Message::Conversation(jid2.clone(), m));
+                    let conv_view = convo
+                        .view()
+                        .map(move |m| Message::Conversation(jid2.clone(), m));
                     if is_typing {
-                        let indicator = container(
-                            text(format!("{} is typing…", jid)).size(11)
-                        )
-                        .padding([2, 8]);
-                        column![conv_view, indicator].height(iced::Length::Fill).into()
+                        let indicator =
+                            container(text(format!("{} is typing…", jid)).size(11)).padding([2, 8]);
+                        column![conv_view, indicator]
+                            .height(iced::Length::Fill)
+                            .into()
                     } else {
                         conv_view
                     }
@@ -325,7 +423,9 @@ impl ChatScreen {
             .on_press(Message::OpenSettings)
             .padding([2, 8]);
         let status_bar = container(
-            row![own_label, settings_btn].spacing(8).align_y(iced::Alignment::Center),
+            row![own_label, settings_btn]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
         )
         .padding([2, 8])
         .width(Length::Fill);

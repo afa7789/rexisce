@@ -146,7 +146,8 @@ impl App {
                     .iter()
                     .copied()
                     .filter(|cmd| {
-                        cmd.to_lowercase().contains(&self.palette_query.to_lowercase())
+                        cmd.to_lowercase()
+                            .contains(&self.palette_query.to_lowercase())
                     })
                     .collect();
                 if let Some(&label) = filtered.get(i) {
@@ -203,7 +204,9 @@ impl App {
                         convo.load_history(display);
                         return convo
                             .update(crate::ui::conversation::Message::ScrollToBottom)
-                            .map(move |m| Message::Chat(chat::Message::Conversation(jid.clone(), m)));
+                            .map(move |m| {
+                                Message::Chat(chat::Message::Conversation(jid.clone(), m))
+                            });
                     }
                 }
                 Task::none()
@@ -222,7 +225,9 @@ impl App {
                 if let Screen::Settings(ref ss, _) = self.screen {
                     self.settings = ss.settings().clone();
                 }
-                if let Screen::Settings(_, prev) = std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new())) {
+                if let Screen::Settings(_, prev) =
+                    std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()))
+                {
                     self.screen = *prev;
                 }
                 Task::none()
@@ -320,21 +325,22 @@ impl App {
                 }
                 if let Screen::Chat(ref mut chat) = self.screen {
                     // B4+B6: if SelectContact, fire history load and mark-read
-                    let selected_jid: Option<String> =
-                        if let chat::Message::Sidebar(
-                            crate::ui::sidebar::Message::SelectContact(ref jid)
-                        ) = msg {
-                            Some(jid.clone())
-                        } else {
-                            None
-                        };
+                    let selected_jid: Option<String> = if let chat::Message::Sidebar(
+                        crate::ui::sidebar::Message::SelectContact(ref jid),
+                    ) = msg
+                    {
+                        Some(jid.clone())
+                    } else {
+                        None
+                    };
                     let history_task: Task<Message> = if let Some(ref jid) = selected_jid {
                         let jid = jid.clone();
                         let pool = self.db.clone();
                         Task::future(async move {
-                            let rows = crate::store::message_repo::find_by_conversation(&pool, &jid, 50)
-                                .await
-                                .unwrap_or_default();
+                            let rows =
+                                crate::store::message_repo::find_by_conversation(&pool, &jid, 50)
+                                    .await
+                                    .unwrap_or_default();
                             Message::MessagesLoaded(jid, rows)
                         })
                     } else {
@@ -345,9 +351,13 @@ impl App {
                             let jid = jid.clone();
                             let pool = self.db.clone();
                             Task::future(async move {
-                                let _ = crate::store::conversation_repo::mark_read(&pool, &jid, &last_id).await;
+                                let _ = crate::store::conversation_repo::mark_read(
+                                    &pool, &jid, &last_id,
+                                )
+                                .await;
                                 Message::GoToBenchmark
-                            }).discard()
+                            })
+                            .discard()
                         } else {
                             Task::none()
                         }
@@ -420,12 +430,16 @@ impl App {
                         tracing::info!("XMPP: reconnecting (attempt {attempt})");
                         self.reconnect_attempt = attempt;
                         let delay_secs = 2u64.pow(attempt.min(6));
-                        if let (Some(cfg), Some(tx)) = (self.last_connect_cfg.clone(), self.xmpp_tx.clone()) {
+                        if let (Some(cfg), Some(tx)) =
+                            (self.last_connect_cfg.clone(), self.xmpp_tx.clone())
+                        {
                             return Task::future(async move {
-                                tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+                                tokio::time::sleep(std::time::Duration::from_secs(delay_secs))
+                                    .await;
                                 let _ = tx.send(XmppCommand::Connect(cfg)).await;
                                 Message::XmppEvent(XmppEvent::Reconnecting { attempt: 0 })
-                            }).discard();
+                            })
+                            .discard();
                         }
                     }
                     XmppEvent::RosterReceived(ref contacts) => {
@@ -440,22 +454,25 @@ impl App {
                         // A3: persist roster to DB
                         let pool = self.db.clone();
                         let contacts = contacts.clone();
-                        return Task::batch([toast, Task::future(async move {
-                            for c in &contacts {
-                                let _ = crate::store::roster_repo::upsert(
-                                    &pool,
-                                    &crate::store::roster_repo::RosterContact {
-                                        jid: c.jid.clone(),
-                                        name: c.name.clone(),
-                                        subscription: c.subscription.clone(),
-                                        groups: None,
-                                    },
-                                )
-                                .await;
-                            }
-                            Message::GoToBenchmark
-                        })
-                        .discard()]);
+                        return Task::batch([
+                            toast,
+                            Task::future(async move {
+                                for c in &contacts {
+                                    let _ = crate::store::roster_repo::upsert(
+                                        &pool,
+                                        &crate::store::roster_repo::RosterContact {
+                                            jid: c.jid.clone(),
+                                            name: c.name.clone(),
+                                            subscription: c.subscription.clone(),
+                                            groups: None,
+                                        },
+                                    )
+                                    .await;
+                                }
+                                Message::GoToBenchmark
+                            })
+                            .discard(),
+                        ]);
                     }
                     XmppEvent::MessageReceived(ref msg) => {
                         tracing::info!("XMPP: message from {}", msg.from);
@@ -474,15 +491,13 @@ impl App {
                             let notif_from = bare_from.clone();
                             let notif_body: String = msg.body.chars().take(100).collect();
                             Task::future(async move {
-                                let _ = crate::notifications::notify_message(&notif_from, &notif_body);
+                                let _ =
+                                    crate::notifications::notify_message(&notif_from, &notif_body);
                                 Message::GoToBenchmark
                             })
                         } else {
                             Task::none()
                         };
-                        if let Screen::Chat(ref mut chat) = self.screen {
-                            chat.on_message_received(msg.clone());
-                        }
                         // A2: persist message + conversation to DB
                         let pool = self.db.clone();
                         let from_jid = msg.from.clone();
@@ -490,7 +505,7 @@ impl App {
                         let msg_id = msg.id.clone();
                         let body = msg.body.clone();
                         let ts = chrono::Utc::now().timestamp_millis();
-                        let db_task = Task::future(async move {
+                        let db_task: Task<Message> = Task::future(async move {
                             let _ = crate::store::conversation_repo::upsert(&pool, &bare_jid).await;
                             let _ = crate::store::message_repo::insert(
                                 &pool,
@@ -509,8 +524,18 @@ impl App {
                             )
                             .await;
                             Message::GoToBenchmark
-                        })
-                        .discard();
+                        });
+
+                        if let Screen::Chat(ref mut chat) = self.screen {
+                            if let Some(preview_task) = chat.on_message_received(msg.clone()) {
+                                return Task::batch([
+                                    notif_task,
+                                    db_task,
+                                    preview_task.map(Message::Chat),
+                                ]);
+                            }
+                            return Task::batch([notif_task, db_task]);
+                        }
                         return Task::batch([notif_task, db_task]);
                     }
                     XmppEvent::PresenceUpdated { ref jid, available } => {
@@ -525,8 +550,14 @@ impl App {
                             let _ = chat.update(chat::Message::PeerTyping(jid.clone(), composing));
                         }
                     }
-                    XmppEvent::AvatarReceived { ref jid, ref png_bytes } => {
-                        tracing::debug!("H1: avatar received for {jid} ({} bytes)", png_bytes.len());
+                    XmppEvent::AvatarReceived {
+                        ref jid,
+                        ref png_bytes,
+                    } => {
+                        tracing::debug!(
+                            "H1: avatar received for {jid} ({} bytes)",
+                            png_bytes.len()
+                        );
                         self.avatar_cache.insert(jid.clone(), png_bytes.clone());
                     }
                     XmppEvent::CatchupFinished {
@@ -537,7 +568,11 @@ impl App {
                             "XMPP: MAM catchup complete for {conversation_jid} ({fetched} messages)"
                         );
                     }
-                    XmppEvent::UploadSlotReceived { ref put_url, ref get_url, .. } => {
+                    XmppEvent::UploadSlotReceived {
+                        ref put_url,
+                        ref get_url,
+                        ..
+                    } => {
                         tracing::info!("E4: upload slot received put={put_url} get={get_url}");
                     }
                     XmppEvent::ConsoleEntry { direction, xml } => {
@@ -546,7 +581,11 @@ impl App {
                             self.console_entries.remove(0);
                         }
                     }
-                    XmppEvent::ReactionReceived { ref msg_id, ref from, ref emojis } => {
+                    XmppEvent::ReactionReceived {
+                        ref msg_id,
+                        ref from,
+                        ref emojis,
+                    } => {
                         tracing::debug!("E3: reaction from {from} on {msg_id}: {:?}", emojis);
                         if let Screen::Chat(ref mut chat) = self.screen {
                             chat.on_reaction_received(msg_id.clone(), from.clone(), emojis.clone());
@@ -559,8 +598,10 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        use iced::widget::{column, container, row, scrollable, stack, text, button, text_input, Space};
-        use iced::{Alignment, Length, Color};
+        use iced::widget::{
+            button, column, container, row, scrollable, stack, text, text_input, Space,
+        };
+        use iced::{Alignment, Color, Length};
 
         let screen_view: Element<Message> = match &self.screen {
             Screen::Login(login) => login.view().map(Message::Login),
@@ -591,7 +632,8 @@ impl App {
                 .copied()
                 .enumerate()
                 .filter(|(_, cmd)| {
-                    cmd.to_lowercase().contains(&self.palette_query.to_lowercase())
+                    cmd.to_lowercase()
+                        .contains(&self.palette_query.to_lowercase())
                 })
                 .collect();
 
@@ -621,30 +663,29 @@ impl App {
                 .into_iter()
                 .fold(column![].spacing(2), iced::widget::Column::push);
 
-            let palette_box = container(
-                column![input, scrollable(cmd_list).height(300)].spacing(8),
-            )
-            .width(480)
-            .padding(16)
-            .style(|theme: &iced::Theme| {
-                let palette = theme.extended_palette();
-                iced::widget::container::Style {
-                    background: Some(iced::Background::Color(
-                        palette.background.base.color,
-                    )),
-                    border: iced::Border {
-                        color: palette.primary.base.color,
-                        width: 1.0,
-                        radius: 8.0.into(),
-                    },
-                    shadow: iced::Shadow {
-                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-                        offset: iced::Vector::new(0.0, 4.0),
-                        blur_radius: 16.0,
-                    },
-                    ..Default::default()
-                }
-            });
+            let palette_box =
+                container(column![input, scrollable(cmd_list).height(300)].spacing(8))
+                    .width(480)
+                    .padding(16)
+                    .style(|theme: &iced::Theme| {
+                        let palette = theme.extended_palette();
+                        iced::widget::container::Style {
+                            background: Some(iced::Background::Color(
+                                palette.background.base.color,
+                            )),
+                            border: iced::Border {
+                                color: palette.primary.base.color,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            shadow: iced::Shadow {
+                                color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                                offset: iced::Vector::new(0.0, 4.0),
+                                blur_radius: 16.0,
+                            },
+                            ..Default::default()
+                        }
+                    });
 
             // Dark semi-transparent backdrop + centered palette
             let backdrop = container(Space::new(Length::Fill, Length::Fill))
@@ -702,7 +743,10 @@ impl App {
                     .on_press(Message::DismissToast(t.id))
                     .padding([2, 4]);
                 let toast_row = row![
-                    text(t.body.clone()).size(12).color(Color::WHITE).width(Length::Fill),
+                    text(t.body.clone())
+                        .size(12)
+                        .color(Color::WHITE)
+                        .width(Length::Fill),
                     dismiss_btn,
                 ]
                 .spacing(4)
@@ -754,7 +798,9 @@ impl App {
                 .height(300)
                 .width(Length::Fill)
                 .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.85))),
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        0.0, 0.0, 0.0, 0.85,
+                    ))),
                     ..Default::default()
                 })
                 .padding([4, 8]);

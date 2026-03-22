@@ -1,7 +1,7 @@
 // F3: Settings panel screen
 
 use iced::{
-    widget::{button, column, container, row, text, toggler},
+    widget::{button, column, container, row, text, text_input, toggler},
     Alignment, Element, Length, Task,
 };
 
@@ -10,20 +10,26 @@ use crate::config::{self, Settings, Theme};
 #[derive(Debug, Clone)]
 pub struct SettingsScreen {
     settings: Settings,
+    status_input: String,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     ThemeToggled,
     NotificationsToggled(bool),
+    SoundToggled(bool),
     FontSizeIncreased,
     FontSizeDecreased,
+    StatusInputChanged(String),
     Back,
 }
 
 impl SettingsScreen {
     pub fn new(settings: Settings) -> Self {
-        Self { settings }
+        Self {
+            status_input: settings.status_message.clone().unwrap_or_default(),
+            settings,
+        }
     }
 
     pub fn settings(&self) -> &Settings {
@@ -45,6 +51,11 @@ impl SettingsScreen {
                 let _ = config::save(&self.settings);
                 Task::none()
             }
+            Message::SoundToggled(enabled) => {
+                self.settings.sound_enabled = enabled;
+                let _ = config::save(&self.settings);
+                Task::none()
+            }
             Message::FontSizeIncreased => {
                 if self.settings.font_size < 20 {
                     self.settings.font_size += 1;
@@ -59,7 +70,17 @@ impl SettingsScreen {
                 }
                 Task::none()
             }
-            Message::Back => Task::none(), // handled by App
+            Message::StatusInputChanged(value) => {
+                self.status_input = value.clone();
+                self.settings.status_message = if self.status_input.trim().is_empty() {
+                    None
+                } else {
+                    Some(self.status_input.trim().to_string())
+                };
+                let _ = config::save(&self.settings);
+                Task::none()
+            }
+            Message::Back => Task::none(),
         }
     }
 
@@ -76,8 +97,14 @@ impl SettingsScreen {
 
         let notif_row = row![
             text("Notifications").size(14).width(Length::Fill),
-            toggler(self.settings.notifications_enabled)
-                .on_toggle(Message::NotificationsToggled),
+            toggler(self.settings.notifications_enabled).on_toggle(Message::NotificationsToggled),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        let sound_row = row![
+            text("Sound").size(14).width(Length::Fill),
+            toggler(self.settings.sound_enabled).on_toggle(Message::SoundToggled),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
@@ -96,12 +123,22 @@ impl SettingsScreen {
         .spacing(8)
         .align_y(Alignment::Center);
 
+        let status_row = row![
+            text("Status:").size(14).width(80),
+            text_input("e.g. In a meeting", &self.status_input)
+                .on_input(Message::StatusInputChanged)
+                .width(Length::Fill),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
         let back_btn = button("Back").on_press(Message::Back).padding([6, 14]);
 
-        let content = column![title, theme_row, notif_row, font_row, back_btn]
-            .spacing(16)
-            .padding(24)
-            .width(400);
+        let content =
+            column![title, theme_row, notif_row, sound_row, font_row, status_row, back_btn]
+                .spacing(16)
+                .padding(24)
+                .width(400);
 
         container(content)
             .center(Length::Fill)

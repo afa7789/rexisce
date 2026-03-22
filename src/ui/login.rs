@@ -64,10 +64,12 @@ impl LoginScreen {
 
     /// Build a ConnectConfig from the current field values.
     pub fn connect_config(&self) -> ConnectConfig {
+        let settings = crate::config::load();
         ConnectConfig {
             jid: self.jid.clone(),
             password: self.password.clone(),
             server: self.server.clone(),
+            status_message: settings.status_message,
         }
     }
 

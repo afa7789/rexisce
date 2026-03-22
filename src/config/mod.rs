@@ -24,6 +24,7 @@ pub struct Settings {
     pub font_size: u8,
     pub show_timestamps: bool,
     pub notifications_enabled: bool,
+    pub sound_enabled: bool,
     /// Last-used JID (pre-fills the login screen).
     pub last_jid: String,
     /// Last-used server override (pre-fills the login screen).
@@ -31,6 +32,9 @@ pub struct Settings {
     /// J3: JIDs with notifications muted.
     #[serde(default)]
     pub muted_jids: std::collections::HashSet<String>,
+    /// J2: Custom presence status message (e.g. "In a meeting").
+    #[serde(default)]
+    pub status_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -47,9 +51,11 @@ impl Default for Settings {
             font_size: 14,
             show_timestamps: true,
             notifications_enabled: true,
+            sound_enabled: true,
             last_jid: String::new(),
             last_server: String::new(),
             muted_jids: std::collections::HashSet::new(),
+            status_message: None,
         }
     }
 }
@@ -152,9 +158,11 @@ mod tests {
             font_size: 16,
             show_timestamps: false,
             notifications_enabled: false,
+            sound_enabled: false,
             last_jid: "user@example.com".into(),
             last_server: "xmpp.example.com".into(),
             muted_jids: std::collections::HashSet::new(),
+            status_message: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         let s2: Settings = serde_json::from_str(&json).unwrap();
