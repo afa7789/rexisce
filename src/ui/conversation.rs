@@ -205,7 +205,7 @@ impl ConversationView {
                 .map(|dt| dt.date_naive());
 
             if let Some(date) = msg_date {
-                if prev_date.map_or(true, |pd| pd != date) {
+                if prev_date != Some(date) {
                     let label = date.format("%b %-d").to_string();
                     let sep = container(text(format!("── {} ──", label)).size(11))
                         .width(Length::Fill)
@@ -219,7 +219,7 @@ impl ConversationView {
             // G5: suppress sender label for consecutive same-sender within 120s
             let same_sender = prev_sender.as_deref() == Some(sender.as_str());
             let within_120s =
-                prev_ts.map_or(false, |pt| (m.timestamp - pt).abs() < 120_000);
+                prev_ts.is_some_and(|pt| (m.timestamp - pt).abs() < 120_000);
             let show_sender = !(same_sender && within_120s);
 
             // G4: /me action rendering

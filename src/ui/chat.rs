@@ -249,8 +249,7 @@ impl ChatScreen {
     pub fn draft_for(&self, jid: &str) -> &str {
         self.conversations
             .get(jid)
-            .map(|cv| cv.composer.as_str())
-            .unwrap_or("")
+            .map_or("", |cv| cv.composer.as_str())
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -275,8 +274,7 @@ impl ChatScreen {
                     let jid2 = jid.clone();
                     // G2: show "is typing" if peer typed in the last 5 seconds
                     let is_typing = self.typing_peers.get(jid)
-                        .map(|t| t.elapsed().as_secs() < 5)
-                        .unwrap_or(false);
+                        .is_some_and(|t| t.elapsed().as_secs() < 5);
                     let conv_view = convo.view().map(move |m| Message::Conversation(jid2.clone(), m));
                     if is_typing {
                         let indicator = container(

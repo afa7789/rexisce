@@ -67,8 +67,8 @@ pub enum Message {
 enum Screen {
     Login(LoginScreen),
     Benchmark(BenchmarkScreen),
-    Chat(ChatScreen),
-    Settings(settings::SettingsScreen, Box<Screen>),
+    Chat(Box<ChatScreen>),
+    Settings(Box<settings::SettingsScreen>, Box<Screen>),
 }
 
 impl App {
@@ -147,7 +147,7 @@ impl App {
             Message::GoToSettings => {
                 let prev = std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()));
                 self.screen = Screen::Settings(
-                    settings::SettingsScreen::new(self.settings.clone()),
+                    Box::new(settings::SettingsScreen::new(self.settings.clone())),
                     Box::new(prev),
                 );
                 Task::none()
@@ -325,7 +325,7 @@ impl App {
                                 let _ = config::save_password(&cfg.jid, &cfg.password);
                             }
                         }
-                        self.screen = Screen::Chat(ChatScreen::new(bound_jid.clone()));
+                        self.screen = Screen::Chat(Box::new(ChatScreen::new(bound_jid.clone())));
                         return self.update(Message::ShowToast(
                             format!("Connected as {}", bound_jid),
                             ToastKind::Success,

@@ -225,7 +225,7 @@ async fn run_session(
                     Some(XmppCommand::RequestUploadSlot { filename, size, mime }) => {
                         // E4: request upload slot from server's upload service
                         // Use a well-known upload service JID pattern; in production, discover via disco.
-                        let upload_jid = "upload.".to_string() + &config.jid.split('@').nth(1).unwrap_or("example.com");
+                        let upload_jid = "upload.".to_string() + config.jid.split('@').nth(1).unwrap_or("example.com");
                         let (_, iq) = file_upload_mgr.request_slot(&filename, size, &mime, &upload_jid);
                         outbox.push_back(iq);
                         tracing::info!("file_upload: requested slot for {filename}");
@@ -251,6 +251,7 @@ async fn run_session(
 // Event dispatching
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_client_event(
     ev: tokio_xmpp::Event,
     event_tx: &mpsc::Sender<XmppEvent>,
@@ -331,6 +332,7 @@ async fn handle_client_event(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_stanza(
     el: Element,
     event_tx: &mpsc::Sender<XmppEvent>,
@@ -379,7 +381,7 @@ async fn dispatch_stanza(
             // XEP-0280: carbon <sent> — own message from another device
             if let Some(inner) = extract_carbon(&el, "sent") {
                 let body = inner.children().find(|c| c.name() == "body")
-                    .map(|b| b.text())
+                    .map(Element::text)
                     .unwrap_or_default();
                 if !body.is_empty() {
                     let _ = event_tx.send(XmppEvent::MessageReceived(IncomingMessage {
@@ -406,6 +408,7 @@ async fn dispatch_stanza(
 // IQ handler — roster result (P1.4)
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_iq(
     el: Element,
     event_tx: &mpsc::Sender<XmppEvent>,
@@ -472,7 +475,7 @@ async fn handle_iq(
 
     // C4: block/unblock push IQs from the server (type="set")
     if el.attr("type") == Some("set") {
-        let first_child_name = el.children().next().map(|c| c.name());
+        let first_child_name = el.children().next().map(Element::name);
         match first_child_name {
             Some("block") => {
                 blocking_mgr.on_block_push(&el);
@@ -641,11 +644,7 @@ fn make_carbons_enable() -> Element {
 }
 
 fn make_presence_with_caps(disco_mgr: &DiscoManager) -> Element {
-    let mut presence = Presence::new(PresenceType::None);
-    // Append XEP-0115 <c> caps element
     let caps_el = disco_mgr.build_caps_element();
-    let el: Element = presence.into();
-    // Rebuild with caps appended
     let mut raw = Element::builder("presence", "jabber:client").build();
     raw.append_child(caps_el);
     raw
@@ -690,7 +689,7 @@ fn make_roster_set(jid: &str) -> Element {
         .build();
     let mut iq = Element::builder("iq", "jabber:client")
         .attr("type", "set")
-        .attr("id", &uuid::Uuid::new_v4().to_string())
+        .attr("id", uuid::Uuid::new_v4().to_string())
         .build();
     iq.append_child(query);
     iq
