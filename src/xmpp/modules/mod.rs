@@ -33,3 +33,6 @@ pub mod adhoc;         // Task P6.2 — XEP-0050 ad-hoc commands
 pub mod blocking;      // Task P6.2 — XEP-0191 blocking
 pub mod entity_time;   // Task P6.4 — XEP-0202 entity time
 pub mod ignore;        // Task P6.4 — per-room ignored users via PubSub
+pub mod console;       // Task P6.3 — XMPP console stanza log
+pub mod xmpp_uri;      // Task P6.3 — XEP-0147 xmpp: URI parser
+pub mod account;       // Task P6.3 — XEP-0077 account management IQs
