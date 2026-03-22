@@ -36,6 +36,7 @@ pub enum Message {
     CloseConversation(String), // G1: close a conversation by JID
     PeerTyping(String, bool),  // G2: (jid, composing)
     OpenSettings,              // F3: open settings panel
+    ToggleMute(String),        // J3: toggle mute for a JID
 }
 
 impl ChatScreen {
@@ -159,7 +160,22 @@ impl ChatScreen {
                 Task::none()
             }
 
+            Message::ToggleMute(jid) => {
+                if let Some(convo) = self.conversations.get_mut(&jid) {
+                    convo.is_muted = !convo.is_muted;
+                    let is_now_muted = convo.is_muted;
+                    // Store mute state; App intercepts this message to persist
+                    let _ = is_now_muted;
+                }
+                Task::none()
+            }
+
             Message::Conversation(jid, cmsg) => {
+                // J3: intercept ToggleMute to bubble up to App
+                if let super::conversation::Message::ToggleMute = cmsg {
+                    return self.update(Message::ToggleMute(jid));
+                }
+
                 // G1: intercept Close to remove the conversation
                 if let super::conversation::Message::Close = cmsg {
                     return self.update(Message::CloseConversation(jid));

@@ -51,6 +51,8 @@ pub struct ConversationView {
     pub peer_blocked: bool,
     /// G3: current reply-to (msg_id, preview text)
     reply_to: Option<(String, String)>,
+    /// J3: whether notifications are muted for this conversation
+    pub is_muted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +69,7 @@ pub enum Message {
     ComposingPaused,         // G2: user stopped typing
     ReplyTo(String, String), // G3: (msg_id, preview)
     CancelReply,             // G3: cancel current reply
+    ToggleMute,              // J3: toggle notification mute
 }
 
 impl ConversationView {
@@ -80,6 +83,7 @@ impl ConversationView {
             own_jid,
             peer_blocked: false,
             reply_to: None,
+            is_muted: false,
         }
     }
 
@@ -140,6 +144,7 @@ impl ConversationView {
                 self.reply_to = None;
                 Task::none()
             }
+            Message::ToggleMute => Task::none(),         // handled by ChatScreen → App
         }
     }
 
@@ -346,12 +351,18 @@ impl ConversationView {
         } else {
             button("🚫 Block").on_press(Message::BlockPeer).padding([4, 8])
         };
+        let mute_btn = if self.is_muted {
+            button("🔕").on_press(Message::ToggleMute).padding([4, 8])
+        } else {
+            button("🔔").on_press(Message::ToggleMute).padding([4, 8])
+        };
         let header = container(
             row![
                 text(format!("Chat with {}", self.peer_jid))
                     .size(14)
                     .width(Length::Fill),
                 block_btn,
+                mute_btn,
                 close_btn,
             ]
             .spacing(4)
