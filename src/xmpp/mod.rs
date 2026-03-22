@@ -79,6 +79,12 @@ pub enum XmppEvent {
         get_url: String,
         headers: Vec<(String, String)>,
     },
+
+    // H1: Avatar received from vCard (XEP-0153)
+    AvatarReceived {
+        jid: String,
+        png_bytes: Vec<u8>,
+    },
 }
 
 /// Commands sent from the UI to the XMPP engine.
@@ -97,6 +103,8 @@ pub enum XmppCommand {
     Disconnect,
     /// E4: Request an HTTP upload slot (XEP-0363).
     RequestUploadSlot { filename: String, size: u64, mime: String },
+    /// H1: Fetch avatar for a JID (vCard-temp fallback).
+    FetchAvatar(String),
     /// Block one or more JIDs (XEP-0191).
     BlockJid(String),
     /// Unblock a previously blocked JID (XEP-0191).

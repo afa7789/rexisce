@@ -33,6 +33,7 @@ use super::{
     modules::presence_machine::PresenceMachine,
     modules::disco::{DiscoIdentity, DiscoManager},
     modules::file_upload::FileUploadManager,
+    modules::avatar::AvatarManager,
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
 };
 
@@ -151,6 +152,8 @@ async fn run_session(
     );
     // E4: XEP-0363 file upload manager
     let mut file_upload_mgr = FileUploadManager::new();
+    // H1: avatar manager (vCard-temp fallback)
+    let mut avatar_mgr = AvatarManager::new();
 
     loop {
         // Drain outbox before blocking on the next event.
@@ -182,7 +185,7 @@ async fn run_session(
                     }
                     Some(ev) => {
 
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr).await;
+                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr).await;
                     }
                 }
             }
@@ -227,6 +230,11 @@ async fn run_session(
                         outbox.push_back(iq);
                         tracing::info!("file_upload: requested slot for {filename}");
                     }
+                    Some(XmppCommand::FetchAvatar(jid)) => {
+                        let (_, iq) = avatar_mgr.build_vcard_request(&jid);
+                        outbox.push_back(iq);
+                        tracing::debug!("avatar: fetching vCard for {jid}");
+                    }
                 }
             }
         }
@@ -256,6 +264,7 @@ async fn handle_client_event(
     presence_machine: &mut PresenceMachine,
     disco_mgr: &mut DiscoManager,
     file_upload_mgr: &mut FileUploadManager,
+    avatar_mgr: &mut AvatarManager,
 ) {
     match ev {
         tokio_xmpp::Event::Online { bound_jid, .. } => {
@@ -317,7 +326,7 @@ async fn handle_client_event(
             if let Some(ack) = sm.maybe_send_ack() {
                 outbox.push_back(ack);
             }
-            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox, own_jid_str, mam_mgr, catchup_mgr, disco_mgr, file_upload_mgr).await;
+            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox, own_jid_str, mam_mgr, catchup_mgr, disco_mgr, file_upload_mgr, avatar_mgr).await;
         }
     }
 }
@@ -333,6 +342,7 @@ async fn dispatch_stanza(
     catchup_mgr: &mut CatchupManager,
     disco_mgr: &mut DiscoManager,
     file_upload_mgr: &mut FileUploadManager,
+    avatar_mgr: &mut AvatarManager,
 ) {
     // XEP-0198: handle server <a h='...'> acks
     if el.name() == "a" && el.ns() == "urn:xmpp:sm:3" {
@@ -349,7 +359,7 @@ async fn dispatch_stanza(
         return;
     }
     match el.name() {
-        "iq" => handle_iq(el, event_tx, blocking_mgr, mam_mgr, catchup_mgr, disco_mgr, file_upload_mgr).await,
+        "iq" => handle_iq(el, event_tx, blocking_mgr, mam_mgr, catchup_mgr, disco_mgr, file_upload_mgr, avatar_mgr).await,
         "message" => {
             // C3: XEP-0313 MAM result wrapper — extract forwarded message
             if let Some(mam_msg) = mam_mgr.on_mam_message(&el) {
@@ -404,6 +414,7 @@ async fn handle_iq(
     catchup_mgr: &mut CatchupManager,
     disco_mgr: &mut DiscoManager,
     file_upload_mgr: &mut FileUploadManager,
+    avatar_mgr: &mut AvatarManager,
 ) {
     // C3: detect MAM <fin> stanza
     if el.attr("type") == Some("result") {
@@ -431,6 +442,16 @@ async fn handle_iq(
             get_url: slot.get_url,
             headers: slot.put_headers,
         }).await;
+        return;
+    }
+    // H1: detect vCard result and extract PHOTO/BINVAL
+    if let Some(avatar_info) = avatar_mgr.on_vcard_result(&el) {
+        if !avatar_info.data.is_empty() {
+            let _ = event_tx.send(XmppEvent::AvatarReceived {
+                jid: avatar_info.jid,
+                png_bytes: avatar_info.data,
+            }).await;
+        }
         return;
     }
     // C5: parse disco#info results into cache
