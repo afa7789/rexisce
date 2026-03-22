@@ -5,25 +5,24 @@
 - ✅ **B2**: i18n module — stub exists as src/i18n/mod.rs
 - ✅ **B3+A4**: Presence indicator — sidebar.rs shows ●/○, mod.rs calls on_presence
 - ✅ **A1**: SQLite DB at startup — wired in main.rs + App struct
+- ✅ **A2**: Persist incoming messages to SQLite (2026-03-22)
+- ✅ **A3**: Persist roster to SQLite on RosterReceived (2026-03-22)
 - ✅ **A5**: Notifications — wired in ui/mod.rs
-- ✅ **E5**: Link previews — implemented (2026-03-22)
-- ✅ **J2**: Custom status message
-- ✅ **J4**: Sound notifications
+- ✅ **C6**: XEP-0280 Carbons — incoming stanza wiring (2026-03-22)
 - ✅ **E3**: Emoji reactions (XEP-0444)
+- ✅ **E5**: Link previews (2026-03-22)
 - ✅ **F1**: XMPP debug console
 - ✅ **F2**: Command palette (Cmd+K)
+- ✅ **G6**: Draft auto-save per conversation
+- ✅ **J2**: Custom status message
+- ✅ **J4**: Sound notifications
 
-## In Progress (Agent Track)
-- [ ] **A2**: Persist incoming messages to SQLite — engine.rs has partial C6 changes staged
-- [ ] **A3**: Persist roster to SQLite on RosterReceived
-- [ ] **C6**: XEP-0280 Carbons — partial impl in engine.rs (uncommitted), need to complete + commit
+## Phase B — Storage Layer
+- [x] ✅ **B4**: Load message history on conversation open (50 most recent) — (2026-03-22)
+- [x] ✅ **B5**: Unread badge count in sidebar — (2026-03-22)
+- [ ] **B6**: Mark conversation read, persist last_read_id — depends on A2, B5
 
-## Phase B — Storage Layer (next priority, depends on A2)
-- [ ] **B4**: Load message history on conversation open (50 most recent)
-- [ ] **B5**: Unread badge count in sidebar
-- [ ] **B6**: Mark conversation read, persist last_read_id
-
-## Phase C — XMPP Engine Wiring (parallel with B)
+## Phase C — XMPP Engine Wiring
 - [ ] **C1**: Wire StreamMgmt into engine loop
 - [ ] **C2**: Wire PresenceMachine into engine
 - [ ] **C3**: MAM post-connect history sync (depends on A1, A2)
@@ -52,7 +51,6 @@
 - [ ] **G3**: Message replies (XEP-0461)
 - [ ] **G4**: /me action messages (XEP-0245)
 - [ ] **G5**: Message grouping + date separators
-- [ ] **G6**: Draft auto-save per conversation
 - [ ] **G7**: Copy message to clipboard
 - [ ] **G8**: MAM lazy-load (scroll up for older history)
 - [ ] **G9**: Message search within conversation
@@ -72,7 +70,8 @@
 
 ---
 ## Orchestration Notes
-- Agent A (Storage/UI): A2 → A3 → B4 → B5 → B6 → D2 → G-phase
-- Agent B (Engine/XMPP): C6 finish → C1 → C2 → C3 → C4 → C5 → D3
+- NO worktree isolation — agents work directly in main repo on non-overlapping files
+- Agent A (Storage/UI): B4 → B5 → B6 → D2 → G-phase (touches ui/, store/)
+- Agent B (Engine/XMPP): C1 → C2 → C3 → C4 → C5 → D3 (touches xmpp/engine.rs)
 - Always run `cargo test && cargo clippy` before marking complete
 - Commit after each completed task, never push
