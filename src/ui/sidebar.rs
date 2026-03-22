@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use iced::{
     widget::{button, column, container, row, scrollable, text},
-    Element, Length, Task,
+    Alignment, Element, Length, Task,
 };
 
 use crate::ui::avatar::{jid_color, jid_initial};
@@ -18,6 +18,7 @@ pub struct SidebarScreen {
     contacts: Vec<RosterContact>,
     selected_jid: Option<String>,
     presence: HashMap<String, bool>,
+    unread_counts: HashMap<String, u32>, // B5: unread message counts per JID
 }
 
 #[derive(Debug, Clone)]
@@ -37,7 +38,18 @@ impl SidebarScreen {
             contacts: vec![],
             selected_jid: None,
             presence: HashMap::new(),
+            unread_counts: HashMap::new(),
         }
+    }
+
+    /// B5: increment unread count for a JID.
+    pub fn increment_unread(&mut self, jid: &str) {
+        *self.unread_counts.entry(jid.to_owned()).or_insert(0) += 1;
+    }
+
+    /// B5: clear unread count for a JID.
+    pub fn clear_unread(&mut self, jid: &str) {
+        self.unread_counts.remove(jid);
     }
 
     pub fn on_presence(&mut self, jid: &str, available: bool) {
@@ -96,20 +108,32 @@ impl SidebarScreen {
                         background: Some(iced::Background::Color(color)),
                         ..Default::default()
                     })
-                    .align_x(iced::Alignment::Center)
-                    .align_y(iced::Alignment::Center);
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center);
 
-                let label_row = row![
-                    avatar,
-                    text(name_label).size(13),
-                ]
-                .spacing(6)
-                .align_y(iced::Alignment::Center);
+                // B5: unread badge
+                let unread = self.unread_counts.get(c.jid.as_str()).copied().unwrap_or(0);
+                let name_elem: Element<Message> = if unread > 0 {
+                    row![
+                        text(name_label).size(13).width(Length::Fill),
+                        container(text(unread.to_string()).size(11))
+                            .width(20)
+                            .height(20)
+                            .align_x(Alignment::Center)
+                            .align_y(Alignment::Center),
+                    ]
+                    .align_y(Alignment::Center)
+                    .into()
+                } else {
+                    text(name_label).size(13).into()
+                };
+
+                let label_row = row![avatar, name_elem]
+                    .spacing(6)
+                    .align_y(Alignment::Center);
 
                 let btn = button(label_row).width(Length::Fill).padding([4, 8]);
-
                 let btn = btn.on_press(Message::SelectContact(c.jid.clone()));
-
                 btn.into()
             })
             .collect();
