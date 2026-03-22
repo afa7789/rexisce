@@ -12,6 +12,14 @@ use iced::{
     Alignment, Color, Element, Font, Length, Task,
 };
 
+// G4: /me action message prefix (XEP-0245)
+const ME_PREFIX: &str = "/me ";
+
+fn is_me_action(body: &str) -> bool {
+    body.len() >= ME_PREFIX.len()
+        && body[..ME_PREFIX.len()].eq_ignore_ascii_case(ME_PREFIX)
+}
+
 use crate::ui::styling::{self, SpanStyle};
 
 /// A single message shown in the conversation view.
@@ -105,11 +113,28 @@ impl ConversationView {
                     m.from.split('/').next().unwrap_or(&m.from).to_string()
                 };
 
-                let styled_spans = styling::parse(&m.body);
-                let body_widget = build_styled_text(&styled_spans);
-                let bubble = column![text(sender).size(11), body_widget]
-                    .spacing(2)
-                    .padding([6, 10]);
+                // G4: render /me actions as "* Sender rest *" in italic
+                let body_widget = if is_me_action(&m.body) {
+                    let action_text = &m.body[ME_PREFIX.len()..];
+                    let action_str = format!("* {} {} *", sender, action_text);
+                    let italic_span: IcedSpan<'static, Message> = span(action_str).font(Font {
+                        style: font::Style::Italic,
+                        ..Font::DEFAULT
+                    });
+                    rich_text([italic_span]).size(14).into()
+                } else {
+                    let styled_spans = styling::parse(&m.body);
+                    build_styled_text(&styled_spans)
+                };
+
+                // For /me messages the sender label is embedded in the action text
+                let bubble = if is_me_action(&m.body) {
+                    column![body_widget].spacing(2).padding([6, 10])
+                } else {
+                    column![text(sender).size(11), body_widget]
+                        .spacing(2)
+                        .padding([6, 10])
+                };
 
                 let align = if m.own {
                     Alignment::End
@@ -245,5 +270,15 @@ mod tests {
         cv.composer = "test message".into();
         let _ = cv.update(Message::Send);
         assert!(cv.composer.is_empty());
+    }
+
+    #[test]
+    fn me_action_detection_case_insensitive() {
+        assert!(is_me_action("/me waves"));
+        assert!(is_me_action("/ME waves"));
+        assert!(is_me_action("/Me waves"));
+        assert!(!is_me_action("hello"));
+        assert!(!is_me_action("/me")); // no space after
+        assert!(!is_me_action("/menu"));
     }
 }
