@@ -40,7 +40,9 @@ pub struct DisplayMessage {
 pub struct ConversationView {
     pub peer_jid: String,
     messages: Vec<DisplayMessage>,
+
     pub(crate) composer: String,
+
     scroll_id: Id,
     scroll_offset: AbsoluteOffset,
     #[allow(dead_code)]
