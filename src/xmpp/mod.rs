@@ -72,6 +72,13 @@ pub enum XmppEvent {
         jid: String,
         composing: bool,
     },
+
+    // E4: Upload slot received (XEP-0363)
+    UploadSlotReceived {
+        put_url: String,
+        get_url: String,
+        headers: Vec<(String, String)>,
+    },
 }
 
 /// Commands sent from the UI to the XMPP engine.
@@ -88,6 +95,8 @@ pub enum XmppCommand {
     /// Gracefully close the current session.
     #[allow(dead_code)]
     Disconnect,
+    /// E4: Request an HTTP upload slot (XEP-0363).
+    RequestUploadSlot { filename: String, size: u64, mime: String },
     /// Block one or more JIDs (XEP-0191).
     BlockJid(String),
     /// Unblock a previously blocked JID (XEP-0191).

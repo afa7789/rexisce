@@ -32,6 +32,7 @@ use super::{
     modules::catchup::CatchupManager,
     modules::presence_machine::PresenceMachine,
     modules::disco::{DiscoIdentity, DiscoManager},
+    modules::file_upload::FileUploadManager,
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
 };
 
@@ -148,6 +149,8 @@ async fn run_session(
         &[DiscoIdentity { category: "client".to_string(), kind: "pc".to_string(), name: "xmpp-start".to_string() }],
         &["urn:xmpp:mam:2", "urn:xmpp:carbons:2"],
     );
+    // E4: XEP-0363 file upload manager
+    let mut file_upload_mgr = FileUploadManager::new();
 
     loop {
         // Drain outbox before blocking on the next event.
@@ -179,7 +182,7 @@ async fn run_session(
                     }
                     Some(ev) => {
 
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr).await;
+                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr).await;
                     }
                 }
             }
@@ -216,6 +219,14 @@ async fn run_session(
                         outbox.push_back(make_roster_set(&jid));
                         tracing::info!("roster: sent add-contact IQ for {jid}");
                     }
+                    Some(XmppCommand::RequestUploadSlot { filename, size, mime }) => {
+                        // E4: request upload slot from server's upload service
+                        // Use a well-known upload service JID pattern; in production, discover via disco.
+                        let upload_jid = "upload.".to_string() + &config.jid.split('@').nth(1).unwrap_or("example.com");
+                        let (_, iq) = file_upload_mgr.request_slot(&filename, size, &mime, &upload_jid);
+                        outbox.push_back(iq);
+                        tracing::info!("file_upload: requested slot for {filename}");
+                    }
                 }
             }
         }
@@ -244,6 +255,7 @@ async fn handle_client_event(
     catchup_mgr: &mut CatchupManager,
     presence_machine: &mut PresenceMachine,
     disco_mgr: &mut DiscoManager,
+    file_upload_mgr: &mut FileUploadManager,
 ) {
     match ev {
         tokio_xmpp::Event::Online { bound_jid, .. } => {
@@ -305,7 +317,7 @@ async fn handle_client_event(
             if let Some(ack) = sm.maybe_send_ack() {
                 outbox.push_back(ack);
             }
-            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox, own_jid_str, mam_mgr, catchup_mgr, disco_mgr).await;
+            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox, own_jid_str, mam_mgr, catchup_mgr, disco_mgr, file_upload_mgr).await;
         }
     }
 }
@@ -320,6 +332,7 @@ async fn dispatch_stanza(
     mam_mgr: &mut MamManager,
     catchup_mgr: &mut CatchupManager,
     disco_mgr: &mut DiscoManager,
+    file_upload_mgr: &mut FileUploadManager,
 ) {
     // XEP-0198: handle server <a h='...'> acks
     if el.name() == "a" && el.ns() == "urn:xmpp:sm:3" {
@@ -336,7 +349,7 @@ async fn dispatch_stanza(
         return;
     }
     match el.name() {
-        "iq" => handle_iq(el, event_tx, blocking_mgr, mam_mgr, catchup_mgr, disco_mgr).await,
+        "iq" => handle_iq(el, event_tx, blocking_mgr, mam_mgr, catchup_mgr, disco_mgr, file_upload_mgr).await,
         "message" => {
             // C3: XEP-0313 MAM result wrapper — extract forwarded message
             if let Some(mam_msg) = mam_mgr.on_mam_message(&el) {
@@ -390,6 +403,7 @@ async fn handle_iq(
     mam_mgr: &mut MamManager,
     catchup_mgr: &mut CatchupManager,
     disco_mgr: &mut DiscoManager,
+    file_upload_mgr: &mut FileUploadManager,
 ) {
     // C3: detect MAM <fin> stanza
     if el.attr("type") == Some("result") {
@@ -409,6 +423,15 @@ async fn handle_iq(
             }
             return;
         }
+    }
+    // E4: detect upload slot result
+    if let Some(slot) = file_upload_mgr.on_slot_result(&el) {
+        let _ = event_tx.send(XmppEvent::UploadSlotReceived {
+            put_url: slot.put_url,
+            get_url: slot.get_url,
+            headers: slot.put_headers,
+        }).await;
+        return;
     }
     // C5: parse disco#info results into cache
     if disco_mgr.on_info_result(&el).is_some() {

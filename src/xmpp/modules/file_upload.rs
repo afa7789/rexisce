@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // Task P5.1 — XEP-0363 HTTP File Upload
 // XEP reference: https://xmpp.org/extensions/xep-0363.html
 //
