@@ -97,3 +97,78 @@ pub async fn find_by_origin_id(
 
     Ok(row.as_ref().map(row_to_message))
 }
+
+/// Return up to `limit` messages in a conversation whose timestamp is strictly
+/// before `before_ts`, ordered newest-first. Used for MAM backward pagination.
+pub async fn find_before(
+    pool: &SqlitePool,
+    conversation_jid: &str,
+    before_ts: i64,
+    limit: i64,
+) -> Result<Vec<Message>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, conversation_jid, from_jid, body, timestamp,
+               stanza_id, origin_id, state, edited_body, retracted
+        FROM messages
+        WHERE conversation_jid = ? AND timestamp < ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+        "#,
+    )
+    .bind(conversation_jid)
+    .bind(before_ts)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.iter().map(row_to_message).collect())
+}
+
+/// Count non-retracted messages that arrived after the message identified by
+/// `last_read_id`. Returns 0 when `last_read_id` does not exist in the table.
+pub async fn count_unread(
+    pool: &SqlitePool,
+    conversation_jid: &str,
+    last_read_id: &str,
+) -> Result<i64> {
+    let row = sqlx::query(
+        r#"
+        SELECT COUNT(*) AS cnt FROM messages m
+        JOIN messages r ON r.id = ?
+        WHERE m.conversation_jid = ?
+          AND m.timestamp > r.timestamp
+          AND m.retracted = 0
+        "#,
+    )
+    .bind(last_read_id)
+    .bind(conversation_jid)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row.get::<i64, _>("cnt"))
+}
+
+/// Mark a message as retracted (soft-delete). The row is kept so that
+/// thread continuity is preserved in the UI.
+pub async fn mark_retracted(pool: &SqlitePool, message_id: &str) -> Result<()> {
+    sqlx::query("UPDATE messages SET retracted = 1 WHERE id = ?")
+        .bind(message_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Overwrite the body of a message via its origin_id (XEP-0308 correction).
+pub async fn update_body(
+    pool: &SqlitePool,
+    origin_id: &str,
+    new_body: &str,
+) -> Result<()> {
+    sqlx::query("UPDATE messages SET edited_body = ? WHERE origin_id = ?")
+        .bind(new_body)
+        .bind(origin_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
