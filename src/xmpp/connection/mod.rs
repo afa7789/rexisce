@@ -7,6 +7,7 @@
 //   packages/fluux-sdk/src/core/modules/Connection.ts
 
 pub mod dns;
+pub mod proxy;
 pub mod sasl;
 pub mod tcp;
 
