@@ -13,7 +13,7 @@ pub mod muc;           // Task P3.1 — XEP-0045 multi-user chat
 pub mod bookmarks;     // Task P3.4 — XEP-0048 bookmarks
 
 // Phase 4 (History)
-// pub mod mam;           // Task P4.1 — XEP-0313 message archive management
+pub mod mam;           // Task P4.1 — XEP-0313 message archive management
 // pub mod conversation_sync; // Task P6.4 — XEP-0223 conversation sync
 
 // Phase 5 (Rich features)
