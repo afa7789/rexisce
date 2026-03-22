@@ -49,6 +49,8 @@ pub enum Message {
     Send,
     Scrolled(AbsoluteOffset),
     ScrollToBottom,
+    CopyToClipboard(String), // G7: copy message body
+    Noop,                    // G7: no-op for task returns
 }
 
 impl ConversationView {
@@ -98,6 +100,10 @@ impl ConversationView {
                 };
                 scrollable::scroll_to::<Message>(self.scroll_id.clone(), bottom)
             }
+            Message::CopyToClipboard(text) => {
+                iced::clipboard::write::<Message>(text)
+            }
+            Message::Noop => Task::none(),
         }
     }
 
@@ -127,13 +133,21 @@ impl ConversationView {
                     build_styled_text(&styled_spans)
                 };
 
+                // G7: copy button per message
+                let copy_btn = button(text("Copy").size(10))
+                    .on_press(Message::CopyToClipboard(m.body.clone()))
+                    .padding([2, 6]);
+
                 // For /me messages the sender label is embedded in the action text
                 let bubble = if is_me_action(&m.body) {
                     column![body_widget].spacing(2).padding([6, 10])
                 } else {
-                    column![text(sender).size(11), body_widget]
-                        .spacing(2)
-                        .padding([6, 10])
+                    column![
+                        row![text(sender).size(11), copy_btn].spacing(8).align_y(Alignment::Center),
+                        body_widget
+                    ]
+                    .spacing(2)
+                    .padding([6, 10])
                 };
 
                 let align = if m.own {
