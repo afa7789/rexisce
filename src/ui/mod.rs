@@ -8,6 +8,7 @@ mod login;
 pub mod benchmark;
 pub mod chat;
 pub mod conversation;
+pub mod muc_panel;
 pub mod sidebar;
 pub mod styling;
 
