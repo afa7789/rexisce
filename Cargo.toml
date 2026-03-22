@@ -42,6 +42,7 @@ keyring = "3"
 # i18n
 fluent = "0.16"
 fluent-bundle = "0.15"
+unic-langid = "0.9"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

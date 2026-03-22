@@ -1,4 +1,5 @@
 mod config;
+pub mod i18n;
 mod store;
 mod ui;
 mod xmpp;
