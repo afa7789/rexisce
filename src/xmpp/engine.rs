@@ -31,6 +31,9 @@ use super::{
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
 };
 
+const NS_CARBONS: &str = "urn:xmpp:carbons:2";
+const NS_FORWARD: &str = "urn:xmpp:forward:0";
+
 // ---------------------------------------------------------------------------
 // Connection state machine  (P1.9)
 // ---------------------------------------------------------------------------
@@ -127,6 +130,8 @@ async fn run_session(
     let mut sm = StreamMgmt::new();
     // C4: XEP-0191 blocking command manager
     let mut blocking_mgr = BlockingManager::new();
+    // own JID (set on Online, used for carbon detection)
+    let mut own_jid_str = String::new();
 
     loop {
         // Drain outbox before blocking on the next event.
@@ -158,7 +163,7 @@ async fn run_session(
                     }
                     Some(ev) => {
 
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr).await;
+                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str).await;
                     }
                 }
             }
@@ -218,10 +223,12 @@ async fn handle_client_event(
     reconnect_attempt: &mut u32,
     sm: &mut StreamMgmt,
     blocking_mgr: &mut BlockingManager,
+    own_jid_str: &mut String,
 ) {
     match ev {
         tokio_xmpp::Event::Online { bound_jid, .. } => {
             *reconnect_attempt = 0;
+            *own_jid_str = bound_jid.to_string();
             tracing::info!("engine: online as {bound_jid}");
 
             // Request roster (P1.4).
@@ -266,7 +273,7 @@ async fn handle_client_event(
             if let Some(ack) = sm.maybe_send_ack() {
                 outbox.push_back(ack);
             }
-            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox).await;
+            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox, own_jid_str).await;
         }
     }
 }
@@ -277,6 +284,7 @@ async fn dispatch_stanza(
     blocking_mgr: &mut BlockingManager,
     sm: &mut StreamMgmt,
     outbox: &mut VecDeque<Element>,
+    own_jid_str: &str,
 ) {
     // XEP-0198: handle server <a h='...'> acks
     if el.name() == "a" && el.ns() == "urn:xmpp:sm:3" {
@@ -294,7 +302,28 @@ async fn dispatch_stanza(
     }
     match el.name() {
         "iq" => handle_iq(el, event_tx, blocking_mgr).await,
-        "message" => handle_message(el, event_tx, blocking_mgr).await,
+        "message" => {
+            // XEP-0280: carbon <sent> — own message from another device
+            if let Some(inner) = extract_carbon(&el, "sent") {
+                let body = inner.children().find(|c| c.name() == "body")
+                    .map(|b| b.text())
+                    .unwrap_or_default();
+                if !body.is_empty() {
+                    let _ = event_tx.send(XmppEvent::MessageReceived(IncomingMessage {
+                        id: inner.attr("id").unwrap_or("").to_string(),
+                        from: own_jid_str.to_string(),
+                        body,
+                    })).await;
+                }
+                return;
+            }
+            // XEP-0280: carbon <received> — message received on another device
+            if let Some(inner) = extract_carbon(&el, "received") {
+                handle_message(inner, event_tx, blocking_mgr).await;
+                return;
+            }
+            handle_message(el, event_tx, blocking_mgr).await;
+        }
         "presence" => handle_presence(el, event_tx).await,
         _ => {}
     }
@@ -358,6 +387,22 @@ async fn handle_iq(
             let _ = event_tx.send(XmppEvent::RosterReceived(contacts)).await;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Carbon helper (XEP-0280)
+// ---------------------------------------------------------------------------
+
+/// Extract the inner forwarded `<message>` from a carbon wrapper.
+/// Returns `None` if the element is not a carbon of the given direction.
+fn extract_carbon(el: &Element, direction: &str) -> Option<Element> {
+    let carbon = el.children()
+        .find(|c| c.name() == direction && c.ns() == NS_CARBONS)?;
+    let forwarded = carbon.children()
+        .find(|c| c.name() == "forwarded" && c.ns() == NS_FORWARD)?;
+    forwarded.children()
+        .find(|c| c.name() == "message")
+        .cloned()
 }
 
 // ---------------------------------------------------------------------------
