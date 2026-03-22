@@ -14,6 +14,7 @@ use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
 const NS_MUC: &str = "http://jabber.org/protocol/muc";
+const NS_MUC_ADMIN: &str = "http://jabber.org/protocol/muc#admin";
 const NS_CLIENT: &str = "jabber:client";
 
 // ---------------------------------------------------------------------------
@@ -290,6 +291,101 @@ impl Default for MucManager {
 }
 
 // ---------------------------------------------------------------------------
+// ModerationManager
+// ---------------------------------------------------------------------------
+
+/// XEP-0045 moderation stanza builder.
+///
+/// Stateless — all methods are pure functions that produce IQ stanzas ready
+/// to be sent to the server.  The caller is responsible for writing the
+/// returned `Element` to the XMPP stream.
+pub struct ModerationManager;
+
+impl ModerationManager {
+    /// Build an IQ stanza that sets `role` on an `<item nick='…'>`.
+    fn role_iq(room_jid: &str, nick: &str, role: &str, reason: Option<&str>) -> Element {
+        let mut item = Element::builder("item", NS_MUC_ADMIN)
+            .attr("nick", nick)
+            .attr("role", role);
+
+        if let Some(r) = reason {
+            item = item.append(
+                Element::builder("reason", NS_MUC_ADMIN)
+                    .append(r)
+                    .build(),
+            );
+        }
+
+        let query = Element::builder("query", NS_MUC_ADMIN)
+            .append(item.build())
+            .build();
+
+        Element::builder("iq", NS_CLIENT)
+            .attr("to", room_jid)
+            .attr("type", "set")
+            .attr("id", Uuid::new_v4().to_string())
+            .append(query)
+            .build()
+    }
+
+    /// Build an IQ stanza that sets `affiliation` on an `<item jid='…'>`.
+    fn affiliation_iq(room_jid: &str, jid: &str, affiliation: &str, reason: Option<&str>) -> Element {
+        let mut item = Element::builder("item", NS_MUC_ADMIN)
+            .attr("jid", jid)
+            .attr("affiliation", affiliation);
+
+        if let Some(r) = reason {
+            item = item.append(
+                Element::builder("reason", NS_MUC_ADMIN)
+                    .append(r)
+                    .build(),
+            );
+        }
+
+        let query = Element::builder("query", NS_MUC_ADMIN)
+            .append(item.build())
+            .build();
+
+        Element::builder("iq", NS_CLIENT)
+            .attr("to", room_jid)
+            .attr("type", "set")
+            .attr("id", Uuid::new_v4().to_string())
+            .append(query)
+            .build()
+    }
+
+    /// Kick a user by nick (sets role to `none`).
+    pub fn kick(room_jid: &str, nick: &str, reason: Option<&str>) -> Element {
+        Self::role_iq(room_jid, nick, "none", reason)
+    }
+
+    /// Ban a user by real JID (sets affiliation to `outcast`).
+    pub fn ban(room_jid: &str, jid: &str, reason: Option<&str>) -> Element {
+        Self::affiliation_iq(room_jid, jid, "outcast", reason)
+    }
+
+    /// Mute a user by nick (sets role to `visitor`).
+    pub fn mute(room_jid: &str, nick: &str, reason: Option<&str>) -> Element {
+        Self::role_iq(room_jid, nick, "visitor", reason)
+    }
+
+    /// Unmute a user by nick (sets role to `participant`).
+    pub fn unmute(room_jid: &str, nick: &str, reason: Option<&str>) -> Element {
+        Self::role_iq(room_jid, nick, "participant", reason)
+    }
+
+    /// Grant moderator role to a nick.
+    pub fn grant_moderator(room_jid: &str, nick: &str) -> Element {
+        Self::role_iq(room_jid, nick, "moderator", None)
+    }
+
+    /// Revoke moderator role from a nick (back to participant).
+    pub fn revoke_moderator(room_jid: &str, nick: &str) -> Element {
+        Self::role_iq(room_jid, nick, "participant", None)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
 
@@ -461,5 +557,118 @@ mod tests {
         assert_eq!(msg.from_nick, "bob");
         assert_eq!(msg.body, "Hello, world!");
         assert_eq!(msg.id, "msg-001");
+    }
+
+    // ---------------------------------------------------------------------------
+    // ModerationManager tests
+    // ---------------------------------------------------------------------------
+
+    const NS_MUC_ADMIN: &str = "http://jabber.org/protocol/muc#admin";
+
+    /// Returns the first `<item>` inside `<query xmlns='muc#admin'>`.
+    fn get_admin_item(iq: &Element) -> &Element {
+        let query = iq
+            .children()
+            .find(|c| c.name() == "query" && c.ns() == NS_MUC_ADMIN)
+            .expect("iq must contain <query xmlns='muc#admin'>");
+        query
+            .children()
+            .find(|c| c.name() == "item")
+            .expect("query must contain <item>")
+    }
+
+    // 11. kick_builds_correct_iq
+    #[test]
+    fn kick_builds_correct_iq() {
+        let iq = ModerationManager::kick(ROOM_JID, "mallory", None);
+
+        assert_eq!(iq.name(), "iq");
+        assert_eq!(iq.attr("to"), Some(ROOM_JID));
+        assert_eq!(iq.attr("type"), Some("set"));
+        assert!(iq.attr("id").is_some(), "iq must have an id");
+
+        let item = get_admin_item(&iq);
+        assert_eq!(item.attr("nick"), Some("mallory"));
+        assert_eq!(item.attr("role"), Some("none"));
+    }
+
+    // 12. kick_with_reason_includes_reason_element
+    #[test]
+    fn kick_with_reason_includes_reason_element() {
+        let iq = ModerationManager::kick(ROOM_JID, "mallory", Some("disruptive behaviour"));
+
+        let item = get_admin_item(&iq);
+        let reason_el = item
+            .children()
+            .find(|c| c.name() == "reason")
+            .expect("item must contain <reason>");
+        assert_eq!(reason_el.text(), "disruptive behaviour");
+    }
+
+    // 13. ban_builds_correct_iq
+    #[test]
+    fn ban_builds_correct_iq() {
+        let iq = ModerationManager::ban(ROOM_JID, "troll@example.com", None);
+
+        assert_eq!(iq.name(), "iq");
+        assert_eq!(iq.attr("to"), Some(ROOM_JID));
+        assert_eq!(iq.attr("type"), Some("set"));
+
+        let item = get_admin_item(&iq);
+        assert_eq!(item.attr("jid"), Some("troll@example.com"));
+        assert_eq!(item.attr("affiliation"), Some("outcast"));
+    }
+
+    // 14. ban_with_reason_includes_reason_element
+    #[test]
+    fn ban_with_reason_includes_reason_element() {
+        let iq = ModerationManager::ban(ROOM_JID, "troll@example.com", Some("spamming"));
+
+        let item = get_admin_item(&iq);
+        let reason_el = item
+            .children()
+            .find(|c| c.name() == "reason")
+            .expect("item must contain <reason>");
+        assert_eq!(reason_el.text(), "spamming");
+    }
+
+    // 15. mute_sets_role_visitor
+    #[test]
+    fn mute_sets_role_visitor() {
+        let iq = ModerationManager::mute(ROOM_JID, "chatterbox", None);
+
+        let item = get_admin_item(&iq);
+        assert_eq!(item.attr("nick"), Some("chatterbox"));
+        assert_eq!(item.attr("role"), Some("visitor"));
+    }
+
+    // 16. unmute_sets_role_participant
+    #[test]
+    fn unmute_sets_role_participant() {
+        let iq = ModerationManager::unmute(ROOM_JID, "chatterbox", None);
+
+        let item = get_admin_item(&iq);
+        assert_eq!(item.attr("nick"), Some("chatterbox"));
+        assert_eq!(item.attr("role"), Some("participant"));
+    }
+
+    // 17. grant_moderator_sets_role_moderator
+    #[test]
+    fn grant_moderator_sets_role_moderator() {
+        let iq = ModerationManager::grant_moderator(ROOM_JID, "trusted");
+
+        let item = get_admin_item(&iq);
+        assert_eq!(item.attr("nick"), Some("trusted"));
+        assert_eq!(item.attr("role"), Some("moderator"));
+    }
+
+    // 18. revoke_moderator_sets_role_participant
+    #[test]
+    fn revoke_moderator_sets_role_participant() {
+        let iq = ModerationManager::revoke_moderator(ROOM_JID, "trusted");
+
+        let item = get_admin_item(&iq);
+        assert_eq!(item.attr("nick"), Some("trusted"));
+        assert_eq!(item.attr("role"), Some("participant"));
     }
 }
