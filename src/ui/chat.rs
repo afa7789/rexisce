@@ -98,6 +98,11 @@ impl ChatScreen {
         &self.own_jid
     }
 
+    /// A5: get the JID of the currently active (foreground) conversation.
+    pub fn active_jid(&self) -> Option<&str> {
+        self.active_jid.as_deref()
+    }
+
     /// B6: Get the ID of the last message in a conversation (for mark-read).
     pub fn last_message_id(&self, jid: &str) -> Option<String> {
         self.conversations

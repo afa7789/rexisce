@@ -389,13 +389,29 @@ impl App {
                     }
                     XmppEvent::MessageReceived(ref msg) => {
                         tracing::info!("XMPP: message from {}", msg.from);
+                        let bare_from = msg.from.split('/').next().unwrap_or(&msg.from).to_string();
+                        // A5: desktop notification — only for background conversations (J3: skip muted JIDs)
+                        let is_active = if let Screen::Chat(ref chat) = self.screen {
+                            chat.active_jid() == Some(bare_from.as_str())
+                        } else {
+                            false
+                        };
+                        // A5: fire desktop notification for background conversations (J3: skip muted)
+                        let notif_task: Task<Message> = if self.settings.notifications_enabled
+                            && !is_active
+                            && !self.settings.muted_jids.contains(&bare_from)
+                        {
+                            let notif_from = bare_from.clone();
+                            let notif_body: String = msg.body.chars().take(100).collect();
+                            Task::future(async move {
+                                let _ = crate::notifications::notify_message(&notif_from, &notif_body);
+                                Message::GoToBenchmark
+                            })
+                        } else {
+                            Task::none()
+                        };
                         if let Screen::Chat(ref mut chat) = self.screen {
                             chat.on_message_received(msg.clone());
-                        }
-                        // A5: desktop notification (J3: skip muted JIDs)
-                        let bare_from = msg.from.split('/').next().unwrap_or(&msg.from).to_string();
-                        if self.settings.notifications_enabled && !self.settings.muted_jids.contains(&bare_from) {
-                            let _ = crate::notifications::notify_message(&bare_from, &msg.body);
                         }
                         // A2: persist message + conversation to DB
                         let pool = self.db.clone();
@@ -404,7 +420,7 @@ impl App {
                         let msg_id = msg.id.clone();
                         let body = msg.body.clone();
                         let ts = chrono::Utc::now().timestamp_millis();
-                        return Task::future(async move {
+                        let db_task = Task::future(async move {
                             let _ = crate::store::conversation_repo::upsert(&pool, &bare_jid).await;
                             let _ = crate::store::message_repo::insert(
                                 &pool,
@@ -425,6 +441,7 @@ impl App {
                             Message::GoToBenchmark
                         })
                         .discard();
+                        return Task::batch([notif_task, db_task]);
                     }
                     XmppEvent::PresenceUpdated { ref jid, available } => {
                         tracing::debug!("XMPP: presence {jid} available={available}");
