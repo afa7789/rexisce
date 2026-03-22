@@ -28,6 +28,7 @@ use super::{
 
     modules::stream_mgmt::StreamMgmt,
     modules::blocking::BlockingManager,
+    modules::avatar::AvatarManager,
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
 };
 
@@ -127,6 +128,8 @@ async fn run_session(
     let mut sm = StreamMgmt::new();
     // C4: XEP-0191 blocking command manager
     let mut blocking_mgr = BlockingManager::new();
+    // H1: avatar manager (vCard-temp fallback)
+    let mut avatar_mgr = AvatarManager::new();
 
     loop {
         // Drain outbox before blocking on the next event.
@@ -158,7 +161,7 @@ async fn run_session(
                     }
                     Some(ev) => {
 
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr).await;
+                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut avatar_mgr).await;
                     }
                 }
             }
@@ -195,6 +198,11 @@ async fn run_session(
                         outbox.push_back(make_roster_set(&jid));
                         tracing::info!("roster: sent add-contact IQ for {jid}");
                     }
+                    Some(XmppCommand::FetchAvatar(jid)) => {
+                        let (_, iq) = avatar_mgr.build_vcard_request(&jid);
+                        outbox.push_back(iq);
+                        tracing::debug!("avatar: fetching vCard for {jid}");
+                    }
                 }
             }
         }
@@ -218,6 +226,7 @@ async fn handle_client_event(
     reconnect_attempt: &mut u32,
     sm: &mut StreamMgmt,
     blocking_mgr: &mut BlockingManager,
+    avatar_mgr: &mut AvatarManager,
 ) {
     match ev {
         tokio_xmpp::Event::Online { bound_jid, .. } => {
@@ -266,7 +275,7 @@ async fn handle_client_event(
             if let Some(ack) = sm.maybe_send_ack() {
                 outbox.push_back(ack);
             }
-            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox).await;
+            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox, avatar_mgr).await;
         }
     }
 }
@@ -277,6 +286,7 @@ async fn dispatch_stanza(
     blocking_mgr: &mut BlockingManager,
     sm: &mut StreamMgmt,
     outbox: &mut VecDeque<Element>,
+    avatar_mgr: &mut AvatarManager,
 ) {
     // XEP-0198: handle server <a h='...'> acks
     if el.name() == "a" && el.ns() == "urn:xmpp:sm:3" {
@@ -293,7 +303,7 @@ async fn dispatch_stanza(
         return;
     }
     match el.name() {
-        "iq" => handle_iq(el, event_tx, blocking_mgr).await,
+        "iq" => handle_iq(el, event_tx, blocking_mgr, avatar_mgr).await,
         "message" => handle_message(el, event_tx, blocking_mgr).await,
         "presence" => handle_presence(el, event_tx).await,
         _ => {}
@@ -308,7 +318,18 @@ async fn handle_iq(
     el: Element,
     event_tx: &mpsc::Sender<XmppEvent>,
     blocking_mgr: &mut BlockingManager,
+    avatar_mgr: &mut AvatarManager,
 ) {
+    // H1: detect vCard result and extract PHOTO/BINVAL
+    if let Some(avatar_info) = avatar_mgr.on_vcard_result(&el) {
+        if !avatar_info.data.is_empty() {
+            let _ = event_tx.send(XmppEvent::AvatarReceived {
+                jid: avatar_info.jid,
+                png_bytes: avatar_info.data,
+            }).await;
+        }
+        return;
+    }
     // C4: blocklist result (initial fetch)
     if el.attr("type") == Some("result") {
         let has_blocklist = el

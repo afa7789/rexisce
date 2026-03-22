@@ -1,6 +1,7 @@
 // Task P2: UI Foundation
 // Reference: https://github.com/squidowl/halloy (iced IRC client)
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use iced::{Element, Subscription, Task};
@@ -38,6 +39,8 @@ pub struct App {
     // F4: reconnect state
     reconnect_attempt: u32,
     last_connect_cfg: Option<crate::xmpp::ConnectConfig>,
+    // H1: avatar cache (jid → png bytes)
+    avatar_cache: HashMap<String, Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +89,7 @@ impl App {
                 next_toast_id: 0,
                 reconnect_attempt: 0,
                 last_connect_cfg: None,
+                avatar_cache: HashMap::new(),
             },
             Task::none(),
         )
@@ -433,6 +437,10 @@ impl App {
                         if let Screen::Chat(ref mut chat) = self.screen {
                             let _ = chat.update(chat::Message::PeerTyping(jid.clone(), composing));
                         }
+                    }
+                    XmppEvent::AvatarReceived { ref jid, ref png_bytes } => {
+                        tracing::debug!("H1: avatar received for {jid} ({} bytes)", png_bytes.len());
+                        self.avatar_cache.insert(jid.clone(), png_bytes.clone());
                     }
                     XmppEvent::CatchupFinished {
                         ref conversation_jid,

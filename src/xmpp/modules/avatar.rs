@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // Task P5.2 — XEP-0084 User Avatar + vCard-temp (XEP-0054) avatar support
 // XEP references:
 //   https://xmpp.org/extensions/xep-0084.html

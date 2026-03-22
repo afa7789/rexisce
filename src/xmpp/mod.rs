@@ -73,6 +73,12 @@ pub enum XmppEvent {
         jid: String,
         composing: bool,
     },
+
+    // H1: Avatar received from vCard (XEP-0153)
+    AvatarReceived {
+        jid: String,
+        png_bytes: Vec<u8>,
+    },
 }
 
 /// Commands sent from the UI to the XMPP engine.
@@ -89,6 +95,8 @@ pub enum XmppCommand {
     /// Gracefully close the current session.
     #[allow(dead_code)]
     Disconnect,
+    /// H1: Fetch avatar for a JID (vCard-temp fallback).
+    FetchAvatar(String),
     /// Block one or more JIDs (XEP-0191).
     BlockJid(String),
     /// Unblock a previously blocked JID (XEP-0191).
