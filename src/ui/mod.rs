@@ -406,10 +406,27 @@ impl App {
                             }
                         }
                         self.screen = Screen::Chat(Box::new(ChatScreen::new(bound_jid.clone())));
-                        return self.update(Message::ShowToast(
+                        // A3: pre-populate sidebar from cached DB roster before server responds
+                        let pool = self.db.clone();
+                        let roster_prefill = Task::future(async move {
+                            let contacts = crate::store::roster_repo::get_all(&pool)
+                                .await
+                                .unwrap_or_default();
+                            let xmpp_contacts: Vec<crate::xmpp::RosterContact> = contacts
+                                .into_iter()
+                                .map(|c| crate::xmpp::RosterContact {
+                                    jid: c.jid,
+                                    name: c.name,
+                                    subscription: c.subscription,
+                                })
+                                .collect();
+                            Message::XmppEvent(XmppEvent::RosterReceived(xmpp_contacts))
+                        });
+                        let toast = self.update(Message::ShowToast(
                             format!("Connected as {}", bound_jid),
                             ToastKind::Success,
                         ));
+                        return Task::batch([roster_prefill, toast]);
                     }
                     XmppEvent::Disconnected { ref reason } => {
                         tracing::warn!("XMPP: disconnected — {reason}");
