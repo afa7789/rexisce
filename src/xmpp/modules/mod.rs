@@ -20,11 +20,9 @@ pub mod sync;          // Task P4.4 — background sync orchestrator (MAM catchu
 // pub mod conversation_sync; // Task P6.4 — XEP-0223 conversation sync
 
 // Phase 5 (Rich features)
-pub mod file_upload;   // Task P5.1 — XEP-0363 file upload
-pub mod avatar;        // Task P5.2 — XEP-0084 / vCard avatars
-// pub mod reactions;     // Task P5.3 — XEP-0444 reactions
-// pub mod corrections;   // Task P5.3 — XEP-0308 last message correction
-// pub mod retractions;   // Task P5.3 — XEP-0424 message retraction
+pub mod file_upload;        // Task P5.1 — XEP-0363 file upload
+pub mod avatar;             // Task P5.2 — XEP-0084 / vCard avatars
+pub mod message_mutations;  // Task P5.3 — XEP-0444 reactions, XEP-0308 corrections, XEP-0424 retractions
 
 // Phase 6 (XEP parity)
 // pub mod caps;          // Task P6.1 — XEP-0115 entity capabilities
