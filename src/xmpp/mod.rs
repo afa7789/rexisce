@@ -85,6 +85,13 @@ pub enum XmppEvent {
         jid: String,
         png_bytes: Vec<u8>,
     },
+
+    // E3: Emoji reaction received (XEP-0444)
+    ReactionReceived {
+        msg_id: String,
+        from: String,
+        emojis: Vec<String>,
+    },
 }
 
 /// Commands sent from the UI to the XMPP engine.
@@ -109,4 +116,6 @@ pub enum XmppCommand {
     BlockJid(String),
     /// Unblock a previously blocked JID (XEP-0191).
     UnblockJid(String),
+    /// E3: Send an emoji reaction (XEP-0444).
+    SendReaction { to: String, msg_id: String, emojis: Vec<String> },
 }

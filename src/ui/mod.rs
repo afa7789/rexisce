@@ -470,6 +470,12 @@ impl App {
                     XmppEvent::UploadSlotReceived { ref put_url, ref get_url, .. } => {
                         tracing::info!("E4: upload slot received put={put_url} get={get_url}");
                     }
+                    XmppEvent::ReactionReceived { ref msg_id, ref from, ref emojis } => {
+                        tracing::debug!("E3: reaction from {from} on {msg_id}: {:?}", emojis);
+                        if let Screen::Chat(ref mut chat) = self.screen {
+                            chat.on_reaction_received(msg_id.clone(), from.clone(), emojis.clone());
+                        }
+                    }
                 }
                 Task::none()
             }

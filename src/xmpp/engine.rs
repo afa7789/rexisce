@@ -235,6 +235,27 @@ async fn run_session(
                         outbox.push_back(iq);
                         tracing::debug!("avatar: fetching vCard for {jid}");
                     }
+                    Some(XmppCommand::SendReaction { to, msg_id, emojis }) => {
+                        // E3: Build XEP-0444 reaction stanza
+                        if let Ok(to_jid) = to.parse::<Jid>() {
+                            let mut msg_el = Element::builder("message", "jabber:client")
+                                .attr("to", to_jid.to_string())
+                                .attr("type", "chat")
+                                .build();
+                            let mut reactions_el = Element::builder("reactions", "urn:xmpp:reactions:0")
+                                .attr("id", &msg_id)
+                                .build();
+                            for emoji in &emojis {
+                                let reaction_el = Element::builder("reaction", "urn:xmpp:reactions:0")
+                                    .append(emoji.as_str())
+                                    .build();
+                                reactions_el.append_child(reaction_el);
+                            }
+                            msg_el.append_child(reactions_el);
+                            outbox.push_back(msg_el);
+                            tracing::debug!("reactions: sent {} reaction(s) to {to_jid}", emojis.len());
+                        }
+                    }
                 }
             }
         }
@@ -532,11 +553,36 @@ fn extract_carbon(el: &Element, direction: &str) -> Option<Element> {
 // Message handler (P1.5)
 // ---------------------------------------------------------------------------
 
+const NS_REACTIONS: &str = "urn:xmpp:reactions:0";
+
 async fn handle_message(
     el: Element,
     event_tx: &mpsc::Sender<XmppEvent>,
     blocking_mgr: &BlockingManager,
 ) {
+    // E3: detect XEP-0444 reaction stanza before consuming el
+    if let Some(reactions_el) = el.children().find(|c| c.name() == "reactions" && c.ns() == NS_REACTIONS) {
+        if let Some(msg_id) = reactions_el.attr("id") {
+            let from = el.attr("from").unwrap_or("").to_string();
+            let bare_from = from.split('/').next().unwrap_or(&from).to_string();
+            if !blocking_mgr.is_blocked(&bare_from) {
+                let emojis: Vec<String> = reactions_el
+                    .children()
+                    .filter(|c| c.name() == "reaction" && c.ns() == NS_REACTIONS)
+                    .map(|c| c.text())
+                    .collect();
+                let _ = event_tx
+                    .send(XmppEvent::ReactionReceived {
+                        msg_id: msg_id.to_string(),
+                        from: bare_from,
+                        emojis,
+                    })
+                    .await;
+            }
+        }
+        return;
+    }
+
     // G2: detect XEP-0085 chat state notifications from the raw element
     // before consuming el into XmppMessage (which may drop unknown children)
     let has_composing = el.children().any(|c| c.name() == "composing" && c.ns() == "jabber:x:chatstates");
