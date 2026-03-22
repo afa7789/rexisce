@@ -83,6 +83,20 @@ impl ChatScreen {
         self.sidebar.on_presence(jid, available);
     }
 
+    /// E3: update the reactions map for a given conversation.
+    pub fn on_reaction_received(&mut self, msg_id: String, from: String, emojis: Vec<String>) {
+        // Find which conversation contains this msg_id
+        for convo in self.conversations.values_mut() {
+            if convo.messages().iter().any(|m| m.id == msg_id) {
+                convo.reactions
+                    .entry(msg_id)
+                    .or_default()
+                    .insert(from, emojis);
+                return;
+            }
+        }
+    }
+
     /// Drain pending outgoing engine commands; called by App::update.
     pub fn drain_commands(&mut self) -> Vec<XmppCommand> {
         std::mem::take(&mut self.pending_commands)
@@ -210,6 +224,16 @@ impl ChatScreen {
                     self.pending_commands.push(XmppCommand::SendChatState {
                         to: jid.clone(),
                         composing: false,
+                    });
+                    return Task::none();
+                }
+
+                // E3: intercept SendReaction to queue a reaction command for the engine.
+                if let super::conversation::Message::SendReaction(ref msg_id, ref emoji) = cmsg {
+                    self.pending_commands.push(crate::xmpp::XmppCommand::SendReaction {
+                        to: jid.clone(),
+                        msg_id: msg_id.clone(),
+                        emojis: vec![emoji.clone()],
                     });
                     return Task::none();
                 }

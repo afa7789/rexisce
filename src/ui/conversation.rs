@@ -66,6 +66,8 @@ pub struct ConversationView {
     search_query: String,
     /// M3: emoji picker state
     emoji_picker_open: bool,
+    /// E3: emoji reactions — msg_id → (jid → emojis)
+    pub reactions: std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +89,7 @@ pub enum Message {
     SearchQueryChanged(String), // G9: search input changed
     EmojiPickerToggled,      // M3: toggle emoji picker
     EmojiSelected(String),   // M3: insert emoji into composer
+    SendReaction(String, String), // E3: (msg_id, emoji)
 }
 
 impl ConversationView {
@@ -105,6 +108,7 @@ impl ConversationView {
             search_open: false,
             search_query: String::new(),
             emoji_picker_open: false,
+            reactions: std::collections::HashMap::new(),
         }
     }
 
@@ -190,6 +194,7 @@ impl ConversationView {
                 self.emoji_picker_open = false;
                 Task::none()
             }
+            Message::SendReaction(_, _) => Task::none(), // bubbled to ChatScreen
         }
     }
 
@@ -276,6 +281,15 @@ impl ConversationView {
                 "Reply",
                 tooltip::Position::Top,
             );
+            // E3: quick-react button (👍)
+            let react_msg_id = m.id.clone();
+            let react_btn = tooltip(
+                button(text("👍").size(10))
+                    .on_press(Message::SendReaction(react_msg_id, "👍".to_string()))
+                    .padding([2, 4]),
+                "React",
+                tooltip::Position::Top,
+            );
 
             let align = if m.own { Alignment::End } else { Alignment::Start };
 
@@ -307,7 +321,7 @@ impl ConversationView {
 
                 let text_col = if show_sender {
                     let mut col = column![
-                        row![text(sender.clone()).size(11), copy_btn, reply_btn]
+                        row![text(sender.clone()).size(11), copy_btn, reply_btn, react_btn]
                             .spacing(8)
                             .align_y(Alignment::Center),
                     ]
@@ -343,7 +357,7 @@ impl ConversationView {
                 };
                 let text_col = if show_sender {
                     column![
-                        row![text(sender.clone()).size(11), copy_btn, reply_btn]
+                        row![text(sender.clone()).size(11), copy_btn, reply_btn, react_btn]
                             .spacing(8)
                             .align_y(Alignment::Center),
                         body_widget,
@@ -361,6 +375,35 @@ impl ConversationView {
             };
 
             rows.push(row_elem);
+
+            // E3: render reaction pills below the message bubble
+            if let Some(by_jid) = self.reactions.get(&m.id) {
+                // Group emojis across all JIDs and count
+                let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+                for emojis in by_jid.values() {
+                    for e in emojis {
+                        *counts.entry(e.as_str()).or_insert(0) += 1;
+                    }
+                }
+                if !counts.is_empty() {
+                    let mut pill_row: iced::widget::Row<Message> = row![].spacing(4).padding([0, 8]);
+                    for (emoji, count) in &counts {
+                        let emoji_str = emoji.to_string();
+                        let label = format!("{} {}", emoji_str, count);
+                        pill_row = pill_row.push(
+                            container(text(label).size(12)).padding([2, 6])
+                        );
+                    }
+                    let pill_align = if m.own { Alignment::End } else { Alignment::Start };
+                    rows.push(
+                        container(pill_row)
+                            .width(Length::Fill)
+                            .align_x(pill_align)
+                            .into()
+                    );
+                }
+            }
+
             prev_sender = Some(sender);
             prev_ts = Some(m.timestamp);
         }

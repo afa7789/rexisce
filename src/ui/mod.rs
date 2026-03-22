@@ -546,6 +546,12 @@ impl App {
                             self.console_entries.remove(0);
                         }
                     }
+                    XmppEvent::ReactionReceived { ref msg_id, ref from, ref emojis } => {
+                        tracing::debug!("E3: reaction from {from} on {msg_id}: {:?}", emojis);
+                        if let Screen::Chat(ref mut chat) = self.screen {
+                            chat.on_reaction_received(msg_id.clone(), from.clone(), emojis.clone());
+                        }
+                    }
                 }
                 Task::none()
             }
