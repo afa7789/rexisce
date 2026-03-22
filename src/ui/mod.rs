@@ -34,6 +34,9 @@ pub struct App {
     // J1: toast notifications
     toasts: Vec<Toast>,
     next_toast_id: u64,
+    // F4: reconnect state
+    reconnect_attempt: u32,
+    last_connect_cfg: Option<crate::xmpp::ConnectConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +76,8 @@ impl App {
                 db,
                 toasts: vec![],
                 next_toast_id: 0,
+                reconnect_attempt: 0,
+                last_connect_cfg: None,
             },
             Task::none(),
         )
@@ -126,6 +131,8 @@ impl App {
                             self.settings.last_jid = cfg.jid.clone();
                             self.settings.last_server = cfg.server.clone();
                             let _ = config::save(&self.settings);
+                            self.last_connect_cfg = Some(cfg.clone());
+                            self.reconnect_attempt = 0;
                             return Task::future(async move {
                                 let _ = tx.send(XmppCommand::Connect(cfg)).await;
                                 Message::Login(login::Message::Connecting)
@@ -219,6 +226,15 @@ impl App {
                     }
                     XmppEvent::Reconnecting { attempt } => {
                         tracing::info!("XMPP: reconnecting (attempt {attempt})");
+                        self.reconnect_attempt = attempt;
+                        let delay_secs = 2u64.pow(attempt.min(6));
+                        if let (Some(cfg), Some(tx)) = (self.last_connect_cfg.clone(), self.xmpp_tx.clone()) {
+                            return Task::future(async move {
+                                tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+                                let _ = tx.send(XmppCommand::Connect(cfg)).await;
+                                Message::XmppEvent(XmppEvent::Reconnecting { attempt: 0 })
+                            }).discard();
+                        }
                     }
                     XmppEvent::RosterReceived(ref contacts) => {
                         tracing::info!("XMPP: roster ({} contacts)", contacts.len());
