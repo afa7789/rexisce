@@ -12,6 +12,8 @@ use iced::{
     Alignment, Color, Element, Font, Length, Task,
 };
 
+use chrono::{TimeZone, Utc};
+
 use crate::ui::styling::{self, SpanStyle};
 
 /// A single message shown in the conversation view.
@@ -22,6 +24,7 @@ pub struct DisplayMessage {
     pub from: String,
     pub body: String,
     pub own: bool, // true if sent by this account
+    pub timestamp: i64, // unix milliseconds (G5)
 }
 
 #[derive(Debug, Clone)]
@@ -94,34 +97,70 @@ impl ConversationView {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        // ---- Message list ----
-        let messages: Vec<Element<Message>> = self
-            .messages
-            .iter()
-            .map(|m| {
-                let sender = if m.own {
-                    "You".to_string()
-                } else {
-                    m.from.split('/').next().unwrap_or(&m.from).to_string()
-                };
+        // ---- Message list (G5: grouping + date separators) ----
+        let mut rows: Vec<Element<Message>> = Vec::new();
+        let mut prev_date: Option<chrono::NaiveDate> = None;
+        let mut prev_sender: Option<String> = None;
+        let mut prev_ts: Option<i64> = None;
 
-                let styled_spans = styling::parse(&m.body);
-                let body_widget = build_styled_text(&styled_spans);
-                let bubble = column![text(sender).size(11), body_widget]
+        for m in &self.messages {
+            let sender = if m.own {
+                "You".to_string()
+            } else {
+                m.from.split('/').next().unwrap_or(&m.from).to_string()
+            };
+
+            // Date separator when the calendar date changes
+            let msg_date = Utc
+                .timestamp_millis_opt(m.timestamp)
+                .single()
+                .map(|dt| dt.date_naive());
+
+            if let Some(date) = msg_date {
+                let show_sep = prev_date.map_or(true, |pd| pd != date);
+                if show_sep {
+                    let label = date.format("%b %-d").to_string();
+                    let sep = container(
+                        text(format!("── {} ──", label)).size(11),
+                    )
+                    .width(Length::Fill)
+                    .align_x(Alignment::Center)
+                    .padding([4, 0]);
+                    rows.push(sep.into());
+                    prev_date = Some(date);
+                }
+            }
+
+            // Suppress sender label when consecutive from same sender within 120s
+            let same_sender = prev_sender.as_deref() == Some(sender.as_str());
+            let within_120s = prev_ts.map_or(false, |pt| {
+                (m.timestamp - pt).abs() < 120_000
+            });
+            let show_sender = !(same_sender && within_120s);
+
+            let styled_spans = styling::parse(&m.body);
+            let body_widget = build_styled_text(&styled_spans);
+
+            let bubble = if show_sender {
+                column![text(sender.clone()).size(11), body_widget]
                     .spacing(2)
-                    .padding([6, 10]);
+                    .padding([6, 10])
+            } else {
+                column![body_widget].spacing(2).padding([2, 10])
+            };
 
-                let align = if m.own {
-                    Alignment::End
-                } else {
-                    Alignment::Start
-                };
+            let align = if m.own {
+                Alignment::End
+            } else {
+                Alignment::Start
+            };
 
-                container(bubble).width(Length::Fill).align_x(align).into()
-            })
-            .collect();
+            rows.push(container(bubble).width(Length::Fill).align_x(align).into());
+            prev_sender = Some(sender);
+            prev_ts = Some(m.timestamp);
+        }
 
-        let list_col = messages
+        let list_col = rows
             .into_iter()
             .fold(column![].spacing(4).padding(8), iced::widget::Column::push);
 
@@ -226,6 +265,7 @@ mod tests {
             from: "alice@example.com".into(),
             body: "Hello".into(),
             own: false,
+            timestamp: 0,
         });
         assert_eq!(cv.messages().len(), 1);
     }
