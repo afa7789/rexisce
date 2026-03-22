@@ -84,6 +84,8 @@ pub enum XmppCommand {
     SendMessage { to: String, body: String },
     /// G2: Send a chat state notification (XEP-0085).
     SendChatState { to: String, composing: bool },
+    /// H3: Add a contact to the roster.
+    AddContact(String),
     /// Gracefully close the current session.
     #[allow(dead_code)]
     Disconnect,

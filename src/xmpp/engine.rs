@@ -191,6 +191,10 @@ async fn run_session(
                             outbox.push_back(make_chat_state_message(to_jid, composing));
                         }
                     }
+                    Some(XmppCommand::AddContact(jid)) => {
+                        outbox.push_back(make_roster_set(&jid));
+                        tracing::info!("roster: sent add-contact IQ for {jid}");
+                    }
                 }
             }
         }
