@@ -286,7 +286,7 @@ impl ChatScreen {
                             text(format!("{} is typing…", jid)).size(11)
                         )
                         .padding([2, 8]);
-                        column![conv_view, indicator].into()
+                        column![conv_view, indicator].height(iced::Length::Fill).into()
                     } else {
                         conv_view
                     }

@@ -530,7 +530,7 @@ impl ConversationView {
         if let Some(panel) = emoji_panel {
             col = col.push(panel);
         }
-        col.push(composer_row).into()
+        col.push(composer_row).height(Length::Fill).into()
     }
 }
 
