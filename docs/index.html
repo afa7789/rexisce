@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xmpp-start</title>
+  <style>
+    body { font-family: Georgia, serif; max-width: 640px; margin: 60px auto; padding: 0 20px; line-height: 1.6; color: #222; }
+    h1 { font-size: 1.6rem; border-bottom: 1px solid #ccc; padding-bottom: 8px; }
+    h2 { font-size: 1.1rem; margin-top: 2em; }
+    code, pre { font-family: monospace; background: #f4f4f4; border-radius: 3px; }
+    code { padding: 2px 5px; font-size: 0.9em; }
+    pre { padding: 12px; overflow-x: auto; }
+    a { color: #0066cc; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+    th { background: #f9f9f9; }
+    .tag { display: inline-block; background: #eee; border-radius: 3px; padding: 1px 6px; font-size: 0.8em; margin: 2px; }
+  </style>
+</head>
+<body>
+
+<h1>xmpp-start</h1>
+<p>Native XMPP desktop messenger written in Rust using <a href="https://github.com/iced-rs/iced">iced</a>.</p>
+<p>Built with vibecoding, taking reference from open-source XMPP clients like <a href="https://github.com/squidowl/halloy">Halloy</a>, <a href="https://dino.im">Dino</a>, and <a href="https://gajim.org">Gajim</a>.</p>
+
+<h2>Download</h2>
+<p>Pre-built binaries are attached to each <a href="https://github.com/owner/xmpp-start/releases">GitHub release</a>.</p>
+<table>
+  <tr><th>Platform</th><th>File</th></tr>
+  <tr><td>Linux (x86_64)</td><td><code>xmpp-start-linux-x86_64</code></td></tr>
+  <tr><td>macOS (Intel)</td><td><code>xmpp-start-macos-x86_64</code></td></tr>
+  <tr><td>macOS (Apple Silicon)</td><td><code>xmpp-start-macos-aarch64</code></td></tr>
+  <tr><td>Windows</td><td><code>xmpp-start-windows-x86_64.exe</code></td></tr>
+</table>
+
+<h2>Build from source</h2>
+<p>Requires <a href="https://rustup.rs">Rust 1.80+</a>.</p>
+<pre>git clone https://github.com/owner/xmpp-start
+cd xmpp-start
+make build        # release binary in target/release/
+make run          # debug build + run</pre>
+
+<h2>Supported XEPs</h2>
+<p>
+  <span class="tag">XEP-0045 MUC</span>
+  <span class="tag">XEP-0048 Bookmarks</span>
+  <span class="tag">XEP-0050 Ad-Hoc Commands</span>
+  <span class="tag">XEP-0084 Avatars</span>
+  <span class="tag">XEP-0115 Entity Caps</span>
+  <span class="tag">XEP-0191 Blocking</span>
+  <span class="tag">XEP-0198 Stream Management</span>
+  <span class="tag">XEP-0202 Entity Time</span>
+  <span class="tag">XEP-0280 Carbons</span>
+  <span class="tag">XEP-0308 Corrections</span>
+  <span class="tag">XEP-0313 MAM</span>
+  <span class="tag">XEP-0357 Push</span>
+  <span class="tag">XEP-0363 HTTP Upload</span>
+  <span class="tag">XEP-0393 Message Styling</span>
+  <span class="tag">XEP-0424 Retractions</span>
+  <span class="tag">XEP-0444 Reactions</span>
+</p>
+
+<h2>License</h2>
+<p>MIT</p>
+
+</body>
+</html>

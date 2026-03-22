@@ -6,6 +6,10 @@ rust-version = "1.80"
 description = "Native XMPP desktop messenger — Rust/iced rewrite of fluux-messenger"
 license = "MIT"
 
+[lib]
+name = "xmpp_start"
+path = "src/lib.rs"
+
 [[bin]]
 name = "xmpp-start"
 path = "src/main.rs"
