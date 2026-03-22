@@ -47,6 +47,8 @@ pub struct ConversationView {
     scroll_offset: AbsoluteOffset,
     #[allow(dead_code)]
     own_jid: String,
+    /// L1: number of messages seen when conversation was last opened
+    last_seen_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -69,11 +71,17 @@ impl ConversationView {
             scroll_id: Id::new("conversation"),
             scroll_offset: AbsoluteOffset::default(),
             own_jid,
+            last_seen_count: 0,
         }
     }
 
     pub fn push_message(&mut self, msg: DisplayMessage) {
         self.messages.push(msg);
+    }
+
+    /// L1: record how many messages existed when the conversation was opened.
+    pub fn mark_seen(&mut self) {
+        self.last_seen_count = self.messages.len();
     }
 
     pub fn take_draft(&mut self) -> String {
@@ -116,7 +124,15 @@ impl ConversationView {
         let mut prev_sender: Option<String> = None;
         let mut prev_ts: Option<i64> = None;
 
-        for m in &self.messages {
+        for (msg_idx, m) in self.messages.iter().enumerate() {
+            // L1: insert "New messages" separator before the first unseen message
+            if self.last_seen_count > 0 && msg_idx == self.last_seen_count {
+                let sep = container(text("── New messages ──").size(11))
+                    .width(Length::Fill)
+                    .align_x(Alignment::Center)
+                    .padding([4, 0]);
+                rows.push(sep.into());
+            }
             let sender = if m.own {
                 "You".to_string()
             } else {
