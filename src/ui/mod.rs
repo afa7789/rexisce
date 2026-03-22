@@ -442,6 +442,9 @@ impl App {
                             "XMPP: MAM catchup complete for {conversation_jid} ({fetched} messages)"
                         );
                     }
+                    XmppEvent::UploadSlotReceived { ref put_url, ref get_url, .. } => {
+                        tracing::info!("E4: upload slot received put={put_url} get={get_url}");
+                    }
                 }
                 Task::none()
             }

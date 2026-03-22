@@ -28,6 +28,7 @@ use super::{
 
     modules::stream_mgmt::StreamMgmt,
     modules::blocking::BlockingManager,
+    modules::file_upload::FileUploadManager,
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
 };
 
@@ -127,6 +128,8 @@ async fn run_session(
     let mut sm = StreamMgmt::new();
     // C4: XEP-0191 blocking command manager
     let mut blocking_mgr = BlockingManager::new();
+    // E4: XEP-0363 file upload manager
+    let mut file_upload_mgr = FileUploadManager::new();
 
     loop {
         // Drain outbox before blocking on the next event.
@@ -158,7 +161,7 @@ async fn run_session(
                     }
                     Some(ev) => {
 
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr).await;
+                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut file_upload_mgr).await;
                     }
                 }
             }
@@ -195,6 +198,14 @@ async fn run_session(
                         outbox.push_back(make_roster_set(&jid));
                         tracing::info!("roster: sent add-contact IQ for {jid}");
                     }
+                    Some(XmppCommand::RequestUploadSlot { filename, size, mime }) => {
+                        // E4: request upload slot from server's upload service
+                        // Use a well-known upload service JID pattern; in production, discover via disco.
+                        let upload_jid = "upload.".to_string() + &config.jid.split('@').nth(1).unwrap_or("example.com");
+                        let (_, iq) = file_upload_mgr.request_slot(&filename, size, &mime, &upload_jid);
+                        outbox.push_back(iq);
+                        tracing::info!("file_upload: requested slot for {filename}");
+                    }
                 }
             }
         }
@@ -218,6 +229,7 @@ async fn handle_client_event(
     reconnect_attempt: &mut u32,
     sm: &mut StreamMgmt,
     blocking_mgr: &mut BlockingManager,
+    file_upload_mgr: &mut FileUploadManager,
 ) {
     match ev {
         tokio_xmpp::Event::Online { bound_jid, .. } => {
@@ -266,7 +278,7 @@ async fn handle_client_event(
             if let Some(ack) = sm.maybe_send_ack() {
                 outbox.push_back(ack);
             }
-            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox).await;
+            dispatch_stanza(el, event_tx, blocking_mgr, sm, outbox, file_upload_mgr).await;
         }
     }
 }
@@ -277,6 +289,7 @@ async fn dispatch_stanza(
     blocking_mgr: &mut BlockingManager,
     sm: &mut StreamMgmt,
     outbox: &mut VecDeque<Element>,
+    file_upload_mgr: &mut FileUploadManager,
 ) {
     // XEP-0198: handle server <a h='...'> acks
     if el.name() == "a" && el.ns() == "urn:xmpp:sm:3" {
@@ -293,7 +306,7 @@ async fn dispatch_stanza(
         return;
     }
     match el.name() {
-        "iq" => handle_iq(el, event_tx, blocking_mgr).await,
+        "iq" => handle_iq(el, event_tx, blocking_mgr, file_upload_mgr).await,
         "message" => handle_message(el, event_tx, blocking_mgr).await,
         "presence" => handle_presence(el, event_tx).await,
         _ => {}
@@ -308,7 +321,17 @@ async fn handle_iq(
     el: Element,
     event_tx: &mpsc::Sender<XmppEvent>,
     blocking_mgr: &mut BlockingManager,
+    file_upload_mgr: &mut FileUploadManager,
 ) {
+    // E4: detect upload slot result
+    if let Some(slot) = file_upload_mgr.on_slot_result(&el) {
+        let _ = event_tx.send(XmppEvent::UploadSlotReceived {
+            put_url: slot.put_url,
+            get_url: slot.get_url,
+            headers: slot.put_headers,
+        }).await;
+        return;
+    }
     // C4: blocklist result (initial fetch)
     if el.attr("type") == Some("result") {
         let has_blocklist = el
