@@ -59,6 +59,8 @@ pub enum Message {
     Close,                   // G1: close this conversation
     BlockPeer,               // C4: block the peer JID
     UnblockPeer,             // C4: unblock the peer JID
+    ComposingStarted,        // G2: user started typing
+    ComposingPaused,         // G2: user stopped typing
 }
 
 impl ConversationView {
@@ -95,7 +97,13 @@ impl ConversationView {
     pub fn update(&mut self, msg: Message) -> Task<Message> {
         match msg {
             Message::ComposerChanged(v) => {
+                let was_empty = self.composer.is_empty();
                 self.composer = v;
+                if !self.composer.is_empty() && was_empty {
+                    return Task::done(Message::ComposingStarted);
+                } else if self.composer.is_empty() && !was_empty {
+                    return Task::done(Message::ComposingPaused);
+                }
                 Task::none()
             }
             Message::Send => {
@@ -111,9 +119,11 @@ impl ConversationView {
                 scrollable::scroll_to::<Message>(self.scroll_id.clone(), bottom)
             }
             Message::CopyToClipboard(text) => iced::clipboard::write::<Message>(text),
-            Message::Close => Task::none(),      // handled by ChatScreen
-            Message::BlockPeer => Task::none(),   // handled by ChatScreen → engine
-            Message::UnblockPeer => Task::none(), // handled by ChatScreen → engine
+            Message::Close => Task::none(),              // handled by ChatScreen
+            Message::BlockPeer => Task::none(),          // handled by ChatScreen → engine
+            Message::UnblockPeer => Task::none(),        // handled by ChatScreen → engine
+            Message::ComposingStarted => Task::none(),   // bubbled to ChatScreen
+            Message::ComposingPaused => Task::none(),    // bubbled to ChatScreen
         }
     }
 
