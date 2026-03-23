@@ -19,7 +19,6 @@ use iced::{
 use chrono::{TimeZone, Utc};
 
 use crate::xmpp::modules::link_preview::LinkPreview;
-use ::image::ImageEncoder;
 
 // G4: /me action message prefix (XEP-0245)
 const ME_PREFIX: &str = "/me ";

@@ -38,7 +38,7 @@
 ## Phase E — Rich Features
 - [x] ✅ **E1**: Message corrections (XEP-0308) — (2026-03-22) UI: edit button, edit-mode strip, apply_correction, SendCorrection XmppCommand
 - [x] ✅ **E2**: Message retractions (XEP-0424) — (2026-03-22) UI: retract button, tombstone rendering, apply_retraction, SendRetraction XmppCommand
-- [ ] **E4**: File upload (XEP-0363)
+- [x] ✅ **E4**: File upload UI (XEP-0363) — (2026-03-22) paperclip button, rfd file picker, pending attachments strip with progress, RequestUploadSlot command, HTTP PUT + send get_url on UploadSlotReceived
 
 ## Phase F — Polish
 - [x] ✅ **F3**: Settings panel (font size, timestamps, theme toggle) — already implemented (2026-03-22)
@@ -56,16 +56,16 @@
 - [x] ✅ **G9**: Message search within conversation — (2026-03-22)
 
 ## Phase H — Avatars & Contact Management
-- [ ] **H1**: Show user avatars (XEP-0084 + XEP-0153)
+- [x] ✅ **H1**: Show user avatars (XEP-0084 + XEP-0153) — (2026-03-22) avatar_cache in ChatScreen, on_avatar_received, FetchAvatar on RosterReceived, PNG handle in conversation view with initials fallback
 - [ ] **H2**: Own avatar upload (XEP-0084)
 - [x] ✅ **H3**: Add/remove/rename contacts — (2026-03-22)
 - [x] ✅ **H4**: Contact profile popover (vCard) — (2026-03-22)
 - [x] ✅ **H5**: Consistent avatar colors (XEP-0392) — already implemented (2026-03-22)
 
 ## Phase I — File & Media
-- [ ] **I1**: Paste image from clipboard
-- [ ] **I2**: Drag & drop files onto composer
-- [ ] **I3**: File picker + multiple attachments + upload progress
+- [x] ✅ **I1**: Paste image from clipboard — (2026-03-22) Cmd+V subscription, arboard clipboard read, PNG encode via image crate, staged as temp file attachment
+- [x] ✅ **I2**: Drag & drop files onto composer — (2026-03-22) iced event::listen_with FileDropped, routes to active conversation
+- [x] ✅ **I3**: File picker + multiple attachments + upload progress — (2026-03-22) Attachment struct, rfd AsyncFileDialog, progress bar per attachment, upload slot flow
 - [x] ✅ **I4**: Attachment preview in received messages — (2026-03-22)
 
 ---
@@ -80,3 +80,32 @@
 - [x] ✅ **BUG-1**: MAM historical messages trigger desktop notifications + sounds — added `is_historical: bool` to `IncomingMessage`; set `true` for MAM-sourced messages in engine.rs; skip notifications in ui/mod.rs when `is_historical` (2026-03-22)
 - [x] ✅ **BUG-2**: Finder/permission modals open on connect — fixed by BUG-1 (2026-03-22)
 - [x] ✅ **BUG-3**: MAM `fetched` count fixed — now uses `mam_result.messages.len()` instead of `rsm.count` (2026-03-22)
+
+## Known Bugs (fix before release)
+- [x] ✅ **BUG-1**: Historical MAM messages triggering notifications — fixed (2026-03-22)
+- [x] ✅ **BUG-2**: Finder modals on connect — fixed (2026-03-22, root cause was BUG-1)
+- [x] ✅ **BUG-3**: MAM fetched count was total archive size — fixed (2026-03-22)
+
+## Phase J — High Priority (from gap analysis)
+- [ ] **J5**: OMEMO end-to-end encryption (XEP-0384) — Critical
+- [ ] **J6**: Avatar fetch + display (XEP-0084 + XEP-0153) — wire AvatarManager in engine
+- [ ] **J7**: File upload full UI flow (XEP-0363) — picker + paste + drag-drop + progress
+- [ ] **J8**: Multi-account support — account switcher, per-account state
+- [ ] **J9**: Account registration wizard (XEP-0077)
+- [ ] **J10**: MAM preferences dialog (All/Contacts/None archiving mode)
+
+## Phase K — Medium Priority (from gap analysis)
+- [ ] **K1**: Proxy settings per-account (SOCKS5 + HTTP)
+- [ ] **K2**: vCard editing (XEP-0054 + XEP-0292) — nickname, org, email, avatar
+- [ ] **K3**: Per-contact notification muting (right-click → Mute)
+- [ ] **K4**: Delivery receipts (XEP-0184) — sent/delivered checkmarks
+- [ ] **K5**: Read markers / displayed (XEP-0333) — double checkmark on read
+- [ ] **K6**: Chat preferences panel — join/leave notifications, contact sorting
+- [ ] **K7**: Push notifications (XEP-0357)
+
+## Phase L — Low Priority (from gap analysis)
+- [ ] **L1**: Voice messaging — record and send voice notes
+- [ ] **L2**: Sticker packs support
+- [ ] **L3**: Location sharing (XEP-0080)
+- [ ] **L4**: Ad-hoc commands UI (XEP-0050)
+- [ ] **L5**: Spam reporting

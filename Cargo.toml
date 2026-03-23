@@ -64,6 +64,12 @@ sha1 = { version = "0.10", features = ["oid"] }
 # Desktop notifications
 notify-rust = { version = "4" }
 
+# Native file dialog (E4/I3 file upload)
+rfd = "0.14"
+
+# Clipboard image paste (I1)
+arboard = "3"
+
 # Utilities
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }

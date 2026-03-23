@@ -84,6 +84,10 @@ pub enum Message {
     TogglePalette,
     PaletteQuery(String),
     PaletteExecute(usize),
+    // I2: file(s) dropped onto window
+    FilesDropped(Vec<std::path::PathBuf>),
+    // I1: paste from clipboard triggered
+    PasteFromClipboard,
 }
 
 enum Screen {
@@ -170,6 +174,36 @@ impl App {
                     }
                 }
                 self.palette_query.clear();
+                Task::none()
+            }
+
+            // I2: route dropped files to active conversation
+            Message::FilesDropped(paths) => {
+                if let Screen::Chat(ref mut chat) = self.screen {
+                    if let Some(jid) = chat.active_jid().map(str::to_owned) {
+                        return chat
+                            .update(chat::Message::Conversation(
+                                jid.clone(),
+                                conversation::Message::FilesDropped(paths),
+                            ))
+                            .map(Message::Chat);
+                    }
+                }
+                Task::none()
+            }
+
+            // I1: route clipboard paste to active conversation
+            Message::PasteFromClipboard => {
+                if let Screen::Chat(ref mut chat) = self.screen {
+                    if let Some(jid) = chat.active_jid().map(str::to_owned) {
+                        return chat
+                            .update(chat::Message::Conversation(
+                                jid.clone(),
+                                conversation::Message::PasteFromClipboard,
+                            ))
+                            .map(Message::Chat);
+                    }
+                }
                 Task::none()
             }
 
@@ -965,11 +999,15 @@ impl App {
     pub fn subscription() -> Subscription<Message> {
         let xmpp_sub = xmpp::subscription::xmpp_subscription();
         // F2: keyboard shortcut — Cmd+K / Ctrl+K to toggle palette, Escape to close
+        // I1: Cmd+V / Ctrl+V to paste from clipboard
         let kb_sub = iced::keyboard::on_key_press(|key, modifiers| {
             use iced::keyboard::Key;
             if modifiers.command() {
                 if key == Key::Character("k".into()) {
                     return Some(Message::TogglePalette);
+                }
+                if key == Key::Character("v".into()) {
+                    return Some(Message::PasteFromClipboard);
                 }
             }
             if key == Key::Named(iced::keyboard::key::Named::Escape) {
@@ -977,6 +1015,14 @@ impl App {
             }
             None
         });
-        Subscription::batch([xmpp_sub, kb_sub])
+        // I2: file drop subscription
+        let drop_sub = iced::event::listen_with(|event, _status, _id| {
+            use iced::Event;
+            if let Event::Window(iced::window::Event::FileDropped(path)) = event {
+                return Some(Message::FilesDropped(vec![path]));
+            }
+            None
+        });
+        Subscription::batch([xmpp_sub, kb_sub, drop_sub])
     }
 }
