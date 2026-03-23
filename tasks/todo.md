@@ -20,18 +20,18 @@
 ## Phase B — Storage Layer
 - [x] ✅ **B4**: Load message history on conversation open (50 most recent) — (2026-03-22)
 - [x] ✅ **B5**: Unread badge count in sidebar — (2026-03-22)
-- [ ] **B6**: Mark conversation read, persist last_read_id — depends on A2, B5
+- [x] ✅ **B6** — (2026-03-22)
 
 ## Phase C — XMPP Engine Wiring
-- [ ] **C1**: Wire StreamMgmt into engine loop
-- [ ] **C2**: Wire PresenceMachine into engine
+- [x] ✅ **C1**: Wire StreamMgmt into engine loop (already wired in engine.rs)
+- [x] ✅ **C2**: Wire PresenceMachine into engine + SetPresence command + UI picker (2026-03-22)
 - [ ] **C3**: MAM post-connect history sync (depends on A1, A2)
 - [ ] **C4**: Wire BlockingManager into engine
 - [ ] **C5**: Wire DiscoManager / caps into presence
 
 ## Phase D — UI Panels
 - [ ] **D1**: Render OccupantPanel in MUC conversations
-- [ ] **D2**: XEP-0393 message styling (bold/italic/code in ConversationView)
+- [x] ✅ **D2** — (2026-03-22)
 - [ ] **D3**: MUC join/leave UI flow
 - [ ] **D4**: Bookmarks autojoin on connect
 
@@ -50,7 +50,7 @@
 - [ ] **G2**: Typing indicators (XEP-0085)
 - [ ] **G3**: Message replies (XEP-0461)
 - [ ] **G4**: /me action messages (XEP-0245)
-- [ ] **G5**: Message grouping + date separators
+- [x] ✅ **G5** — (2026-03-22)
 - [ ] **G7**: Copy message to clipboard
 - [ ] **G8**: MAM lazy-load (scroll up for older history)
 - [ ] **G9**: Message search within conversation
