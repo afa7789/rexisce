@@ -24,7 +24,7 @@ pub use chat::ChatScreen;
 pub use login::LoginScreen;
 
 use crate::config::{self, Settings, Theme};
-use crate::xmpp::{self, XmppCommand, XmppEvent};
+use crate::xmpp::{self, modules::presence_machine::PresenceStatus, XmppCommand, XmppEvent};
 use toast::{Toast, ToastKind};
 
 // F2: hardcoded command palette entries
@@ -57,6 +57,8 @@ pub struct App {
     palette_query: String,
     // E4: pending upload (target_jid, file_path) — set when RequestUploadSlot is sent
     pending_upload: Option<(String, std::path::PathBuf)>,
+    // O2: own presence — skip notifications when DND
+    own_presence: PresenceStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +90,10 @@ pub enum Message {
     FilesDropped(Vec<std::path::PathBuf>),
     // I1: paste from clipboard triggered
     PasteFromClipboard,
+    // AUTH-2: logout button — disconnect and return to login screen
+    Logout,
+    // O2: own presence changed (intercepted from Chat::SetPresence)
+    OwnPresenceChanged(PresenceStatus),
 }
 
 enum Screen {
@@ -121,6 +127,7 @@ impl App {
                 show_palette: false,
                 palette_query: String::new(),
                 pending_upload: None,
+                own_presence: PresenceStatus::Available,
             },
             Task::none(),
         )
@@ -347,10 +354,43 @@ impl App {
                 }
             }
 
+            Message::Logout => {
+                // AUTH-2: disconnect, clear keychain if !remember_me, return to login screen
+                if !self.settings.remember_me && !self.settings.last_jid.is_empty() {
+                    config::delete_password(&self.settings.last_jid);
+                }
+                // Reset own presence
+                self.own_presence = PresenceStatus::Available;
+                let login = LoginScreen::with_saved(
+                    self.settings.last_jid.clone(),
+                    String::new(),
+                    self.settings.last_server.clone(),
+                );
+                self.screen = Screen::Login(login);
+                if let Some(ref tx) = self.xmpp_tx {
+                    let tx = tx.clone();
+                    return Task::future(async move {
+                        let _ = tx.send(XmppCommand::Disconnect).await;
+                        Message::GoToBenchmark
+                    })
+                    .discard();
+                }
+                Task::none()
+            }
+
+            Message::OwnPresenceChanged(status) => {
+                self.own_presence = status;
+                Task::none()
+            }
+
             Message::Chat(msg) => {
                 // F3: intercept OpenSettings before delegating
                 if let chat::Message::OpenSettings = msg {
                     return self.update(Message::GoToSettings);
+                }
+                // O2: intercept SetPresence to track own presence for DND notification suppression
+                if let chat::Message::SetPresence(ref status) = msg {
+                    self.own_presence = status.clone();
                 }
                 // J3: intercept ToggleMute to persist muted_jids
                 if let chat::Message::ToggleMute(ref jid) = msg {
@@ -521,7 +561,8 @@ impl App {
                         // H1: fetch avatars for all roster contacts
                         let avatar_task: Task<Message> = if let Some(ref tx) = self.xmpp_tx {
                             let tx = tx.clone();
-                            let jids: Vec<String> = contacts.iter().map(|c| c.jid.clone()).collect();
+                            let jids: Vec<String> =
+                                contacts.iter().map(|c| c.jid.clone()).collect();
                             Task::future(async move {
                                 for jid in jids {
                                     let _ = tx.send(XmppCommand::FetchAvatar(jid)).await;
@@ -672,13 +713,18 @@ impl App {
                                             }
                                             match req.send().await {
                                                 Ok(resp) if resp.status().is_success() => {
-                                                    let _ = tx.send(XmppCommand::SendMessage {
-                                                        to: target_jid,
-                                                        body: get_url,
-                                                    }).await;
+                                                    let _ = tx
+                                                        .send(XmppCommand::SendMessage {
+                                                            to: target_jid,
+                                                            body: get_url,
+                                                        })
+                                                        .await;
                                                 }
                                                 Ok(resp) => {
-                                                    tracing::warn!("E4: PUT failed: {}", resp.status());
+                                                    tracing::warn!(
+                                                        "E4: PUT failed: {}",
+                                                        resp.status()
+                                                    );
                                                 }
                                                 Err(e) => {
                                                     tracing::warn!("E4: PUT error: {e}");
@@ -686,11 +732,15 @@ impl App {
                                             }
                                         }
                                         Err(e) => {
-                                            tracing::warn!("E4: failed to read file {:?}: {e}", file_path);
+                                            tracing::warn!(
+                                                "E4: failed to read file {:?}: {e}",
+                                                file_path
+                                            );
                                         }
                                     }
                                     Message::GoToBenchmark
-                                }).discard();
+                                })
+                                .discard();
                             }
                         }
                     }
@@ -715,7 +765,10 @@ impl App {
                     }
                     // J6: XEP-0084 PubSub avatar — store alongside vCard avatar
                     XmppEvent::AvatarUpdated { ref jid, ref data } => {
-                        tracing::debug!("J6: PubSub avatar updated for {jid} ({} bytes)", data.len());
+                        tracing::debug!(
+                            "J6: PubSub avatar updated for {jid} ({} bytes)",
+                            data.len()
+                        );
                         self.avatar_cache.insert(jid.clone(), data.clone());
                         if let Screen::Chat(ref mut chat) = self.screen {
                             chat.on_avatar_received(jid.clone(), data.clone());
@@ -736,10 +789,7 @@ impl App {
                     XmppEvent::BookmarksReceived(bookmarks) => {
                         tracing::info!("D4: {} bookmark(s) received", bookmarks.len());
                         // D4: autojoin rooms — send JoinRoom for each autojoin bookmark
-                        let autojoin: Vec<_> = bookmarks
-                            .iter()
-                            .filter(|b| b.autojoin)
-                            .collect();
+                        let autojoin: Vec<_> = bookmarks.iter().filter(|b| b.autojoin).collect();
                         if !autojoin.is_empty() {
                             if let Some(ref tx) = self.xmpp_tx {
                                 let tx = tx.clone();
@@ -799,10 +849,7 @@ impl App {
 
         // F4: reconnect banner — shown at top of screen when reconnecting
         if self.reconnect_attempt > 0 {
-            let banner_text = format!(
-                "Reconnecting (attempt {})…",
-                self.reconnect_attempt
-            );
+            let banner_text = format!("Reconnecting (attempt {})…", self.reconnect_attempt);
             let banner = container(text(banner_text).size(12).color(Color::WHITE))
                 .width(Length::Fill)
                 .padding([4, 12])

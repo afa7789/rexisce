@@ -90,3 +90,37 @@ Generated: 2026-03-22 (local source review)
 Critical: K1 (OMEMO), L1 (multi-account), N1+N2 (delivery/read receipts)
 High: L2 (registration), M1-M5 (settings), O1 (push)
 Medium: M6-M7, P1-P2, R1-R3
+
+---
+# Gajim Local Source — Additional Gaps (114 GTK files, 51+ XEP modules)
+Generated: 2026-03-22
+
+## Key new findings not in previous analysis:
+
+### Phase S tasks (see todo.md):
+- S1: Auto-away on idle (AutoAwayPage / AutoExtendedAwayPage in Gajim prefs)
+- S2: Window behavior (show on startup, close behavior, taskbar) — WindowBehaviourGroup
+- S3: Full MUC admin UI — Gajim has 12 groupchat_*.py files (affiliation, bans, config, creation, details, invitation, manage, outcasts, voice requests)
+- S4: File preview settings — max size (256KB-25MB), preview px, public MUC toggle, HTTPS verify
+- S5: Keyboard shortcut manager — shortcut_manager.py, searchable + customizable
+- S6: Per-account privacy panel — send receipts/typing/read markers/idle/OS info per account
+- S7: Password change dialog — account_login.py
+- S8: Full-text search across all conversations — search_view.py (G9 is only per-conversation)
+- S9: Annotations/notes per contact (XEP-0145) — annotations.py
+- S10: XEP-0004 data forms renderer — dataform.py, used by ad-hoc/room-config/registration
+- S11: Roster item exchange (XEP-0144) — roster_item_exchange.py
+- S12: Per-room chat preferences (join/leave, sort, link preview per room)
+- S13: Voice message recorder — voice_message_recorder_widget.py
+
+## Gajim XEP modules not in xmpp-start:
+jingle (voice/video), location (XEP-0080), tune (XEP-0118), bits_of_binary (XEP-0231),
+security_labels (XEP-0258), roster_item_exchange (XEP-0144), gateway (XEP-0100),
+annotations (XEP-0145), moderations (XEP-0425 full), omemo (XEP-0384)
+
+## Gajim GTK dialogs not in xmpp-start:
+account_wizard.py, profile.py, contact_info.py, call_window.py, adhoc.py,
+plugins.py, shortcut_manager.py, search_view.py, workspace_dialog.py,
+certificate_dialog.py, ssl_error_dialog.py, manage_proxies.py, dataform.py,
+groupchat_affiliation.py, groupchat_blocks.py, groupchat_config.py,
+groupchat_creation.py, groupchat_details.py, groupchat_invitation.py,
+groupchat_manage.py, groupchat_outcasts.py

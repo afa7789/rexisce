@@ -35,6 +35,13 @@ pub struct Settings {
     /// J2: Custom presence status message (e.g. "In a meeting").
     #[serde(default)]
     pub status_message: Option<String>,
+    /// AUTH-1: if true, password stays in keychain on logout so next login is instant.
+    #[serde(default = "default_remember_me")]
+    pub remember_me: bool,
+}
+
+fn default_remember_me() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -56,6 +63,7 @@ impl Default for Settings {
             last_server: String::new(),
             muted_jids: std::collections::HashSet::new(),
             status_message: None,
+            remember_me: true,
         }
     }
 }
@@ -163,12 +171,14 @@ mod tests {
             last_server: "xmpp.example.com".into(),
             muted_jids: std::collections::HashSet::new(),
             status_message: None,
+            remember_me: false,
         };
         let json = serde_json::to_string(&s).unwrap();
         let s2: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(s2.last_jid, "user@example.com");
         assert_eq!(s2.theme, Theme::Light);
         assert_eq!(s2.font_size, 16);
+        assert!(!s2.remember_me);
     }
 
     #[test]

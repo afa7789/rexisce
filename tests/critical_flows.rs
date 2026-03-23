@@ -205,6 +205,7 @@ fn settings_json_round_trip() {
         last_server: "xmpp.example.com".into(),
         muted_jids: std::collections::HashSet::new(),
         status_message: Some("In a meeting".into()),
+        remember_me: false,
     };
 
     let json = serde_json::to_string(&original).unwrap();
