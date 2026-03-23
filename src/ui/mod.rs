@@ -59,6 +59,17 @@ pub struct App {
     pending_upload: Option<(String, std::path::PathBuf)>,
     // O2: own presence — skip notifications when DND
     own_presence: PresenceStatus,
+    // S1: idle state tracking
+    last_activity: std::time::Instant,
+    idle_state: IdleState,
+}
+
+/// S1: tracks which auto-away stage has been sent to the engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IdleState {
+    Active,
+    AutoAway,
+    AutoXa,
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +103,8 @@ pub enum Message {
     PasteFromClipboard,
     // AUTH-2: logout button — disconnect and return to login screen
     Logout,
+    // S1: periodic idle timer tick — checked to trigger auto-away
+    IdleTick,
 }
 
 enum Screen {
@@ -126,6 +139,8 @@ impl App {
                 palette_query: String::new(),
                 pending_upload: None,
                 own_presence: PresenceStatus::Available,
+                last_activity: std::time::Instant::now(),
+                idle_state: IdleState::Active,
             },
             Task::none(),
         )
@@ -154,6 +169,53 @@ impl App {
 
             Message::PaletteExecute(i) => {
                 self.show_palette = false;
+                // S1: activity resets idle timer
+                self.last_activity = std::time::Instant::now();
+                if self.idle_state != IdleState::Active {
+                    self.idle_state = IdleState::Active;
+                    if let Some(ref tx) = self.xmpp_tx {
+                        let tx = tx.clone();
+                        return Task::batch([
+                            Task::future(async move {
+                                let _ = tx.send(XmppCommand::UserActive).await;
+                                Message::GoToBenchmark
+                            })
+                            .discard(),
+                            {
+                                let filtered: Vec<&str> = PALETTE_COMMANDS
+                                    .iter()
+                                    .copied()
+                                    .filter(|cmd| {
+                                        cmd.to_lowercase()
+                                            .contains(&self.palette_query.to_lowercase())
+                                    })
+                                    .collect();
+                                if let Some(&label) = filtered.get(i) {
+                                    match label {
+                                        "Open Settings" => {
+                                            return self.update(Message::GoToSettings)
+                                        }
+                                        "Disconnect" => {
+                                            if let Some(ref tx) = self.xmpp_tx {
+                                                let tx = tx.clone();
+                                                return Task::future(async move {
+                                                    let _ = tx
+                                                        .send(crate::xmpp::XmppCommand::Disconnect)
+                                                        .await;
+                                                    Message::GoToBenchmark
+                                                })
+                                                .discard();
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                self.palette_query.clear();
+                                Task::none()
+                            },
+                        ]);
+                    }
+                }
                 let filtered: Vec<&str> = PALETTE_COMMANDS
                     .iter()
                     .copied()
@@ -179,6 +241,44 @@ impl App {
                     }
                 }
                 self.palette_query.clear();
+                Task::none()
+            }
+
+            Message::IdleTick => {
+                let elapsed = self.last_activity.elapsed().as_secs();
+                const IDLE_SECS: u64 = 300;
+                const EXTENDED_SECS: u64 = 900;
+
+                match self.idle_state {
+                    IdleState::Active if elapsed >= EXTENDED_SECS => {
+                        self.idle_state = IdleState::AutoXa;
+                        if let Some(ref tx) = self.xmpp_tx {
+                            let tx = tx.clone();
+                            return Task::future(async move {
+                                let _ = tx.send(XmppCommand::UserExtendedIdle).await;
+                                Message::GoToBenchmark
+                            })
+                            .discard();
+                        }
+                    }
+                    IdleState::Active if elapsed >= IDLE_SECS => {
+                        self.idle_state = IdleState::AutoAway;
+                        if let Some(ref tx) = self.xmpp_tx {
+                            let tx = tx.clone();
+                            return Task::future(async move {
+                                let _ = tx.send(XmppCommand::UserIdle).await;
+                                Message::GoToBenchmark
+                            })
+                            .discard();
+                        }
+                    }
+                    _ => {}
+                }
+                Task::none()
+            }
+
+            Message::PaletteQuery(q) => {
+                self.palette_query = q;
                 Task::none()
             }
 
@@ -377,6 +477,22 @@ impl App {
             }
 
             Message::Chat(msg) => {
+                // S1: any user interaction resets the idle timer
+                self.last_activity = std::time::Instant::now();
+                if self.idle_state != IdleState::Active {
+                    self.idle_state = IdleState::Active;
+                    if let Some(ref tx) = self.xmpp_tx {
+                        let tx = tx.clone();
+                        return Task::batch([
+                            Task::future(async move {
+                                let _ = tx.send(XmppCommand::UserActive).await;
+                                Message::GoToBenchmark
+                            })
+                            .discard(),
+                            self.update(Message::Chat(msg)),
+                        ]);
+                    }
+                }
                 // F3: intercept OpenSettings before delegating
                 if let chat::Message::OpenSettings = msg {
                     return self.update(Message::GoToSettings);
@@ -1063,6 +1179,9 @@ impl App {
 
     pub fn subscription() -> Subscription<Message> {
         let xmpp_sub = xmpp::subscription::xmpp_subscription();
+        // S1: periodic idle tick — fires every 30s so App can check auto-away conditions
+        let idle_sub =
+            iced::time::every(std::time::Duration::from_secs(30)).map(|_| Message::IdleTick);
         // F2: keyboard shortcut — Cmd+K / Ctrl+K to toggle palette, Escape to close
         // I1: Cmd+V / Ctrl+V to paste from clipboard
         let kb_sub = iced::keyboard::on_key_press(|key, modifiers| {
@@ -1088,6 +1207,6 @@ impl App {
             }
             None
         });
-        Subscription::batch([xmpp_sub, kb_sub, drop_sub])
+        Subscription::batch([xmpp_sub, kb_sub, drop_sub, idle_sub])
     }
 }

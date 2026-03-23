@@ -324,6 +324,39 @@ async fn run_session(
                     | Some(XmppCommand::FetchHistory { .. }) => {
                         // Not yet implemented — silently ignore.
                     }
+                    // S1: auto-away — user has been idle, transition to AutoAway
+                    Some(XmppCommand::UserIdle) => {
+                        let before = presence_machine.effective_status();
+                        presence_machine.on_idle_detected();
+                        let after = presence_machine.effective_status();
+                        if before != after {
+                            if let Some(stanza) = presence_machine.build_presence_stanza() {
+                                outbox.push_back(stanza);
+                            }
+                        }
+                    }
+                    // S1: auto-away — user has been idle for extended period, transition to AutoXa
+                    Some(XmppCommand::UserExtendedIdle) => {
+                        let before = presence_machine.effective_status();
+                        presence_machine.on_sleep_detected();
+                        let after = presence_machine.effective_status();
+                        if before != after {
+                            if let Some(stanza) = presence_machine.build_presence_stanza() {
+                                outbox.push_back(stanza);
+                            }
+                        }
+                    }
+                    // S1: auto-away — user is active again, restore pre-idle status
+                    Some(XmppCommand::UserActive) => {
+                        let before = presence_machine.effective_status();
+                        presence_machine.on_activity_detected();
+                        let after = presence_machine.effective_status();
+                        if before != after {
+                            if let Some(stanza) = presence_machine.build_presence_stanza() {
+                                outbox.push_back(stanza);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -672,8 +705,7 @@ async fn handle_iq(
             c.name() == "pubsub"
                 && c.ns() == "http://jabber.org/protocol/pubsub"
                 && c.children().any(|items| {
-                    items.name() == "items"
-                        && items.attr("node") == Some("urn:xmpp:avatar:data")
+                    items.name() == "items" && items.attr("node") == Some("urn:xmpp:avatar:data")
                 })
         });
         if is_avatar_data {
@@ -748,9 +780,7 @@ async fn handle_iq(
             if !bookmarks.is_empty() || el.children().any(|_| true) {
                 bookmark_mgr.set_bookmarks(bookmarks.clone());
                 tracing::info!("bookmarks: loaded {} bookmark(s)", bookmarks.len());
-                let _ = event_tx
-                    .send(XmppEvent::BookmarksReceived(bookmarks))
-                    .await;
+                let _ = event_tx.send(XmppEvent::BookmarksReceived(bookmarks)).await;
             }
             return;
         }

@@ -69,10 +69,10 @@ impl PresenceMachine {
 
     /// User explicitly sets their status.
     ///
-    /// Resets auto_state to Active and clears the saved pre-auto status.
+    /// Resets auto_state to Active. Does NOT update pre_auto_away_status —
+    /// that is only saved when entering auto-away so it can be restored later.
     pub fn set_user_status(&mut self, status: PresenceStatus) {
-        self.user_status = status.clone();
-        self.pre_auto_away_status = status;
+        self.user_status = status;
         self.auto_state = AutoState::Active;
     }
 

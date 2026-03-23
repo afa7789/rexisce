@@ -156,7 +156,11 @@ pub enum XmppCommand {
     #[allow(dead_code)]
     Disconnect,
     /// E4: Request an HTTP upload slot (XEP-0363).
-    RequestUploadSlot { filename: String, size: u64, mime: String },
+    RequestUploadSlot {
+        filename: String,
+        size: u64,
+        mime: String,
+    },
     /// H1: Fetch avatar for a JID (vCard-temp fallback).
     FetchAvatar(String),
     /// Block one or more JIDs (XEP-0191).
@@ -164,15 +168,26 @@ pub enum XmppCommand {
     /// Unblock a previously blocked JID (XEP-0191).
     UnblockJid(String),
     /// E3: Send an emoji reaction (XEP-0444).
-    SendReaction { to: String, msg_id: String, emojis: Vec<String> },
+    SendReaction {
+        to: String,
+        msg_id: String,
+        emojis: Vec<String>,
+    },
     /// E1: Send a message correction (XEP-0308).
-    SendCorrection { to: String, original_id: String, new_body: String },
+    SendCorrection {
+        to: String,
+        original_id: String,
+        new_body: String,
+    },
     /// E2: Send a message retraction (XEP-0424).
     SendRetraction { to: String, origin_id: String },
     /// H4: Fetch vCard for a JID.
     FetchVCard(String),
     /// G8: Fetch older MAM history before a given message ID.
-    FetchHistory { jid: String, before_id: Option<String> },
+    FetchHistory {
+        jid: String,
+        before_id: Option<String>,
+    },
     /// D3: Join a MUC room with the given nickname (XEP-0045).
     JoinRoom { jid: String, nick: String },
     /// D3: Leave a MUC room (XEP-0045).
@@ -181,4 +196,10 @@ pub enum XmppCommand {
     SendDisplayed { to: String, id: String },
     /// J10: Set MAM archiving preferences.
     SetMamPrefs { default_mode: String },
+    /// S1: User has been idle for ~5 minutes — trigger auto-away.
+    UserIdle,
+    /// S1: User has been idle for ~15 minutes — trigger extended away.
+    UserExtendedIdle,
+    /// S1: User is active again — restore pre-idle presence.
+    UserActive,
 }
