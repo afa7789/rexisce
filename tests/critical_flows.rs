@@ -206,6 +206,9 @@ fn settings_json_round_trip() {
         muted_jids: std::collections::HashSet::new(),
         status_message: Some("In a meeting".into()),
         remember_me: false,
+        send_receipts: true,
+        send_typing: true,
+        send_read_markers: true,
     };
 
     let json = serde_json::to_string(&original).unwrap();

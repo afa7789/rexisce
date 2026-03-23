@@ -99,6 +99,11 @@ pub async fn run_engine(
 // Session loop
 // ---------------------------------------------------------------------------
 
+/// S6: privacy toggles — controls which optional XMPP features we announce/use.
+/// Stored as a global so the engine callbacks can read it without threading parameters.
+static PRIVACY_FLAGS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0b000);
+/// Bit flags for PRIVACY_FLAGS: bit 0=receipts, bit 1=typing, bit 2=read_markers (1=enabled)
+
 async fn run_session(
     config: ConnectConfig,
     event_tx: &mpsc::Sender<XmppEvent>,
@@ -168,6 +173,12 @@ async fn run_session(
     // D4: XEP-0048 bookmarks manager
     let mut bookmark_mgr = BookmarkManager::new();
 
+    // S6: privacy settings — control whether we send receipts, typing, read markers
+    let flags = (config.send_receipts as u8)
+        | ((config.send_typing as u8) << 1)
+        | ((config.send_read_markers as u8) << 2);
+    PRIVACY_FLAGS.store(flags, std::sync::atomic::Ordering::SeqCst);
+
     loop {
         // Drain outbox before blocking on the next event.
         while let Some(stanza) = outbox.pop_front() {
@@ -235,8 +246,11 @@ async fn run_session(
                         tracing::info!("blocking: sent unblock IQ for {jid}");
                     }
                     Some(XmppCommand::SendChatState { to, composing }) => {
-                        if let Ok(to_jid) = to.parse::<Jid>() {
-                            outbox.push_back(make_chat_state_message(to_jid, composing));
+                        // S6: respect user's privacy preference for typing indicators
+                        if PRIVACY_FLAGS.load(std::sync::atomic::Ordering::SeqCst) & 0b010 != 0 {
+                            if let Ok(to_jid) = to.parse::<Jid>() {
+                                outbox.push_back(make_chat_state_message(to_jid, composing));
+                            }
                         }
                     }
                     Some(XmppCommand::AddContact(jid)) => {
@@ -309,9 +323,11 @@ async fn run_session(
                         }
                     }
                     Some(XmppCommand::SendDisplayed { to, id }) => {
-                        // K5: XEP-0333 send displayed marker
-                        outbox.push_back(make_displayed_message(&to, &id));
-                        tracing::debug!("chat-markers: sent displayed for {id} to {to}");
+                        // S6: respect user's privacy preference for read markers
+                        if PRIVACY_FLAGS.load(std::sync::atomic::Ordering::SeqCst) & 0b100 != 0 {
+                            outbox.push_back(make_displayed_message(&to, &id));
+                            tracing::debug!("chat-markers: sent displayed for {id} to {to}");
+                        }
                     }
                     Some(XmppCommand::SetMamPrefs { default_mode }) => {
                         // J10: set MAM archiving preferences
@@ -978,7 +994,8 @@ async fn handle_message(
     let id = msg.id.unwrap_or_default();
 
     // K4: auto-reply with <received> if sender requested a delivery receipt
-    if receipt_request {
+    // S6: respect user's privacy preference for delivery receipts
+    if PRIVACY_FLAGS.load(std::sync::atomic::Ordering::SeqCst) & 0b001 != 0 && receipt_request {
         if let (Some(reply_to), Some(orig_id)) = (msg_from, msg_id_raw) {
             let receipt = Element::builder("message", "jabber:client")
                 .attr("to", reply_to)
@@ -1402,6 +1419,9 @@ mod tests {
             password: "secret".into(),
             server: "xmpp.example.com:5222".into(),
             status_message: Some("In a meeting".into()),
+            send_receipts: true,
+            send_typing: true,
+            send_read_markers: true,
         };
         assert_eq!(cfg.jid, "user@example.com");
         assert_eq!(cfg.server, "xmpp.example.com:5222");

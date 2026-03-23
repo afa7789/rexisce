@@ -25,6 +25,12 @@ pub struct ConnectConfig {
     pub server: String,
     /// J2: Custom presence status message.
     pub status_message: Option<String>,
+    /// S6: whether to request and send delivery receipts.
+    pub send_receipts: bool,
+    /// S6: whether to send typing indicators.
+    pub send_typing: bool,
+    /// S6: whether to send read markers.
+    pub send_read_markers: bool,
 }
 
 /// Parsed server input from the login screen.

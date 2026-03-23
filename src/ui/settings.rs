@@ -21,6 +21,10 @@ pub enum Message {
     FontSizeIncreased,
     FontSizeDecreased,
     StatusInputChanged(String),
+    // S6: privacy toggles
+    SendReceiptsToggled(bool),
+    SendTypingToggled(bool),
+    SendReadMarkersToggled(bool),
     Back,
 }
 
@@ -80,6 +84,21 @@ impl SettingsScreen {
                 let _ = config::save(&self.settings);
                 Task::none()
             }
+            Message::SendReceiptsToggled(enabled) => {
+                self.settings.send_receipts = enabled;
+                let _ = config::save(&self.settings);
+                Task::none()
+            }
+            Message::SendTypingToggled(enabled) => {
+                self.settings.send_typing = enabled;
+                let _ = config::save(&self.settings);
+                Task::none()
+            }
+            Message::SendReadMarkersToggled(enabled) => {
+                self.settings.send_read_markers = enabled;
+                let _ = config::save(&self.settings);
+                Task::none()
+            }
             Message::Back => Task::none(),
         }
     }
@@ -132,13 +151,45 @@ impl SettingsScreen {
         .spacing(8)
         .align_y(Alignment::Center);
 
+        // S6: privacy toggles
+        let receipts_row = row![
+            text("Send delivery receipts").size(14).width(Length::Fill),
+            toggler(self.settings.send_receipts).on_toggle(Message::SendReceiptsToggled),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        let typing_row = row![
+            text("Send typing indicators").size(14).width(Length::Fill),
+            toggler(self.settings.send_typing).on_toggle(Message::SendTypingToggled),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        let read_markers_row = row![
+            text("Send read markers").size(14).width(Length::Fill),
+            toggler(self.settings.send_read_markers).on_toggle(Message::SendReadMarkersToggled),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
         let back_btn = button("Back").on_press(Message::Back).padding([6, 14]);
 
-        let content =
-            column![title, theme_row, notif_row, sound_row, font_row, status_row, back_btn]
-                .spacing(16)
-                .padding(24)
-                .width(400);
+        let content = column![
+            title,
+            theme_row,
+            notif_row,
+            sound_row,
+            font_row,
+            status_row,
+            receipts_row,
+            typing_row,
+            read_markers_row,
+            back_btn
+        ]
+        .spacing(16)
+        .padding(24)
+        .width(400);
 
         container(content)
             .center(Length::Fill)

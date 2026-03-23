@@ -38,6 +38,19 @@ pub struct Settings {
     /// AUTH-1: if true, password stays in keychain on logout so next login is instant.
     #[serde(default = "default_remember_me")]
     pub remember_me: bool,
+    /// S6: whether to request and send XEP-0184 delivery receipts.
+    #[serde(default = "default_true")]
+    pub send_receipts: bool,
+    /// S6: whether to send XEP-0085 typing indicators.
+    #[serde(default = "default_true")]
+    pub send_typing: bool,
+    /// S6: whether to send XEP-0333 displayed markers (read receipts).
+    #[serde(default = "default_true")]
+    pub send_read_markers: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_remember_me() -> bool {
@@ -64,6 +77,9 @@ impl Default for Settings {
             muted_jids: std::collections::HashSet::new(),
             status_message: None,
             remember_me: true,
+            send_receipts: true,
+            send_typing: true,
+            send_read_markers: true,
         }
     }
 }
@@ -172,6 +188,9 @@ mod tests {
             muted_jids: std::collections::HashSet::new(),
             status_message: None,
             remember_me: false,
+            send_receipts: false,
+            send_typing: false,
+            send_read_markers: false,
         };
         let json = serde_json::to_string(&s).unwrap();
         let s2: Settings = serde_json::from_str(&json).unwrap();
@@ -179,6 +198,9 @@ mod tests {
         assert_eq!(s2.theme, Theme::Light);
         assert_eq!(s2.font_size, 16);
         assert!(!s2.remember_me);
+        assert!(!s2.send_receipts);
+        assert!(!s2.send_typing);
+        assert!(!s2.send_read_markers);
     }
 
     #[test]

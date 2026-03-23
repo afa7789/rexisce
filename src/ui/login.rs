@@ -70,6 +70,9 @@ impl LoginScreen {
             password: self.password.clone(),
             server: self.server.clone(),
             status_message: settings.status_message,
+            send_receipts: settings.send_receipts,
+            send_typing: settings.send_typing,
+            send_read_markers: settings.send_read_markers,
         }
     }
 
