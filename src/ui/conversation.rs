@@ -156,6 +156,8 @@ pub struct ConversationView {
     drag_drop_active: bool,
     /// M2: delivery/read state for own messages — msg_id → state
     message_states: std::collections::HashMap<String, MessageState>,
+    /// M6: currently hovered message ID for showing action bar
+    hovered_message: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +199,8 @@ pub enum Message {
     // M2: delivery/read status updates
     MessageDelivered(String), // (msg_id) — K4 receipt
     MessageRead(String),      // (msg_id) — K5 displayed marker
+    // M6: hover state for action bar
+    SetHoveredMessage(Option<String>), // Some(msg_id) or None to clear
 }
 
 impl ConversationView {
@@ -225,6 +229,7 @@ impl ConversationView {
             pending_attachments: vec![],
             drag_drop_active: false,
             message_states: std::collections::HashMap::new(),
+            hovered_message: None,
         }
     }
 
@@ -491,6 +496,11 @@ impl ConversationView {
                 self.message_states.insert(msg_id, MessageState::Read);
                 Task::none()
             }
+            // M6: hover state
+            Message::SetHoveredMessage(msg_id) => {
+                self.hovered_message = msg_id;
+                Task::none()
+            }
         }
     }
 
@@ -600,16 +610,35 @@ impl ConversationView {
                 "Reply",
                 tooltip::Position::Top,
             );
-            // E3: quick-react button (👍)
+            // M6: quick-react buttons (👍 ❤️ 😂) - always visible for easy access
             let react_msg_id = m.id.clone();
-            let react_btn = tooltip(
-                button(text("👍").size(10))
-                    .on_press(Message::SendReaction(react_msg_id, "👍".to_string()))
-                    .padding([2, 4]),
-                "React",
-                tooltip::Position::Top,
-            );
-            // E1: edit button (own messages only)
+            let heart_msg_id = m.id.clone();
+            let laugh_msg_id = m.id.clone();
+            let react_btn = row![
+                tooltip(
+                    button(text("👍").size(10))
+                        .on_press(Message::SendReaction(react_msg_id, "👍".to_string()))
+                        .padding([2, 4]),
+                    "React",
+                    tooltip::Position::Top,
+                ),
+                tooltip(
+                    button(text("❤️").size(10))
+                        .on_press(Message::SendReaction(heart_msg_id, "❤️".to_string()))
+                        .padding([2, 4]),
+                    "React with heart",
+                    tooltip::Position::Top,
+                ),
+                tooltip(
+                    button(text("😂").size(10))
+                        .on_press(Message::SendReaction(laugh_msg_id, "😂".to_string()))
+                        .padding([2, 4]),
+                    "React with laugh",
+                    tooltip::Position::Top,
+                ),
+            ]
+            .spacing(4);
+
             let edit_msg_id = m.id.clone();
             let edit_body = m.body.clone();
             let edit_btn = tooltip(
@@ -745,6 +774,8 @@ impl ConversationView {
                     .into()
             };
 
+            // M6: wrap in mouse_area for hover detection
+            let msg_id_for_hover = m.id.clone();
             rows.push(row_elem);
 
             // E3: render reaction pills below the message bubble
