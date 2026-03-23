@@ -12,6 +12,7 @@ use crate::xmpp::{modules::presence_machine::PresenceStatus, IncomingMessage, Ro
 
 use super::{
     conversation::{ConversationView, DisplayMessage},
+    muc_panel::{OccupantEntry, OccupantPanel},
     sidebar::{self, SidebarScreen},
 };
 
@@ -27,6 +28,16 @@ pub struct ChatScreen {
     pending_commands: Vec<XmppCommand>,
     /// G2: peers currently typing: JID → instant they last sent composing
     typing_peers: HashMap<String, std::time::Instant>,
+    /// H1: avatar cache (bare JID → PNG bytes)
+    avatars: HashMap<String, Vec<u8>>,
+    /// E4: pending upload targets (target_jid, file_path) to be consumed by App
+    pending_upload_targets: Vec<(String, std::path::PathBuf)>,
+    /// D1: occupant panels for MUC rooms (room JID → panel)
+    muc_panels: HashMap<String, OccupantPanel>,
+    /// D1: set of room JIDs we have joined
+    muc_jids: std::collections::HashSet<String>,
+    /// D1: shadow occupant lists (room JID → vec) used to update panels
+    muc_occupants: HashMap<String, Vec<OccupantEntry>>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,11 +60,75 @@ impl ChatScreen {
             active_jid: None,
             pending_commands: vec![],
             typing_peers: HashMap::new(),
+            avatars: HashMap::new(),
+            pending_upload_targets: vec![],
+            muc_panels: HashMap::new(),
+            muc_jids: std::collections::HashSet::new(),
+            muc_occupants: HashMap::new(),
         }
+    }
+
+    /// H1: store a received avatar PNG for a JID.
+    pub fn on_avatar_received(&mut self, jid: String, png_bytes: Vec<u8>) {
+        self.avatars.insert(jid, png_bytes);
+    }
+
+    /// E4: drain pending upload targets (target_jid, file_path) queued by Send with attachments.
+    pub fn drain_upload_targets(&mut self) -> Vec<(String, std::path::PathBuf)> {
+        std::mem::take(&mut self.pending_upload_targets)
     }
 
     pub fn set_roster(&mut self, contacts: Vec<RosterContact>) {
         self.sidebar.set_contacts(contacts);
+    }
+
+    /// D1: Register a MUC room join and create an occupant panel.
+    pub fn on_join_room(&mut self, room_jid: &str) {
+        self.muc_jids.insert(room_jid.to_string());
+        self.muc_panels
+            .entry(room_jid.to_string())
+            .or_insert_with(|| OccupantPanel::new(room_jid.to_string()));
+    }
+
+    /// D1: Update the occupant panel for a room from a MUC presence.
+    pub fn on_muc_presence(
+        &mut self,
+        room_jid: &str,
+        nick: &str,
+        role: &str,
+        affiliation: &str,
+        available: bool,
+    ) {
+        // Upsert into shadow occupant list
+        let occupants = self
+            .muc_occupants
+            .entry(room_jid.to_string())
+            .or_default();
+        if available {
+            // Upsert by nick
+            if let Some(existing) = occupants.iter_mut().find(|o| o.nick == nick) {
+                existing.role = role.to_string();
+                existing.affiliation = affiliation.to_string();
+                existing.available = true;
+            } else {
+                occupants.push(OccupantEntry {
+                    nick: nick.to_string(),
+                    role: role.to_string(),
+                    affiliation: affiliation.to_string(),
+                    available: true,
+                });
+            }
+        } else {
+            occupants.retain(|o| o.nick != nick);
+        }
+
+        // Sync shadow list to panel
+        let snapshot = occupants.clone();
+        let panel = self
+            .muc_panels
+            .entry(room_jid.to_string())
+            .or_insert_with(|| OccupantPanel::new(room_jid.to_string()));
+        panel.set_occupants(snapshot);
     }
 
     /// Route an incoming message to the right conversation bucket.
@@ -162,6 +237,13 @@ impl ChatScreen {
     }
 
     pub fn on_presence(&mut self, jid: &str, available: bool) {
+        // D1: if this is a MUC presence (room@conf/nick), update occupant panel
+        if let Some((room_jid, nick)) = jid.split_once('/') {
+            if self.muc_jids.contains(room_jid) {
+                self.on_muc_presence(room_jid, nick, "Participant", "None", available);
+                return;
+            }
+        }
         self.sidebar.on_presence(jid, available);
     }
 
@@ -235,6 +317,8 @@ impl ChatScreen {
                     let jid = self.sidebar.join_room_jid().to_owned();
                     let nick = self.sidebar.join_room_nick().to_owned();
                     if !jid.trim().is_empty() && !nick.trim().is_empty() {
+                        // D1: register the room so the occupant panel is shown
+                        self.on_join_room(&jid);
                         self.pending_commands
                             .push(crate::xmpp::XmppCommand::JoinRoom { jid, nick });
                     }
@@ -392,9 +476,42 @@ impl ChatScreen {
                     return Task::none();
                 }
 
+                // E4/I3: intercept OpenFilePicker to spawn picker task
+                if let super::conversation::Message::OpenFilePicker = cmsg {
+                    if let Some(convo) = self.conversations.get_mut(&jid) {
+                        return convo
+                            .update(super::conversation::Message::OpenFilePicker)
+                            .map(move |m| Message::Conversation(jid.clone(), m));
+                    }
+                    return Task::none();
+                }
+
                 // Intercept Send to queue a command for the engine.
                 if let super::conversation::Message::Send = cmsg {
                     if let Some(convo) = self.conversations.get_mut(&jid) {
+                        // E4/I3: if there are pending attachments, request upload slots first
+                        if !convo.pending_attachments.is_empty() {
+                            let attachments = std::mem::take(&mut convo.pending_attachments);
+                            for att in attachments {
+                                let mime = if att.name.ends_with(".png") {
+                                    "image/png"
+                                } else if att.name.ends_with(".jpg") || att.name.ends_with(".jpeg") {
+                                    "image/jpeg"
+                                } else if att.name.ends_with(".gif") {
+                                    "image/gif"
+                                } else {
+                                    "application/octet-stream"
+                                };
+                                self.pending_upload_targets.push((jid.clone(), att.path));
+                                self.pending_commands.push(crate::xmpp::XmppCommand::RequestUploadSlot {
+                                    filename: att.name,
+                                    size: att.size,
+                                    mime: mime.to_string(),
+                                });
+                            }
+                            return Task::none();
+                        }
+
                         // E1: if in edit mode, send correction instead
                         if let Some((original_id, _)) = convo.take_edit_mode() {
                             let new_body = convo.take_draft();
@@ -529,7 +646,7 @@ impl ChatScreen {
                         .get(jid)
                         .is_some_and(|t| t.elapsed().as_secs() < 5);
                     let conv_view = convo
-                        .view()
+                        .view(&self.avatars)
                         .map(move |m| Message::Conversation(jid2.clone(), m));
                     if is_typing {
                         let indicator =
@@ -568,13 +685,39 @@ impl ChatScreen {
         .padding([2, 8])
         .width(Length::Fill);
 
-        column![
-            row![sidebar_view, main_area]
-                .height(Length::Fill)
-                .width(Length::Fill),
-            status_bar,
-        ]
-        .into()
+        // D1: if active JID is a MUC room, show the occupant panel on the right
+        let content_row: Element<Message> =
+            if let Some(ref jid) = self.active_jid {
+                if self.muc_jids.contains(jid.as_str()) {
+                    if let Some(panel) = self.muc_panels.get(jid) {
+                        let panel_view = panel.view().map(|_msg| {
+                            // muc_panel::Message is empty — this branch is unreachable
+                            unreachable!()
+                        });
+                        row![sidebar_view, main_area, panel_view]
+                            .height(Length::Fill)
+                            .width(Length::Fill)
+                            .into()
+                    } else {
+                        row![sidebar_view, main_area]
+                            .height(Length::Fill)
+                            .width(Length::Fill)
+                            .into()
+                    }
+                } else {
+                    row![sidebar_view, main_area]
+                        .height(Length::Fill)
+                        .width(Length::Fill)
+                        .into()
+                }
+            } else {
+                row![sidebar_view, main_area]
+                    .height(Length::Fill)
+                    .width(Length::Fill)
+                    .into()
+            };
+
+        column![content_row, status_bar].into()
     }
 }
 
