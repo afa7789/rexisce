@@ -42,6 +42,8 @@ pub struct ChatScreen {
     muc_occupants: HashMap<String, Vec<OccupantEntry>>,
     /// K1: JID of a room waiting for config form submission.
     pending_room_config: Option<(String, crate::xmpp::modules::muc_config::MucRoomConfig)>,
+    /// L2: user's own nick per MUC room (room_jid → nick)
+    muc_own_nicks: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +82,7 @@ impl ChatScreen {
             muc_jids: std::collections::HashSet::new(),
             muc_occupants: HashMap::new(),
             pending_room_config: None,
+            muc_own_nicks: HashMap::new(),
         }
     }
 
@@ -342,6 +345,8 @@ impl ChatScreen {
                     if !jid.trim().is_empty() && !nick.trim().is_empty() {
                         // D1: register the room so the occupant panel is shown
                         self.on_join_room(&jid);
+                        // L2: record own nick for this room
+                        self.muc_own_nicks.insert(jid.clone(), nick.clone());
                         self.pending_commands
                             .push(crate::xmpp::XmppCommand::JoinRoom { jid, nick });
                     }
@@ -357,6 +362,8 @@ impl ChatScreen {
                     if !local.trim().is_empty() && !service.trim().is_empty() && !nick.trim().is_empty() {
                         let room_jid = format!("{}@{}", local, service);
                         self.on_join_room(&room_jid);
+                        // L2: record own nick for this room
+                        self.muc_own_nicks.insert(room_jid.clone(), nick.clone());
                         self.pending_commands.push(crate::xmpp::XmppCommand::CreateRoom {
                             local,
                             service,
@@ -796,8 +803,26 @@ impl ChatScreen {
                             .typing_peers
                             .get(jid)
                             .is_some_and(|t| t.elapsed().as_secs() < 5);
+                        // L2: pass occupant list and own nick for @mention autocomplete
+                        let empty_occupants: Vec<crate::ui::muc_panel::OccupantEntry> = vec![];
+                        let occupants = if self.muc_jids.contains(jid.as_str()) {
+                            self.muc_occupants
+                                .get(jid.as_str())
+                                .map(|v| v.as_slice())
+                                .unwrap_or(&[])
+                        } else {
+                            empty_occupants.as_slice()
+                        };
+                        let own_nick = if self.muc_jids.contains(jid.as_str()) {
+                            self.muc_own_nicks
+                                .get(jid.as_str())
+                                .map(|s| s.as_str())
+                                .unwrap_or("")
+                        } else {
+                            ""
+                        };
                         let conv_view = convo
-                            .view(&self.avatars, time_format)
+                            .view(&self.avatars, time_format, occupants, own_nick)
                             .map(move |m| Message::Conversation(jid2.clone(), m));
                         if is_typing {
                             let indicator =

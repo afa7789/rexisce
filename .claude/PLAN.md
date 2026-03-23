@@ -931,17 +931,284 @@ returning to a conversation.
 
 ### L2: @mention autocomplete + highlight (XEP-0372)
 **Goal**: Typing `@` in the composer shows a dropdown of room occupants; selecting
-one inserts the mention; mentions are highlighted in received messages.
+one inserts the mention; messages containing `@own_nick` are visually highlighted.
 **Files touched**: `src/ui/conversation.rs`, `src/ui/chat.rs`
-**Depends on**: D3 (occupant list)
-**Steps**:
-1. In `ConversationView::update(ComposerChanged)`, detect `@` prefix; filter occupant
-   nicks.
-2. Render a small floating list above the composer; arrow keys + Enter to select.
-3. Insert `@nick ` into composer on selection.
-4. In `build_styled_text`, detect `@nick` tokens and highlight with accent color.
-**Done when**: typing `@` in a room shows nick suggestions; received `@mentions`
-are highlighted.
+**Depends on**: D3 (occupant list already in `ChatScreen::muc_occupants`)
+**Status**: ✅ DONE 2026-03-23
+
+---
+
+#### Architecture overview
+
+```
+ChatScreen::muc_occupants: HashMap<room_jid, Vec<OccupantEntry>>
+                │
+                │  passed as &[&str] slice on each view() call
+                ▼
+ConversationView::view(avatars, time_format, occupants, own_nick)
+                │
+                ├── message list: highlight rows where body contains @own_nick
+                └── composer area:
+                        │
+                        ├── text_input (existing)
+                        │
+                        └── [if mention_prefix is Some] autocomplete panel
+                                column of button rows above composer
+                                filtered by typed prefix
+```
+
+Autocomplete state lives entirely in `ConversationView` — it is transient composer
+state, not shared with ChatScreen. The occupant list is not duplicated; it is
+passed in from ChatScreen on each `view()` call (already has `muc_occupants`).
+
+---
+
+#### State additions to `ConversationView`
+
+```rust
+/// L2: @mention autocomplete — Some(prefix) when active, None when inactive
+mention_prefix: Option<String>,
+```
+
+One field. No separate `Vec` of filtered nicks stored — compute the filter at
+render time from the `occupants` slice passed to `view()`. This keeps state
+minimal and avoids stale lists.
+
+---
+
+#### `ConversationView::view` signature change
+
+Current:
+```rust
+pub fn view(&self, avatars: &HashMap<String, Vec<u8>>, time_format: TimeFormat) -> Element<'_, Message>
+```
+
+New (add two parameters):
+```rust
+pub fn view(
+    &self,
+    avatars: &HashMap<String, Vec<u8>>,
+    time_format: TimeFormat,
+    occupants: &[OccupantEntry],   // L2: for autocomplete
+    own_nick: &str,                // L2: for mention highlight ("localpart" of own_jid)
+) -> Element<'_, Message>
+```
+
+`ChatScreen::view` already calls `convo.view(&self.avatars, time_format)`. It
+must be updated to pass:
+- `occupants`: `self.muc_occupants.get(jid).map(|v| v.as_slice()).unwrap_or(&[])`
+- `own_nick`: derive from `self.own_jid` — take the part before `/` or the full string
+  (for DM conversations, `occupants` will be empty so autocomplete never fires).
+
+---
+
+#### Detecting `@` in ComposerChanged
+
+In `ConversationView::update(Message::ComposerChanged(v))`:
+
+```
+After: self.composer = v;
+
+Find the last `@` in composer that has no space after it.
+  - scan from cursor: find last `@` in the string
+  - if found and the substring after it contains no space → set mention_prefix = Some(after_@)
+  - else → set mention_prefix = None
+```
+
+Implementation note: iced's `text_input` does not expose cursor position in
+0.13. We approximate by scanning `self.composer` for the last `@` that is not
+followed by a space. This is the same heuristic used by most desktop clients.
+The edge case (user types `@foo bar @ba`) resolves correctly — the last `@ba`
+prefix is active.
+
+Also on `Message::Send`: clear `mention_prefix = None`.
+Also on `Message::CancelEdit`/`CancelReply`: no change needed (prefix clears when composer clears).
+
+---
+
+#### New `Message` variants
+
+```rust
+/// L2: user selected a nick from the autocomplete dropdown
+MentionSelected(String),   // nick string (without @)
+
+/// L2: dismiss autocomplete without selecting
+MentionDismissed,
+```
+
+`MentionSelected(nick)` handler in `update()`:
+1. Find the last `@` in `self.composer`.
+2. Truncate composer to that index (exclusive).
+3. Append `@nick ` (nick + space).
+4. Set `mention_prefix = None`.
+5. Return `Task::none()`.
+
+`MentionDismissed` handler: `self.mention_prefix = None; Task::none()`.
+
+---
+
+#### Autocomplete dropdown in `view()`
+
+Rendered as a `column` of `button` widgets inserted into the main column
+**above the composer row**, mirroring the existing `emoji_panel` pattern:
+
+```rust
+let mention_panel: Option<Element<Message>> = if let Some(ref prefix) = self.mention_prefix {
+    let prefix_lower = prefix.to_lowercase();
+    let matches: Vec<&str> = occupants
+        .iter()
+        .filter(|o| o.available && o.nick.to_lowercase().starts_with(&prefix_lower))
+        .map(|o| o.nick.as_str())
+        .take(8)   // cap at 8 suggestions
+        .collect();
+
+    if matches.is_empty() {
+        None
+    } else {
+        let mut col = column![].spacing(2).padding([4, 8]);
+        for nick in matches {
+            let n = nick.to_string();
+            col = col.push(
+                button(text(format!("@{}", n)).size(13))
+                    .on_press(Message::MentionSelected(n))
+                    .padding([4, 8])
+                    .width(Length::Fill),
+            );
+        }
+        Some(
+            container(col)
+                .width(Length::Fill)
+                .style(/* dark background, same as emoji_panel */)
+                .into()
+        )
+    }
+} else {
+    None
+};
+```
+
+Insert into the `col` builder before `composer_row`, same position as
+`emoji_panel`:
+```rust
+if let Some(panel) = mention_panel {
+    col = col.push(panel);
+}
+```
+
+No iced overlay or z-index manipulation required. The panel pushes the composer
+down slightly, which is acceptable. iced 0.13 has no built-in overlay API for
+dropdowns — the stacked column approach matches how emoji_panel already works.
+
+**Keyboard navigation**: iced 0.13 `text_input` does not expose up/down key
+events at the application level without a custom widget. Do not implement arrow
+key navigation in this iteration. Mouse-click selection is sufficient for L2.
+Keyboard navigation can be added later when a custom input widget is introduced.
+
+---
+
+#### Mention highlight in message list
+
+In `view()`, for each `DisplayMessage`, before constructing the body widget,
+check:
+
+```rust
+let is_mentioned = !own_nick.is_empty()
+    && m.body.contains(&format!("@{}", own_nick));
+```
+
+If `is_mentioned`, wrap the message row in a `container` with a distinct
+background (amber/yellow tint):
+
+```rust
+let row_elem = if is_mentioned {
+    container(row_elem)
+        .style(|_theme: &iced::Theme| iced::widget::container::Style {
+            background: Some(iced::Background::Color(
+                iced::Color::from_rgba(1.0, 0.85, 0.1, 0.15),
+            )),
+            ..Default::default()
+        })
+        .width(Length::Fill)
+        .into()
+} else {
+    row_elem
+};
+```
+
+Apply this wrapping **after** the `mouse_area` hover wrapper (M6), so hover
+detection still works inside the tinted container.
+
+---
+
+#### `own_nick` derivation
+
+In `ChatScreen::view()`:
+```rust
+let own_nick = self.own_jid
+    .split('@')
+    .next()
+    .unwrap_or(&self.own_jid);
+```
+
+For MUC the user's nick in the room may differ from their XMPP local-part.
+However, the server echoes MUC messages back with `from = room@service/nick`,
+and that is how `DisplayMessage.from` is stored. The nick stored in
+`muc_occupants` is the actual room nick. For the highlight to be reliable, we
+need the user's MUC nick, not their bare JID local-part.
+
+**Approach**: derive `own_nick` for the active conversation from
+`muc_occupants[jid]` — find the entry where the nick matches the resource part
+of messages sent by the user. The simplest heuristic: when `ChatScreen::on_join_room`
+or `SubmitJoinRoom` fires, the user provides a nick explicitly. Store it.
+
+Add to `ChatScreen`:
+```rust
+/// L2: nick used per room (room_jid → nick)
+muc_own_nicks: HashMap<String, String>,
+```
+
+Populate in the `SubmitJoinRoom` and `SubmitCreateRoom` intercept handlers
+(nick is already available there). Pass to `convo.view()` as:
+```rust
+let own_nick = if self.muc_jids.contains(jid) {
+    self.muc_own_nicks.get(jid).map(|s| s.as_str()).unwrap_or("")
+} else {
+    ""  // DM: no mention highlight needed
+};
+```
+
+---
+
+#### Files to touch — summary
+
+| File | Change |
+|---|---|
+| `src/ui/conversation.rs` | Add `mention_prefix: Option<String>` field; add `MentionSelected(String)` + `MentionDismissed` variants; update `update()` to set/clear prefix and handle selection; update `view()` signature to accept `occupants` + `own_nick`; add autocomplete panel above composer; add highlight logic per-message row |
+| `src/ui/chat.rs` | Add `muc_own_nicks: HashMap<String, String>` field; populate in `SubmitJoinRoom`/`SubmitCreateRoom` intercept; update `convo.view(...)` call to pass occupants slice + own_nick |
+| No new files | All logic fits in the existing two files |
+
+**No changes to**: `src/xmpp/mod.rs`, `src/ui/muc_panel.rs`, `src/ui/sidebar.rs`,
+any engine or MASM files.
+
+---
+
+#### Risks and constraints
+
+- **Cursor position**: iced 0.13 text_input does not expose cursor index. The
+  last-`@`-with-no-space heuristic is good enough for V1 but can misfire if the
+  user edits text in the middle of the composer. Document as known limitation.
+- **Completeness cap**: limit to 8 suggestions (`.take(8)`) to avoid overflowing
+  the screen in large rooms.
+- **Empty rooms / DM**: `occupants` is `&[]` for DM conversations, so the
+  autocomplete panel will never render. Safe.
+- **own_nick missing**: if the user joined before `muc_own_nicks` was populated
+  (e.g. from a restored session), highlight will not fire. Acceptable for V1.
+
+**Done when**:
+- Typing `@` in a MUC room composer shows a dropdown of matching nicks.
+- Clicking a nick inserts `@nick ` into the composer and closes the dropdown.
+- Incoming MUC messages containing `@own_nick` are rendered with a yellow tint.
+- All 296 tests pass; `cargo clippy` reports no errors.
 
 ### L3: Message moderation by room moderators (XEP-0425)
 **Goal**: Moderators can delete any message in a room; the message is replaced with

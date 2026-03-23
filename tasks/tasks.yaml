@@ -212,6 +212,14 @@ completed:
   - id: S3
     name: "MUC admin modules"
     completed: "2026-03-22"
+  - id: L2
+    name: "@mention autocomplete in MUC"
+    completed: "2026-03-23"
+    notes: |
+      Typing @ in the MUC composer shows an autocomplete dropdown of available
+      occupants filtered by prefix. Selecting a nick inserts @nick into the
+      composer. Messages containing @own_nick are highlighted with an amber tint.
+      State: mention_prefix in ConversationView; muc_own_nicks in ChatScreen.
   - id: M6
     name: "Reaction hover bar"
     completed: "2026-03-22"
@@ -274,15 +282,6 @@ pending:
       files:
         - "src/ui/"
         - "src/xmpp/engine.rs"
-
-    - id: L2
-      name: "@mention autocomplete"
-      xep: "XEP-0372"
-      description: |
-        In MUC, typing @ shows autocomplete dropdown of room occupants.
-        Highlighted messages when mentioned.
-      files:
-        - "src/ui/conversation.rs"
 
     - id: L3
       name: "Message moderation by moderators"
@@ -486,9 +485,9 @@ implemented_xeps:
 
 # Statistics
 stats:
-  completed: 59
+  completed: 60
   pending_critical: 2
-  pending_high: 4
+  pending_high: 3
   pending_medium: 7
   pending_low: 9
   total_xeps_implemented: 26

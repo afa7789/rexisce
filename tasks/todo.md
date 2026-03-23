@@ -17,6 +17,7 @@
 - ✅ **J2**: Custom status message
 - ✅ **J4**: Sound notifications
 - ✅ **K1** (PLAN.md): Room creation UI + config modal (2026-03-23)
+- ✅ **L2** (PLAN.md): @mention autocomplete in MUC (2026-03-23) — dropdown above composer, amber highlight for mentioned messages
 
 ## Phase B — Storage Layer
 - [x] ✅ **B4**: Load message history on conversation open (50 most recent) — (2026-03-22)

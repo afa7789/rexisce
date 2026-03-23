@@ -16,6 +16,8 @@ use iced::{
     Alignment, Color, Element, Font, Length, Task,
 };
 
+use crate::ui::muc_panel::OccupantEntry;
+
 use chrono::{TimeZone, Utc};
 
 use crate::xmpp::modules::link_preview::LinkPreview;
@@ -158,6 +160,8 @@ pub struct ConversationView {
     message_states: std::collections::HashMap<String, MessageState>,
     /// M6: currently hovered message ID for showing action bar
     hovered_message: Option<String>,
+    /// L2: @mention autocomplete — Some(prefix) when active, None when inactive
+    mention_prefix: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -201,6 +205,9 @@ pub enum Message {
     MessageRead(String),      // (msg_id) — K5 displayed marker
     // M6: hover state for action bar
     SetHoveredMessage(Option<String>), // Some(msg_id) or None to clear
+    // L2: @mention autocomplete
+    MentionSelected(String), // nick string (without @)
+    MentionDismissed,        // dismiss autocomplete without selecting
 }
 
 impl ConversationView {
@@ -230,6 +237,7 @@ impl ConversationView {
             drag_drop_active: false,
             message_states: std::collections::HashMap::new(),
             hovered_message: None,
+            mention_prefix: None,
         }
     }
 
@@ -302,6 +310,19 @@ impl ConversationView {
             Message::ComposerChanged(v) => {
                 let was_empty = self.composer.is_empty();
                 self.composer = v;
+                // L2: detect last `@` with no space after it to activate autocomplete
+                self.mention_prefix = {
+                    if let Some(at_pos) = self.composer.rfind('@') {
+                        let after_at = &self.composer[at_pos + 1..];
+                        if !after_at.contains(' ') {
+                            Some(after_at.to_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
                 if !self.composer.is_empty() && was_empty {
                     return Task::done(Message::ComposingStarted);
                 } else if self.composer.is_empty() && !was_empty {
@@ -313,6 +334,7 @@ impl ConversationView {
                 self.composer.clear();
                 self.reply_to = None;
                 self.edit_mode = None;
+                self.mention_prefix = None;
                 Task::none()
             }
             Message::Scrolled(offset) => {
@@ -501,6 +523,21 @@ impl ConversationView {
                 self.hovered_message = msg_id;
                 Task::none()
             }
+            // L2: autocomplete — replace the trailing @prefix with @nick
+            Message::MentionSelected(nick) => {
+                if let Some(at_pos) = self.composer.rfind('@') {
+                    self.composer.truncate(at_pos);
+                    self.composer.push('@');
+                    self.composer.push_str(&nick);
+                    self.composer.push(' ');
+                }
+                self.mention_prefix = None;
+                Task::none()
+            }
+            Message::MentionDismissed => {
+                self.mention_prefix = None;
+                Task::none()
+            }
         }
     }
 
@@ -508,6 +545,8 @@ impl ConversationView {
         &self,
         avatars: &std::collections::HashMap<String, Vec<u8>>,
         time_format: crate::config::TimeFormat,
+        occupants: &[OccupantEntry],
+        own_nick: &str,
     ) -> Element<'_, Message> {
         let ts_format = match time_format {
             crate::config::TimeFormat::TwentyFourHour => "%H:%M",
@@ -778,6 +817,23 @@ impl ConversationView {
                     .into()
             };
 
+            // L2: wrap in amber highlight if own_nick is @-mentioned in this message
+            let is_mentioned = !own_nick.is_empty()
+                && m.body.contains(&format!("@{}", own_nick));
+            let row_elem: Element<Message> = if is_mentioned {
+                container(row_elem)
+                    .width(Length::Fill)
+                    .style(|_theme: &iced::Theme| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(
+                            0.98, 0.85, 0.20, 0.25,
+                        ))),
+                        ..Default::default()
+                    })
+                    .into()
+            } else {
+                row_elem
+            };
+
             // M6: wrap in mouse_area for hover detection and add react row below
             let msg_id_for_hover = m.id.clone();
             let row_elem = mouse_area(row_elem)
@@ -946,6 +1002,46 @@ impl ConversationView {
             None
         };
 
+        // L2: @mention autocomplete panel — shown above composer when mention_prefix is Some
+        let mention_panel: Option<Element<Message>> =
+            if let Some(ref prefix) = self.mention_prefix {
+                let prefix_lower = prefix.to_lowercase();
+                let matches: Vec<String> = occupants
+                    .iter()
+                    .filter(|o| o.available && o.nick.to_lowercase().starts_with(&prefix_lower))
+                    .map(|o| o.nick.clone())
+                    .collect();
+                if matches.is_empty() {
+                    None
+                } else {
+                    let mut panel_col: iced::widget::Column<Message> =
+                        column![].spacing(2).padding([4, 8]);
+                    // Dismiss button at the top
+                    panel_col = panel_col.push(
+                        button(text("✕ Dismiss").size(10))
+                            .on_press(Message::MentionDismissed)
+                            .padding([2, 6]),
+                    );
+                    for nick in matches {
+                        let nick_clone = nick.clone();
+                        panel_col = panel_col.push(
+                            button(text(format!("@{}", nick)).size(13))
+                                .on_press(Message::MentionSelected(nick_clone))
+                                .padding([4, 8])
+                                .width(Length::Fill),
+                        );
+                    }
+                    Some(
+                        container(panel_col)
+                            .width(Length::Fill)
+                            .padding([2, 0])
+                            .into(),
+                    )
+                }
+            } else {
+                None
+            };
+
         let emoji_btn = button(text("😊").size(14))
             .on_press(Message::EmojiPickerToggled)
             .padding([6, 8]);
@@ -1113,6 +1209,9 @@ impl ConversationView {
             col = col.push(strip);
         }
         if let Some(panel) = emoji_panel {
+            col = col.push(panel);
+        }
+        if let Some(panel) = mention_panel {
             col = col.push(panel);
         }
         col.push(composer_row).height(Length::Fill).into()
