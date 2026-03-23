@@ -33,7 +33,9 @@ use super::{
     modules::file_upload::FileUploadManager,
     modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery},
     modules::muc::MucManager,
+    modules::muc_config::MucConfigManager,
     modules::presence_machine::PresenceMachine,
+    modules::push::PushManager,
     modules::stream_mgmt::StreamMgmt,
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
 };
@@ -170,8 +172,12 @@ async fn run_session(
     let mut avatar_mgr = AvatarManager::new();
     // D3: XEP-0045 multi-user chat manager
     let mut muc_mgr = MucManager::new();
+    // K1: XEP-0045 room config manager
+    let mut muc_config_mgr = MucConfigManager::new();
     // D4: XEP-0048 bookmarks manager
     let mut bookmark_mgr = BookmarkManager::new();
+    // K7: XEP-0357 push notifications manager
+    let mut push_mgr = PushManager::new();
 
     // S6: privacy settings — control whether we send receipts, typing, read markers
     let flags = (config.send_receipts as u8)
@@ -217,7 +223,7 @@ async fn run_session(
                     }
                     Some(ev) => {
 
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut bookmark_mgr).await;
+                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr).await;
                     }
                 }
             }
@@ -322,6 +328,18 @@ async fn run_session(
                         outbox.push_back(muc_mgr.join_room(&jid, &nick));
                         tracing::info!("muc: joining room {jid} as {nick}");
                     }
+                    // K1: Create a new MUC room (same as join; server sends 201 on creation)
+                    Some(XmppCommand::CreateRoom { local, service, nick }) => {
+                        let room_jid = format!("{}@{}", local, service);
+                        outbox.push_back(muc_mgr.join_room(&room_jid, &nick));
+                        tracing::info!("muc: creating room {room_jid} as {nick}");
+                    }
+                    // K1: Submit room configuration form
+                    Some(XmppCommand::ConfigureRoom { room_jid, config }) => {
+                        let (_, iq) = muc_config_mgr.build_config_submit(&room_jid, &config);
+                        outbox.push_back(iq);
+                        tracing::info!("muc: submitting config for {room_jid}");
+                    }
                     Some(XmppCommand::LeaveRoom(jid)) => {
                         // D3: XEP-0045 MUC leave
                         if let Some(stanza) = muc_mgr.leave_room(&jid) {
@@ -380,6 +398,24 @@ async fn run_session(
                             }
                         }
                     }
+                    // K7: Enable push notifications (XEP-0357)
+                    Some(XmppCommand::EnablePush { service_jid }) => {
+                        let iq = push_mgr.build_enable_iq(&service_jid);
+                        outbox.push_back(iq);
+                        tracing::info!("push: enabling notifications via {}", service_jid);
+                    }
+                    // K7: Disable push notifications (XEP-0357)
+                    Some(XmppCommand::DisablePush { service_jid }) => {
+                        let iq = push_mgr.build_disable_iq(&service_jid);
+                        outbox.push_back(iq);
+                        tracing::info!("push: disabling notifications for {}", service_jid);
+                    }
+                    // K7: Disable all push notifications (XEP-0357)
+                    Some(XmppCommand::DisableAllPush) => {
+                        let iq = push_mgr.build_disable_all_iq();
+                        outbox.push_back(iq);
+                        tracing::info!("push: disabling all notifications");
+                    }
                 }
             }
         }
@@ -412,7 +448,9 @@ async fn handle_client_event(
     file_upload_mgr: &mut FileUploadManager,
     avatar_mgr: &mut AvatarManager,
     muc_mgr: &mut MucManager,
+    muc_config_mgr: &mut MucConfigManager,
     bookmark_mgr: &mut BookmarkManager,
+    push_mgr: &mut PushManager,
 ) {
     match ev {
         tokio_xmpp::Event::Online { bound_jid, .. } => {
@@ -505,6 +543,7 @@ async fn handle_client_event(
                 file_upload_mgr,
                 avatar_mgr,
                 muc_mgr,
+                muc_config_mgr,
                 bookmark_mgr,
             )
             .await;
@@ -526,6 +565,7 @@ async fn dispatch_stanza(
     file_upload_mgr: &mut FileUploadManager,
     avatar_mgr: &mut AvatarManager,
     muc_mgr: &mut MucManager,
+    muc_config_mgr: &mut MucConfigManager,
     bookmark_mgr: &mut BookmarkManager,
 ) {
     // F1: emit received stanza to debug console before routing
@@ -563,6 +603,7 @@ async fn dispatch_stanza(
                 disco_mgr,
                 file_upload_mgr,
                 avatar_mgr,
+                muc_config_mgr,
                 bookmark_mgr,
             )
             .await
@@ -653,6 +694,22 @@ async fn dispatch_stanza(
         "presence" => {
             // D3: update MUC occupant lists from room presence stanzas
             muc_mgr.on_presence(&el);
+            // K1: detect room-created status code 201 in MUC owner presence
+            {
+                const NS_MUC_USER: &str = "http://jabber.org/protocol/muc#user";
+                let is_room_created = el.children().any(|c| {
+                    c.name() == "x" && c.ns() == NS_MUC_USER
+                        && c.children().any(|s| s.name() == "status" && s.attr("code") == Some("201"))
+                });
+                if is_room_created {
+                    if let Some(from) = el.attr("from") {
+                        let room_jid = from.split('/').next().unwrap_or(from).to_string();
+                        let (_, iq) = muc_config_mgr.build_config_request(&room_jid);
+                        outbox.push_back(iq);
+                        tracing::info!("muc: room {room_jid} created, requesting config form");
+                    }
+                }
+            }
             handle_presence(el, event_tx).await;
         }
         _ => {}
@@ -674,6 +731,7 @@ async fn handle_iq(
     disco_mgr: &mut DiscoManager,
     file_upload_mgr: &mut FileUploadManager,
     avatar_mgr: &mut AvatarManager,
+    muc_config_mgr: &mut MucConfigManager,
     bookmark_mgr: &mut BookmarkManager,
 ) {
     // C5: respond to disco#info get requests with our feature list
@@ -791,6 +849,39 @@ async fn handle_iq(
                 .send(XmppEvent::MamPrefsReceived { default_mode })
                 .await;
             return;
+        }
+    }
+    // K1: detect muc#owner config form result
+    const NS_MUC_OWNER: &str = "http://jabber.org/protocol/muc#owner";
+    if el.attr("type") == Some("result") {
+        let has_owner_query = el
+            .children()
+            .any(|c| c.name() == "query" && c.ns() == NS_MUC_OWNER);
+        if has_owner_query {
+            let room_jid = el.attr("from").unwrap_or("").to_string();
+            if let Some(query) = el
+                .children()
+                .find(|c| c.name() == "query" && c.ns() == NS_MUC_OWNER)
+            {
+                if let Some(config) = muc_config_mgr.parse_config_form(query) {
+                    let _ = event_tx
+                        .send(XmppEvent::RoomConfigFormReceived { room_jid, config })
+                        .await;
+                }
+            }
+            return;
+        }
+    }
+    // K1: detect muc config submit result
+    if el.attr("type") == Some("result") {
+        if let Some(id) = el.attr("id") {
+            if id.starts_with("muc-config-submit-") {
+                let room_jid = el.attr("from").unwrap_or("").to_string();
+                let _ = event_tx
+                    .send(XmppEvent::RoomConfigured { room_jid })
+                    .await;
+                return;
+            }
         }
     }
     // D4: detect bookmarks result (private XML storage, XEP-0048)

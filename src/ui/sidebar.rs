@@ -30,6 +30,11 @@ pub struct SidebarScreen {
     show_join_room: bool,
     join_room_jid: String,
     join_room_nick: String,
+    // K1: create MUC room UI state
+    show_create_room: bool,
+    create_room_local: String,
+    create_room_service: String,
+    create_room_nick: String,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +54,12 @@ pub enum Message {
     JoinRoomJidChanged(String),     // D3: room JID input changed
     JoinRoomNickChanged(String),    // D3: nick input changed
     SubmitJoinRoom,                 // D3: submit join room
+    // K1: create room
+    ToggleCreateRoom,
+    CreateRoomLocalChanged(String),
+    CreateRoomServiceChanged(String),
+    CreateRoomNickChanged(String),
+    SubmitCreateRoom,
 }
 
 impl Default for SidebarScreen {
@@ -71,6 +82,10 @@ impl SidebarScreen {
             show_join_room: false,
             join_room_jid: String::new(),
             join_room_nick: String::new(),
+            show_create_room: false,
+            create_room_local: String::new(),
+            create_room_service: String::new(),
+            create_room_nick: String::new(),
         }
     }
 
@@ -109,6 +124,19 @@ impl SidebarScreen {
 
     pub fn join_room_nick(&self) -> &str {
         &self.join_room_nick
+    }
+
+    /// K1: Get the create-room form fields.
+    pub fn create_room_local(&self) -> &str {
+        &self.create_room_local
+    }
+
+    pub fn create_room_service(&self) -> &str {
+        &self.create_room_service
+    }
+
+    pub fn create_room_nick(&self) -> &str {
+        &self.create_room_nick
     }
 
     /// H3: Returns the pending rename (jid, new_name) if SubmitRename was triggered.
@@ -177,23 +205,46 @@ impl SidebarScreen {
                 self.join_room_jid.clear();
                 self.join_room_nick.clear();
             }
+            // K1: create room
+            Message::ToggleCreateRoom => {
+                self.show_create_room = !self.show_create_room;
+                self.create_room_local.clear();
+                self.create_room_service.clear();
+                self.create_room_nick.clear();
+            }
+            Message::CreateRoomLocalChanged(v) => self.create_room_local = v,
+            Message::CreateRoomServiceChanged(v) => self.create_room_service = v,
+            Message::CreateRoomNickChanged(v) => self.create_room_nick = v,
+            Message::SubmitCreateRoom => {
+                // ChatScreen intercepts this
+                self.show_create_room = false;
+                self.create_room_local.clear();
+                self.create_room_service.clear();
+                self.create_room_nick.clear();
+            }
         }
         Task::none()
     }
 
     /// G6: render sidebar with optional draft indicators.
     /// `drafts` is a list of JIDs that currently have a non-empty draft.
-    pub fn view_with_drafts(&self, drafts: &[String]) -> Element<'_, Message> {
+    /// `default_conference_service` is pre-filled in the create-room form.
+    pub fn view_with_drafts(&self, drafts: &[String], default_conference_service: &str) -> Element<'_, Message> {
         let add_btn = button("+")
             .on_press(Message::ToggleAddContact)
             .padding([2, 6]);
         let join_btn = button("#")
             .on_press(Message::ToggleJoinRoom)
             .padding([2, 6]);
+        let create_btn = button("*")
+            .on_press(Message::ToggleCreateRoom)
+            .padding([2, 6]);
+        let _ = default_conference_service; // used for default pre-fill (set via ToggleCreateRoom caller)
         let header_row = row![
             text("Contacts").size(16).width(Length::Fill),
             add_btn,
             join_btn,
+            create_btn,
         ]
         .spacing(4)
         .align_y(Alignment::Center);
@@ -228,6 +279,36 @@ impl SidebarScreen {
                 column![jid_input, row![nick_input, join_submit_btn].spacing(4),]
                     .spacing(4)
                     .into(),
+            )
+        } else {
+            None
+        };
+
+        // K1: create room input row
+        let create_room_row: Option<Element<Message>> = if self.show_create_room {
+            let local_input = text_input("room-name", &self.create_room_local)
+                .on_input(Message::CreateRoomLocalChanged)
+                .on_submit(Message::SubmitCreateRoom)
+                .padding(4);
+            let service_input = text_input("conference.example.com", &self.create_room_service)
+                .on_input(Message::CreateRoomServiceChanged)
+                .on_submit(Message::SubmitCreateRoom)
+                .padding(4);
+            let nick_input = text_input("nick", &self.create_room_nick)
+                .on_input(Message::CreateRoomNickChanged)
+                .on_submit(Message::SubmitCreateRoom)
+                .padding(4);
+            let create_submit_btn = button("Create")
+                .on_press(Message::SubmitCreateRoom)
+                .padding([4, 8]);
+            Some(
+                column![
+                    local_input,
+                    service_input,
+                    row![nick_input, create_submit_btn].spacing(4),
+                ]
+                .spacing(4)
+                .into(),
             )
         } else {
             None
@@ -362,6 +443,9 @@ impl SidebarScreen {
         }
         if let Some(jr_row) = join_room_row {
             col = col.push(jr_row);
+        }
+        if let Some(cr_row) = create_room_row {
+            col = col.push(cr_row);
         }
 
         for row in contact_rows {

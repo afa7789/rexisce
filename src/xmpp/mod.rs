@@ -133,6 +133,17 @@ pub enum XmppEvent {
     MamPrefsReceived {
         default_mode: String,
     },
+
+    // K1: Server returned a config form for a newly created room.
+    RoomConfigFormReceived {
+        room_jid: String,
+        /// Pre-parsed defaults from the server's form.
+        config: modules::muc_config::MucRoomConfig,
+    },
+    // K1: Room configuration was accepted by the server — room is now live.
+    RoomConfigured {
+        room_jid: String,
+    },
 }
 
 /// Commands sent from the UI to the XMPP engine.
@@ -207,5 +218,33 @@ pub enum XmppCommand {
         room: String,
         user: String,
         reason: Option<String>,
+    },
+    /// K7: Enable push notifications (XEP-0357).
+    EnablePush {
+        /// The push service JID (e.g., "push.example.com").
+        service_jid: String,
+    },
+    /// K7: Disable push notifications (XEP-0357).
+    DisablePush {
+        /// The push service JID to disable.
+        service_jid: String,
+    },
+    /// K7: Disable all push notifications (XEP-0357).
+    DisableAllPush,
+    /// K1: Create a new MUC room by joining it (XEP-0045 §8).
+    /// The engine joins the room; if the server returns status 201 (room created),
+    /// it requests the config form automatically.
+    CreateRoom {
+        /// Local part of the room JID (before the '@').
+        local: String,
+        /// Conference service domain (e.g. "conference.example.com").
+        service: String,
+        /// Nickname to use in the new room.
+        nick: String,
+    },
+    /// K1: Submit a room configuration form (XEP-0045 §9).
+    ConfigureRoom {
+        room_jid: String,
+        config: crate::xmpp::modules::muc_config::MucRoomConfig,
     },
 }

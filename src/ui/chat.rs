@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use iced::{
-    widget::{column, container, row, text},
-    Element, Length, Task,
+    widget::{button, checkbox, column, container, row, text, text_input},
+    Alignment, Element, Length, Task,
 };
 
 use crate::xmpp::{
@@ -40,6 +40,8 @@ pub struct ChatScreen {
     muc_jids: std::collections::HashSet<String>,
     /// D1: shadow occupant lists (room JID → vec) used to update panels
     muc_occupants: HashMap<String, Vec<OccupantEntry>>,
+    /// K1: JID of a room waiting for config form submission.
+    pending_room_config: Option<(String, crate::xmpp::modules::muc_config::MucRoomConfig)>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +55,14 @@ pub enum Message {
     SetPresence(PresenceStatus),      // C2: user changed their presence status
     MessageDelivered(String, String), // M2: (jid, msg_id) — K4 delivery receipt
     MessageRead(String, String),      // M2: (jid, msg_id) — K5 read marker
+    // K1: room config flow
+    RoomConfigFormReceived(String, crate::xmpp::modules::muc_config::MucRoomConfig),
+    RoomConfigured(String),
+    RoomConfigNameChanged(String),
+    RoomConfigPublicChanged(bool),
+    RoomConfigPersistentChanged(bool),
+    SubmitRoomConfig,
+    DismissRoomConfig,
 }
 
 impl ChatScreen {
@@ -69,6 +79,7 @@ impl ChatScreen {
             muc_panels: HashMap::new(),
             muc_jids: std::collections::HashSet::new(),
             muc_occupants: HashMap::new(),
+            pending_room_config: None,
         }
     }
 
@@ -338,6 +349,24 @@ impl ChatScreen {
                     return Task::none();
                 }
 
+                // K1: intercept SubmitCreateRoom
+                if let sidebar::Message::SubmitCreateRoom = smsg {
+                    let local = self.sidebar.create_room_local().to_owned();
+                    let service = self.sidebar.create_room_service().to_owned();
+                    let nick = self.sidebar.create_room_nick().to_owned();
+                    if !local.trim().is_empty() && !service.trim().is_empty() && !nick.trim().is_empty() {
+                        let room_jid = format!("{}@{}", local, service);
+                        self.on_join_room(&room_jid);
+                        self.pending_commands.push(crate::xmpp::XmppCommand::CreateRoom {
+                            local,
+                            service,
+                            nick,
+                        });
+                    }
+                    let _ = self.sidebar.update(smsg);
+                    return Task::none();
+                }
+
                 // H3: intercept SubmitRename
                 if let sidebar::Message::SubmitRename = smsg {
                     if let Some((jid, name)) = self.sidebar.pending_rename() {
@@ -417,6 +446,51 @@ impl ChatScreen {
                 if let Some(convo) = self.conversations.get_mut(&jid) {
                     let _ = convo.update(conversation::Message::MessageRead(msg_id));
                 }
+                Task::none()
+            }
+
+            // K1: room config form received from server
+            Message::RoomConfigFormReceived(room_jid, config) => {
+                self.pending_room_config = Some((room_jid, config));
+                Task::none()
+            }
+            // K1: room configuration accepted — room is now live
+            Message::RoomConfigured(room_jid) => {
+                self.pending_room_config = None;
+                let own = self.own_jid.clone();
+                self.conversations
+                    .entry(room_jid.clone())
+                    .or_insert_with(|| ConversationView::new(room_jid.clone(), own));
+                self.active_jid = Some(room_jid);
+                Task::none()
+            }
+            Message::RoomConfigNameChanged(v) => {
+                if let Some((_, ref mut cfg)) = self.pending_room_config {
+                    cfg.room_name = Some(v);
+                }
+                Task::none()
+            }
+            Message::RoomConfigPublicChanged(v) => {
+                if let Some((_, ref mut cfg)) = self.pending_room_config {
+                    cfg.public = Some(v);
+                }
+                Task::none()
+            }
+            Message::RoomConfigPersistentChanged(v) => {
+                if let Some((_, ref mut cfg)) = self.pending_room_config {
+                    cfg.persistent_room = Some(v);
+                }
+                Task::none()
+            }
+            Message::SubmitRoomConfig => {
+                if let Some((room_jid, config)) = self.pending_room_config.take() {
+                    self.pending_commands
+                        .push(crate::xmpp::XmppCommand::ConfigureRoom { room_jid, config });
+                }
+                Task::none()
+            }
+            Message::DismissRoomConfig => {
+                self.pending_room_config = None;
                 Task::none()
             }
 
@@ -660,37 +734,83 @@ impl ChatScreen {
             .filter(|(_, cv)| !cv.composer.trim().is_empty())
             .map(|(jid, _)| jid.clone())
             .collect();
-        let sidebar_view = self.sidebar.view_with_drafts(&drafts).map(Message::Sidebar);
+        // K1: derive default conference service from own JID domain
+        let conference_service = self
+            .own_jid
+            .split('@')
+            .nth(1)
+            .map(|domain| format!("conference.{}", domain))
+            .unwrap_or_default();
+        let sidebar_view = self.sidebar.view_with_drafts(&drafts, &conference_service).map(Message::Sidebar);
 
-        let main_area: Element<Message> = match &self.active_jid {
-            None => container(text("Select a contact to start chatting").size(14))
+        // K1: if there is a pending room config, show the config modal instead of the conversation
+        let main_area: Element<Message> = if let Some((ref room_jid, ref cfg)) = self.pending_room_config {
+            let name_val = cfg.room_name.clone().unwrap_or_default();
+            let public_val = cfg.public.unwrap_or(true);
+            let persistent_val = cfg.persistent_room.unwrap_or(true);
+            let name_input = text_input("Room display name", &name_val)
+                .on_input(Message::RoomConfigNameChanged)
+                .padding(6);
+            let public_check = checkbox("Public room", public_val)
+                .on_toggle(Message::RoomConfigPublicChanged);
+            let persistent_check = checkbox("Persistent room", persistent_val)
+                .on_toggle(Message::RoomConfigPersistentChanged);
+            let cancel_btn = button(text("Cancel").size(13))
+                .on_press(Message::DismissRoomConfig)
+                .padding([4, 12]);
+            let create_btn = button(text("Create Room").size(13))
+                .on_press(Message::SubmitRoomConfig)
+                .padding([4, 12]);
+            let btn_row = row![cancel_btn, create_btn]
+                .spacing(8)
+                .align_y(Alignment::Center);
+            let modal_col = column![
+                text(format!("Configure New Room: {}", room_jid)).size(16),
+                text("Room Name:").size(12),
+                name_input,
+                public_check,
+                persistent_check,
+                btn_row,
+            ]
+            .spacing(12)
+            .padding(24)
+            .width(Length::Fill);
+            container(modal_col)
                 .center(Length::Fill)
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .into(),
+                .into()
+        } else {
+            match &self.active_jid {
+                None => container(text("Select a contact to start chatting").size(14))
+                    .center(Length::Fill)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into(),
 
-            Some(jid) => {
-                if let Some(convo) = self.conversations.get(jid) {
-                    let jid2 = jid.clone();
-                    // G2: show "is typing" if peer typed in the last 5 seconds
-                    let is_typing = self
-                        .typing_peers
-                        .get(jid)
-                        .is_some_and(|t| t.elapsed().as_secs() < 5);
-                    let conv_view = convo
-                        .view(&self.avatars, time_format)
-                        .map(move |m| Message::Conversation(jid2.clone(), m));
-                    if is_typing {
-                        let indicator =
-                            container(text(format!("{} is typing…", jid)).size(11)).padding([2, 8]);
-                        column![conv_view, indicator]
-                            .height(iced::Length::Fill)
-                            .into()
+                Some(jid) => {
+                    if let Some(convo) = self.conversations.get(jid) {
+                        let jid2 = jid.clone();
+                        // G2: show "is typing" if peer typed in the last 5 seconds
+                        let is_typing = self
+                            .typing_peers
+                            .get(jid)
+                            .is_some_and(|t| t.elapsed().as_secs() < 5);
+                        let conv_view = convo
+                            .view(&self.avatars, time_format)
+                            .map(move |m| Message::Conversation(jid2.clone(), m));
+                        if is_typing {
+                            let indicator =
+                                container(text(format!("{} is typing…", jid)).size(11)).padding([2, 8]);
+                            column![conv_view, indicator]
+                                .height(iced::Length::Fill)
+                                .into()
+                        } else {
+                            conv_view
+                        }
                     } else {
-                        conv_view
+                        container(text("Loading…")).center(Length::Fill).into()
                     }
-                } else {
-                    container(text("Loading…")).center(Length::Fill).into()
                 }
             }
         };

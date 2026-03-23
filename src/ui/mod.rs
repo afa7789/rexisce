@@ -869,6 +869,22 @@ impl App {
                         self.settings.mam_default_mode = Some(default_mode.clone());
                         let _ = config::save(&self.settings);
                     }
+                    // K1: room config form received from server
+                    XmppEvent::RoomConfigFormReceived { room_jid, config } => {
+                        if let Screen::Chat(ref mut chat) = self.screen {
+                            return chat
+                                .update(chat::Message::RoomConfigFormReceived(room_jid, config))
+                                .map(Message::Chat);
+                        }
+                    }
+                    // K1: room configuration accepted — room is now live
+                    XmppEvent::RoomConfigured { room_jid } => {
+                        if let Screen::Chat(ref mut chat) = self.screen {
+                            return chat
+                                .update(chat::Message::RoomConfigured(room_jid))
+                                .map(Message::Chat);
+                        }
+                    }
                     XmppEvent::BookmarksReceived(bookmarks) => {
                         tracing::info!("D4: {} bookmark(s) received", bookmarks.len());
                         // D4: autojoin rooms — send JoinRoom for each autojoin bookmark
