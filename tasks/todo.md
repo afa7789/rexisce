@@ -32,7 +32,7 @@
 ## Phase D — UI Panels
 - [ ] **D1**: Render OccupantPanel in MUC conversations
 - [x] ✅ **D2** — (2026-03-22)
-- [ ] **D3**: MUC join/leave UI flow
+- [x] ✅ **D3**: MUC join/leave UI flow — (2026-03-22) JoinRoom/LeaveRoom commands, MucManager wired into engine, join-room input row in sidebar
 - [ ] **D4**: Bookmarks autojoin on connect
 
 ## Phase E — Rich Features

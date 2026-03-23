@@ -31,6 +31,7 @@ use super::{
     modules::disco::{DiscoIdentity, DiscoManager},
     modules::file_upload::FileUploadManager,
     modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery},
+    modules::muc::MucManager,
     modules::presence_machine::PresenceMachine,
     modules::stream_mgmt::StreamMgmt,
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
@@ -159,6 +160,8 @@ async fn run_session(
     let mut file_upload_mgr = FileUploadManager::new();
     // H1: avatar manager (vCard-temp fallback)
     let mut avatar_mgr = AvatarManager::new();
+    // D3: XEP-0045 multi-user chat manager
+    let mut muc_mgr = MucManager::new();
 
     loop {
         // Drain outbox before blocking on the next event.
@@ -198,7 +201,7 @@ async fn run_session(
                     }
                     Some(ev) => {
 
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr).await;
+                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr).await;
                     }
                 }
             }
@@ -288,6 +291,18 @@ async fn run_session(
                             outbox.push_back(make_retraction_message(to_jid, &origin_id));
                         }
                     }
+                    Some(XmppCommand::JoinRoom { jid, nick }) => {
+                        // D3: XEP-0045 MUC join
+                        outbox.push_back(muc_mgr.join_room(&jid, &nick));
+                        tracing::info!("muc: joining room {jid} as {nick}");
+                    }
+                    Some(XmppCommand::LeaveRoom(jid)) => {
+                        // D3: XEP-0045 MUC leave
+                        if let Some(stanza) = muc_mgr.leave_room(&jid) {
+                            outbox.push_back(stanza);
+                            tracing::info!("muc: leaving room {jid}");
+                        }
+                    }
                     Some(XmppCommand::RemoveContact(_))
                     | Some(XmppCommand::RenameContact { .. })
                     | Some(XmppCommand::FetchVCard(_))
@@ -325,6 +340,7 @@ async fn handle_client_event(
     disco_mgr: &mut DiscoManager,
     file_upload_mgr: &mut FileUploadManager,
     avatar_mgr: &mut AvatarManager,
+    muc_mgr: &mut MucManager,
 ) {
     match ev {
         tokio_xmpp::Event::Online { bound_jid, .. } => {
@@ -408,6 +424,7 @@ async fn handle_client_event(
                 disco_mgr,
                 file_upload_mgr,
                 avatar_mgr,
+                muc_mgr,
             )
             .await;
         }
@@ -427,6 +444,7 @@ async fn dispatch_stanza(
     disco_mgr: &mut DiscoManager,
     file_upload_mgr: &mut FileUploadManager,
     avatar_mgr: &mut AvatarManager,
+    muc_mgr: &mut MucManager,
 ) {
     // F1: emit received stanza to debug console before routing
     let xml_str = String::from(&el);
@@ -467,6 +485,18 @@ async fn dispatch_stanza(
             .await
         }
         "message" => {
+            // D3: XEP-0045 groupchat message — route through MucManager
+            if let Some(muc_msg) = muc_mgr.on_groupchat_message(&el) {
+                let _ = event_tx
+                    .send(XmppEvent::MessageReceived(IncomingMessage {
+                        id: muc_msg.id,
+                        from: format!("{}/{}", muc_msg.room_jid, muc_msg.from_nick),
+                        body: muc_msg.body,
+                        is_historical: false,
+                    }))
+                    .await;
+                return;
+            }
             // C3: XEP-0313 MAM result wrapper — extract forwarded message
             if let Some(mam_msg) = mam_mgr.on_mam_message(&el) {
                 if !mam_msg.body.is_empty() {
@@ -515,7 +545,11 @@ async fn dispatch_stanza(
             }
             handle_message(el, event_tx, blocking_mgr).await;
         }
-        "presence" => handle_presence(el, event_tx).await,
+        "presence" => {
+            // D3: update MUC occupant lists from room presence stanzas
+            muc_mgr.on_presence(&el);
+            handle_presence(el, event_tx).await;
+        }
         _ => {}
     }
 }
