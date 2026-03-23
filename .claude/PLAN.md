@@ -1114,7 +1114,10 @@ F1–F5 independent of each other (depend on B1 only)
 - J4 ✅ Sound notifications
 - L1 ✅ New messages separator line
 - M1 ✅ Message timestamps on bubbles
+- M2 ✅ Delivery/read status indicators (✓ ✓✓ ✓✓ blue)
 - M3 ✅ Emoji picker in composer
+- S1 ✅ Auto-away after 5min idle, extended after 15min
+- S6 ✅ Privacy panel — per-account toggles for receipts/typing/read markers
 
 ---
 
