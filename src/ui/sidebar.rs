@@ -35,20 +35,20 @@ pub struct SidebarScreen {
 #[derive(Debug, Clone)]
 pub enum Message {
     SelectContact(String),
-    ToggleAddContact,                      // H3: show/hide add-contact input
-    AddContactInputChanged(String),        // H3: input field changed
-    SubmitAddContact,                      // H3: submit add contact
-    RemoveContact(String),                 // H3: remove a contact
-    StartRename(String, String),           // H3: (jid, current_name) begin inline rename
-    RenameInputChanged(String),            // H3: rename text input changed
-    SubmitRename,                          // H3: confirm rename
-    CancelRename,                          // H3: cancel rename
-    ShowProfile(String),                   // H4: show contact profile popover
-    CloseProfile,                          // H4: close profile popover
-    ToggleJoinRoom,                        // D3: show/hide join-room input
-    JoinRoomJidChanged(String),            // D3: room JID input changed
-    JoinRoomNickChanged(String),           // D3: nick input changed
-    SubmitJoinRoom,                        // D3: submit join room
+    ToggleAddContact,               // H3: show/hide add-contact input
+    AddContactInputChanged(String), // H3: input field changed
+    SubmitAddContact,               // H3: submit add contact
+    RemoveContact(String),          // H3: remove a contact
+    StartRename(String, String),    // H3: (jid, current_name) begin inline rename
+    RenameInputChanged(String),     // H3: rename text input changed
+    SubmitRename,                   // H3: confirm rename
+    CancelRename,                   // H3: cancel rename
+    ShowProfile(String),            // H4: show contact profile popover
+    CloseProfile,                   // H4: close profile popover
+    ToggleJoinRoom,                 // D3: show/hide join-room input
+    JoinRoomJidChanged(String),     // D3: room JID input changed
+    JoinRoomNickChanged(String),    // D3: nick input changed
+    SubmitJoinRoom,                 // D3: submit join room
 }
 
 impl Default for SidebarScreen {
@@ -190,9 +190,13 @@ impl SidebarScreen {
         let join_btn = button("#")
             .on_press(Message::ToggleJoinRoom)
             .padding([2, 6]);
-        let header_row = row![text("Contacts").size(16).width(Length::Fill), add_btn, join_btn,]
-            .spacing(4)
-            .align_y(Alignment::Center);
+        let header_row = row![
+            text("Contacts").size(16).width(Length::Fill),
+            add_btn,
+            join_btn,
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
 
         let add_contact_row: Option<Element<Message>> = if self.show_add_contact {
             let input = text_input("JID to add…", &self.add_contact_input)
@@ -221,12 +225,9 @@ impl SidebarScreen {
                 .on_press(Message::SubmitJoinRoom)
                 .padding([4, 8]);
             Some(
-                column![
-                    jid_input,
-                    row![nick_input, join_submit_btn].spacing(4),
-                ]
-                .spacing(4)
-                .into(),
+                column![jid_input, row![nick_input, join_submit_btn].spacing(4),]
+                    .spacing(4)
+                    .into(),
             )
         } else {
             None
@@ -319,10 +320,7 @@ impl SidebarScreen {
                 );
 
                 // H3: if renaming this contact, show inline rename input
-                let is_renaming = self
-                    .rename_state
-                    .as_ref()
-                    .is_some_and(|(j, _)| j == &c.jid);
+                let is_renaming = self.rename_state.as_ref().is_some_and(|(j, _)| j == &c.jid);
 
                 if is_renaming {
                     let (_, new_name) = self.rename_state.as_ref().unwrap();
@@ -384,30 +382,28 @@ impl SidebarScreen {
                 .on_press(Message::CloseProfile)
                 .padding([2, 4]);
             let profile_col = column![
-                row![
-                    text("Profile").size(12).width(Length::Fill),
-                    close_btn,
-                ]
-                .spacing(4)
-                .align_y(Alignment::Center),
+                row![text("Profile").size(12).width(Length::Fill), close_btn,]
+                    .spacing(4)
+                    .align_y(Alignment::Center),
                 text(name).size(13),
                 text(jid.as_str()).size(11),
             ]
             .spacing(4)
             .padding(8);
-            let profile_panel = container(profile_col)
-                .width(Length::Fill)
-                .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgb(
-                        0.13, 0.13, 0.16,
-                    ))),
-                    border: iced::Border {
-                        color: iced::Color::from_rgb(0.3, 0.3, 0.35),
-                        width: 1.0,
-                        radius: 6.0.into(),
-                    },
-                    ..Default::default()
-                });
+            let profile_panel =
+                container(profile_col)
+                    .width(Length::Fill)
+                    .style(|_theme: &iced::Theme| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(
+                            0.13, 0.13, 0.16,
+                        ))),
+                        border: iced::Border {
+                            color: iced::Color::from_rgb(0.3, 0.3, 0.35),
+                            width: 1.0,
+                            radius: 6.0.into(),
+                        },
+                        ..Default::default()
+                    });
             col = col.push(profile_panel);
         }
 

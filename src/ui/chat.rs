@@ -8,10 +8,12 @@ use iced::{
     Element, Length, Task,
 };
 
-use crate::xmpp::{modules::presence_machine::PresenceStatus, IncomingMessage, RosterContact, XmppCommand};
+use crate::xmpp::{
+    modules::presence_machine::PresenceStatus, IncomingMessage, RosterContact, XmppCommand,
+};
 
 use super::{
-    conversation::{ConversationView, DisplayMessage},
+    conversation::{self, ConversationView, DisplayMessage},
     muc_panel::{OccupantEntry, OccupantPanel},
     sidebar::{self, SidebarScreen},
 };
@@ -44,11 +46,13 @@ pub struct ChatScreen {
 pub enum Message {
     Sidebar(sidebar::Message),
     Conversation(String, super::conversation::Message),
-    CloseConversation(String), // G1: close a conversation by JID
-    PeerTyping(String, bool),  // G2: (jid, composing)
-    OpenSettings,              // F3: open settings panel
-    ToggleMute(String),        // J3: toggle mute for a JID
-    SetPresence(PresenceStatus), // C2: user changed their presence status
+    CloseConversation(String),        // G1: close a conversation by JID
+    PeerTyping(String, bool),         // G2: (jid, composing)
+    OpenSettings,                     // F3: open settings panel
+    ToggleMute(String),               // J3: toggle mute for a JID
+    SetPresence(PresenceStatus),      // C2: user changed their presence status
+    MessageDelivered(String, String), // M2: (jid, msg_id) — K4 delivery receipt
+    MessageRead(String, String),      // M2: (jid, msg_id) — K5 read marker
 }
 
 impl ChatScreen {
@@ -100,10 +104,7 @@ impl ChatScreen {
         available: bool,
     ) {
         // Upsert into shadow occupant list
-        let occupants = self
-            .muc_occupants
-            .entry(room_jid.to_string())
-            .or_default();
+        let occupants = self.muc_occupants.entry(room_jid.to_string()).or_default();
         if available {
             // Upsert by nick
             if let Some(existing) = occupants.iter_mut().find(|o| o.nick == nick) {
@@ -178,14 +179,11 @@ impl ChatScreen {
                     {
                         Ok(resp) => {
                             if let Ok(bytes) = resp.bytes().await {
-                                let handle = iced::widget::image::Handle::from_bytes(
-                                    bytes.to_vec(),
-                                );
+                                let handle =
+                                    iced::widget::image::Handle::from_bytes(bytes.to_vec());
                                 return Message::Conversation(
                                     jid2.clone(),
-                                    super::conversation::Message::AttachmentLoaded(
-                                        msg_id, handle,
-                                    ),
+                                    super::conversation::Message::AttachmentLoaded(msg_id, handle),
                                 );
                             }
                         }
@@ -259,6 +257,20 @@ impl ChatScreen {
                     .insert(from, emojis);
                 return;
             }
+        }
+    }
+
+    /// M2: K4 delivery receipt — update message state to Delivered for the matching conversation.
+    pub fn on_message_delivered(&mut self, jid: &str, msg_id: String) {
+        if let Some(convo) = self.conversations.get_mut(jid) {
+            let _ = convo.update(conversation::Message::MessageDelivered(msg_id));
+        }
+    }
+
+    /// M2: K5 read marker — update message state to Read for the matching conversation.
+    pub fn on_message_read(&mut self, jid: &str, msg_id: String) {
+        if let Some(convo) = self.conversations.get_mut(jid) {
+            let _ = convo.update(conversation::Message::MessageRead(msg_id));
         }
     }
 
@@ -392,6 +404,22 @@ impl ChatScreen {
                 Task::none()
             }
 
+            // M2: K4 delivery receipt — update message state
+            Message::MessageDelivered(jid, msg_id) => {
+                if let Some(convo) = self.conversations.get_mut(&jid) {
+                    let _ = convo.update(conversation::Message::MessageDelivered(msg_id));
+                }
+                Task::none()
+            }
+
+            // M2: K5 read marker — update message state
+            Message::MessageRead(jid, msg_id) => {
+                if let Some(convo) = self.conversations.get_mut(&jid) {
+                    let _ = convo.update(conversation::Message::MessageRead(msg_id));
+                }
+                Task::none()
+            }
+
             Message::Conversation(jid, cmsg) => {
                 // J3: intercept ToggleMute to bubble up to App
                 if let super::conversation::Message::ToggleMute = cmsg {
@@ -495,7 +523,8 @@ impl ChatScreen {
                             for att in attachments {
                                 let mime = if att.name.ends_with(".png") {
                                     "image/png"
-                                } else if att.name.ends_with(".jpg") || att.name.ends_with(".jpeg") {
+                                } else if att.name.ends_with(".jpg") || att.name.ends_with(".jpeg")
+                                {
                                     "image/jpeg"
                                 } else if att.name.ends_with(".gif") {
                                     "image/gif"
@@ -503,11 +532,13 @@ impl ChatScreen {
                                     "application/octet-stream"
                                 };
                                 self.pending_upload_targets.push((jid.clone(), att.path));
-                                self.pending_commands.push(crate::xmpp::XmppCommand::RequestUploadSlot {
-                                    filename: att.name,
-                                    size: att.size,
-                                    mime: mime.to_string(),
-                                });
+                                self.pending_commands.push(
+                                    crate::xmpp::XmppCommand::RequestUploadSlot {
+                                        filename: att.name,
+                                        size: att.size,
+                                        mime: mime.to_string(),
+                                    },
+                                );
                             }
                             return Task::none();
                         }
@@ -517,12 +548,13 @@ impl ChatScreen {
                             let new_body = convo.take_draft();
                             if !new_body.trim().is_empty() {
                                 convo.apply_correction(&original_id, &new_body);
-                                self.pending_commands
-                                    .push(crate::xmpp::XmppCommand::SendCorrection {
+                                self.pending_commands.push(
+                                    crate::xmpp::XmppCommand::SendCorrection {
                                         to: jid.clone(),
                                         original_id,
                                         new_body,
-                                    });
+                                    },
+                                );
                             }
                             return Task::none();
                         }
@@ -686,24 +718,17 @@ impl ChatScreen {
         .width(Length::Fill);
 
         // D1: if active JID is a MUC room, show the occupant panel on the right
-        let content_row: Element<Message> =
-            if let Some(ref jid) = self.active_jid {
-                if self.muc_jids.contains(jid.as_str()) {
-                    if let Some(panel) = self.muc_panels.get(jid) {
-                        let panel_view = panel.view().map(|_msg| {
-                            // muc_panel::Message is empty — this branch is unreachable
-                            unreachable!()
-                        });
-                        row![sidebar_view, main_area, panel_view]
-                            .height(Length::Fill)
-                            .width(Length::Fill)
-                            .into()
-                    } else {
-                        row![sidebar_view, main_area]
-                            .height(Length::Fill)
-                            .width(Length::Fill)
-                            .into()
-                    }
+        let content_row: Element<Message> = if let Some(ref jid) = self.active_jid {
+            if self.muc_jids.contains(jid.as_str()) {
+                if let Some(panel) = self.muc_panels.get(jid) {
+                    let panel_view = panel.view().map(|_msg| {
+                        // muc_panel::Message is empty — this branch is unreachable
+                        unreachable!()
+                    });
+                    row![sidebar_view, main_area, panel_view]
+                        .height(Length::Fill)
+                        .width(Length::Fill)
+                        .into()
                 } else {
                     row![sidebar_view, main_area]
                         .height(Length::Fill)
@@ -715,7 +740,13 @@ impl ChatScreen {
                     .height(Length::Fill)
                     .width(Length::Fill)
                     .into()
-            };
+            }
+        } else {
+            row![sidebar_view, main_area]
+                .height(Length::Fill)
+                .width(Length::Fill)
+                .into()
+        };
 
         column![content_row, status_bar].into()
     }

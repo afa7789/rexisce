@@ -92,8 +92,6 @@ pub enum Message {
     PasteFromClipboard,
     // AUTH-2: logout button — disconnect and return to login screen
     Logout,
-    // O2: own presence changed (intercepted from Chat::SetPresence)
-    OwnPresenceChanged(PresenceStatus),
 }
 
 enum Screen {
@@ -378,11 +376,6 @@ impl App {
                 Task::none()
             }
 
-            Message::OwnPresenceChanged(status) => {
-                self.own_presence = status;
-                Task::none()
-            }
-
             Message::Chat(msg) => {
                 // F3: intercept OpenSettings before delegating
                 if let chat::Message::OpenSettings = msg {
@@ -603,11 +596,12 @@ impl App {
                         } else {
                             false
                         };
-                        // A5: fire desktop notification for background conversations (J3: skip muted, BUG-1: skip historical)
+                        // A5: fire desktop notification for background conversations (J3: skip muted, BUG-1: skip historical, O2: skip if DND)
                         let notif_task: Task<Message> = if self.settings.notifications_enabled
                             && !is_active
                             && !msg.is_historical
                             && !self.settings.muted_jids.contains(&bare_from)
+                            && self.own_presence != PresenceStatus::DoNotDisturb
                         {
                             let notif_from = bare_from.clone();
                             let notif_body: String = msg.body.chars().take(100).collect();
@@ -774,13 +768,17 @@ impl App {
                             chat.on_avatar_received(jid.clone(), data.clone());
                         }
                     }
-                    // K4: delivery receipt — log only for now
+                    // K4: delivery receipt — update message state in conversation
                     XmppEvent::MessageDelivered { ref id, ref from } => {
-                        tracing::debug!("K4: delivery receipt from {from} for msg {id}");
+                        if let Screen::Chat(ref mut chat) = self.screen {
+                            chat.on_message_delivered(from, id.clone());
+                        }
                     }
-                    // K5: read marker — log only for now
+                    // K5: read marker — update message state in conversation
                     XmppEvent::MessageRead { ref id, ref from } => {
-                        tracing::debug!("K5: read marker from {from} for msg {id}");
+                        if let Screen::Chat(ref mut chat) = self.screen {
+                            chat.on_message_read(from, id.clone());
+                        }
                     }
                     // J10: MAM prefs received — log only for now
                     XmppEvent::MamPrefsReceived { ref default_mode } => {

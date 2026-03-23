@@ -105,6 +105,15 @@ pub struct DisplayMessage {
     pub retracted: bool,
 }
 
+/// M2/K5: message delivery/read state for own messages (shown as ✓ indicators)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageState {
+    Sending,
+    Sent,
+    Delivered,
+    Read,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConversationView {
     pub peer_jid: String,
@@ -145,6 +154,8 @@ pub struct ConversationView {
     pub pending_attachments: Vec<Attachment>,
     /// I2: drag-drop staging (path string shown to user)
     drag_drop_active: bool,
+    /// M2: delivery/read state for own messages — msg_id → state
+    message_states: std::collections::HashMap<String, MessageState>,
 }
 
 #[derive(Debug, Clone)]
@@ -174,15 +185,18 @@ pub enum Message {
     RequestOlderHistory,          // G8: emitted on scroll to top to request older MAM history
     AttachmentLoaded(String, iced_image::Handle), // I4: (msg_id, image_handle)
     // E4/I3: file upload
-    OpenFilePicker,                              // E4: open native file picker
-    FilePicked(Option<std::path::PathBuf>),      // E4: result from file picker
-    RemoveAttachment(usize),                     // I3: remove staged attachment by index
-    AttachmentProgress(usize, u8),              // I3: (index, progress 0–100)
+    OpenFilePicker,                         // E4: open native file picker
+    FilePicked(Option<std::path::PathBuf>), // E4: result from file picker
+    RemoveAttachment(usize),                // I3: remove staged attachment by index
+    AttachmentProgress(usize, u8),          // I3: (index, progress 0–100)
     // I1: clipboard paste
     PasteFromClipboard,
-    ClipboardImageReady(Vec<u8>),               // I1: PNG bytes from clipboard
+    ClipboardImageReady(Vec<u8>), // I1: PNG bytes from clipboard
     // I2: drag-drop
-    FilesDropped(Vec<std::path::PathBuf>),       // I2: files dropped onto composer
+    FilesDropped(Vec<std::path::PathBuf>), // I2: files dropped onto composer
+    // M2: delivery/read status updates
+    MessageDelivered(String), // (msg_id) — K4 receipt
+    MessageRead(String),      // (msg_id) — K5 displayed marker
 }
 
 impl ConversationView {
@@ -210,6 +224,7 @@ impl ConversationView {
             pending_images: std::collections::HashMap::new(),
             pending_attachments: vec![],
             drag_drop_active: false,
+            message_states: std::collections::HashMap::new(),
         }
     }
 
@@ -369,16 +384,14 @@ impl ConversationView {
                 Task::none()
             }
             // E4/I3: open native file picker via rfd
-            Message::OpenFilePicker => {
-                Task::future(async {
-                    let path = rfd::AsyncFileDialog::new()
-                        .set_title("Select file to send")
-                        .pick_file()
-                        .await
-                        .map(|f| f.path().to_path_buf());
-                    Message::FilePicked(path)
-                })
-            }
+            Message::OpenFilePicker => Task::future(async {
+                let path = rfd::AsyncFileDialog::new()
+                    .set_title("Select file to send")
+                    .pick_file()
+                    .await
+                    .map(|f| f.path().to_path_buf());
+                Message::FilePicked(path)
+            }),
             Message::FilePicked(Some(path)) => {
                 let name = path
                     .file_name()
@@ -465,10 +478,26 @@ impl ConversationView {
                 self.drag_drop_active = false;
                 Task::none()
             }
+            // M2: K4 delivery receipt — peer confirmed receipt of the message
+            Message::MessageDelivered(msg_id) => {
+                let current = self.message_states.get(&msg_id).copied();
+                if current != Some(MessageState::Read) {
+                    self.message_states.insert(msg_id, MessageState::Delivered);
+                }
+                Task::none()
+            }
+            // M2: K5 read marker — peer displayed the message
+            Message::MessageRead(msg_id) => {
+                self.message_states.insert(msg_id, MessageState::Read);
+                Task::none()
+            }
         }
     }
 
-    pub fn view(&self, avatars: &std::collections::HashMap<String, Vec<u8>>) -> Element<'_, Message> {
+    pub fn view(
+        &self,
+        avatars: &std::collections::HashMap<String, Vec<u8>>,
+    ) -> Element<'_, Message> {
         // ---- Message list (G5: grouping + date separators) ----
         let mut rows: Vec<Element<Message>> = Vec::new();
         let mut prev_date: Option<chrono::NaiveDate> = None;
@@ -772,7 +801,29 @@ impl ConversationView {
             "Jump to bottom",
             tooltip::Position::Top,
         );
-        let scroll_bar = row![jump_btn]
+        // M2: delivery/read status indicator — shown for the last own message
+        let status_indicator: Element<Message> = {
+            let last_own = self.messages.iter().rev().find(|m| m.own);
+            if let Some(msg) = last_own {
+                let state = self.message_states.get(&msg.id).copied();
+                let label = match state {
+                    None => "·", // sending
+                    Some(MessageState::Sending) => "·",
+                    Some(MessageState::Sent) => "✓",
+                    Some(MessageState::Delivered) => "✓✓",
+                    Some(MessageState::Read) => "✓✓",
+                };
+                let color = if state == Some(MessageState::Read) {
+                    iced::Color::from_rgb(0.0, 0.67, 1.0) // blue for read
+                } else {
+                    iced::Color::from_rgb(0.5, 0.5, 0.5) // gray for sent/delivered
+                };
+                text(label).size(12).color(color).into()
+            } else {
+                text("").size(12).into()
+            }
+        };
+        let scroll_bar = row![jump_btn, status_indicator]
             .spacing(8)
             .align_y(Alignment::Center)
             .padding([2, 8]);
@@ -809,7 +860,11 @@ impl ConversationView {
         });
 
         let can_send = !self.composer.trim().is_empty();
-        let send_label = if self.edit_mode.is_some() { "Save" } else { "Send" };
+        let send_label = if self.edit_mode.is_some() {
+            "Save"
+        } else {
+            "Send"
+        };
         let send_btn = if can_send {
             button(send_label).on_press(Message::Send)
         } else {
@@ -886,9 +941,9 @@ impl ConversationView {
                         .width(Length::Fixed(att.progress as f32 * 2.0))
                         .height(4)
                         .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                            background: Some(iced::Background::Color(
-                                iced::Color::from_rgb(0.2, 0.7, 0.3),
-                            )),
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(
+                                0.2, 0.7, 0.3,
+                            ))),
                             ..Default::default()
                         }),
                 )
