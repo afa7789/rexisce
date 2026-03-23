@@ -8,7 +8,7 @@
 - [x] Duplicate `PaletteQuery` arm in `App::update` (`src/ui/mod.rs`) — FIXED
 
 ## High Priority
-- [x] M6: Reaction hover bar
+- [x] M6: Reaction hover bar (2026-03-22)
 - [ ] L2: @mention autocomplete in MUC
 - [ ] L3: Message moderation by moderators
 - [ ] M4: Audio recording (voice messages)

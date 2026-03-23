@@ -212,6 +212,9 @@ completed:
   - id: S3
     name: "MUC admin modules"
     completed: "2026-03-22"
+  - id: M6
+    name: "Reaction hover bar"
+    completed: "2026-03-22"
 
 # Pending tasks organized by priority
 pending:
@@ -268,17 +271,6 @@ pending:
         - "src/xmpp/engine.rs"
       depends_on:
         - "E4" # HTTP Upload
-
-    - id: M6
-      name: "Reaction hover bar"
-      xep: "XEP-0444"
-      description: |
-        Hovering over a message reveals action bar with quick-react emoji (👍 ❤️ 😂) 
-        and reply button. Reaction counts shown as pills below bubble.
-      files:
-        - "src/ui/conversation.rs"
-      depends_on:
-        - "E3" # Emoji reactions
 
     - id: K3
       name: "Room invitations"
@@ -500,9 +492,9 @@ implemented_xeps:
 
 # Statistics
 stats:
-  completed: 57
+  completed: 58
   pending_critical: 3
-  pending_high: 5
+  pending_high: 4
   pending_medium: 7
   pending_low: 9
   total_xeps_implemented: 26

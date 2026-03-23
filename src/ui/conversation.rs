@@ -10,8 +10,8 @@ use iced::widget::text::Span as IcedSpan;
 use iced::{
     font,
     widget::{
-        button, column, container, image, rich_text, row, scrollable, span, text, text_input,
-        tooltip,
+        button, column, container, image, mouse_area, rich_text, row, scrollable, span, text,
+        text_input, tooltip,
     },
     Alignment, Color, Element, Font, Length, Task,
 };
@@ -610,34 +610,40 @@ impl ConversationView {
                 "Reply",
                 tooltip::Position::Top,
             );
-            // M6: quick-react buttons (👍 ❤️ 😂) - always visible for easy access
-            let react_msg_id = m.id.clone();
-            let heart_msg_id = m.id.clone();
-            let laugh_msg_id = m.id.clone();
-            let react_btn = row![
-                tooltip(
-                    button(text("👍").size(10))
-                        .on_press(Message::SendReaction(react_msg_id, "👍".to_string()))
-                        .padding([2, 4]),
-                    "React",
-                    tooltip::Position::Top,
-                ),
-                tooltip(
-                    button(text("❤️").size(10))
-                        .on_press(Message::SendReaction(heart_msg_id, "❤️".to_string()))
-                        .padding([2, 4]),
-                    "React with heart",
-                    tooltip::Position::Top,
-                ),
-                tooltip(
-                    button(text("😂").size(10))
-                        .on_press(Message::SendReaction(laugh_msg_id, "😂".to_string()))
-                        .padding([2, 4]),
-                    "React with laugh",
-                    tooltip::Position::Top,
-                ),
-            ]
-            .spacing(4);
+            // M6: quick-react buttons (👍 ❤️ 😂) - only visible on hover
+            let is_hovered = self.hovered_message.as_ref() == Some(&m.id);
+            let react_row: Element<Message> = if is_hovered {
+                let react_msg_id = m.id.clone();
+                let heart_msg_id = m.id.clone();
+                let laugh_msg_id = m.id.clone();
+                row![
+                    tooltip(
+                        button(text("👍").size(10))
+                            .on_press(Message::SendReaction(react_msg_id, "👍".to_string()))
+                            .padding([2, 4]),
+                        "React",
+                        tooltip::Position::Top,
+                    ),
+                    tooltip(
+                        button(text("❤️").size(10))
+                            .on_press(Message::SendReaction(heart_msg_id, "❤️".to_string()))
+                            .padding([2, 4]),
+                        "React with heart",
+                        tooltip::Position::Top,
+                    ),
+                    tooltip(
+                        button(text("😂").size(10))
+                            .on_press(Message::SendReaction(laugh_msg_id, "😂".to_string()))
+                            .padding([2, 4]),
+                        "React with laugh",
+                        tooltip::Position::Top,
+                    ),
+                ]
+                .spacing(4)
+                .into()
+            } else {
+                row![].spacing(4).into()
+            };
 
             let edit_msg_id = m.id.clone();
             let edit_body = m.body.clone();
@@ -698,7 +704,6 @@ impl ConversationView {
                         text(sender.clone()).size(11),
                         copy_btn,
                         reply_btn,
-                        react_btn
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center),]
@@ -747,7 +752,6 @@ impl ConversationView {
                             text(sender.clone()).size(11),
                             copy_btn,
                             reply_btn,
-                            react_btn,
                             edit_btn,
                             retract_btn
                         ]
@@ -774,9 +778,14 @@ impl ConversationView {
                     .into()
             };
 
-            // M6: wrap in mouse_area for hover detection
+            // M6: wrap in mouse_area for hover detection and add react row below
             let msg_id_for_hover = m.id.clone();
-            rows.push(row_elem);
+            let row_elem = mouse_area(row_elem)
+                .on_enter(Message::SetHoveredMessage(Some(msg_id_for_hover.clone())))
+                .on_exit(Message::SetHoveredMessage(None));
+            rows.push(row_elem.into());
+            // M6: render reaction buttons below message when hovered
+            rows.push(react_row);
 
             // E3: render reaction pills below the message bubble
             if let Some(by_jid) = self.reactions.get(&m.id) {
