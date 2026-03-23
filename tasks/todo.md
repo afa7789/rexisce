@@ -77,6 +77,6 @@
 - Commit after each completed task, never push
 
 ## Known Bugs (fix before release)
-- [ ] **BUG-1**: MAM historical messages trigger desktop notifications + sounds — `IncomingMessage` needs `is_historical: bool` flag; set `true` for MAM-sourced messages in engine.rs; skip notifications/sound in ui/mod.rs when `is_historical`
-- [ ] **BUG-2**: Finder/permission modals open on connect — notify-rust fires for every MAM message on startup; root cause is BUG-1
+- [x] ✅ **BUG-1**: MAM historical messages trigger desktop notifications + sounds — added `is_historical: bool` to `IncomingMessage`; set `true` for MAM-sourced messages in engine.rs; skip notifications in ui/mod.rs when `is_historical` (2026-03-22)
+- [x] ✅ **BUG-2**: Finder/permission modals open on connect — fixed by BUG-1 (2026-03-22)
 - [x] ✅ **BUG-3**: MAM `fetched` count fixed — now uses `mam_result.messages.len()` instead of `rsm.count` (2026-03-22)

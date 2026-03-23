@@ -183,6 +183,28 @@ impl ChatScreen {
                     return Task::none();
                 }
 
+                // H3: intercept RemoveContact
+                if let sidebar::Message::RemoveContact(ref jid) = smsg {
+                    let jid = jid.clone();
+                    self.pending_commands
+                        .push(crate::xmpp::XmppCommand::RemoveContact(jid));
+                    return Task::none();
+                }
+
+                // H3: intercept SubmitRename
+                if let sidebar::Message::SubmitRename = smsg {
+                    if let Some((jid, name)) = self.sidebar.pending_rename() {
+                        let jid = jid.to_owned();
+                        let name = name.to_owned();
+                        if !name.trim().is_empty() {
+                            self.pending_commands
+                                .push(crate::xmpp::XmppCommand::RenameContact { jid, name });
+                        }
+                    }
+                    let _ = self.sidebar.update(smsg);
+                    return Task::none();
+                }
+
                 // When user selects a contact, open (or switch to) that conversation.
                 if let sidebar::Message::SelectContact(ref jid) = smsg {
                     let jid = jid.clone();
@@ -510,6 +532,7 @@ mod tests {
             id: "1".into(),
             from: "alice@example.com/res".into(),
             body: "Hello!".into(),
+            is_historical: false,
         });
 
         assert!(s.conversations.contains_key("alice@example.com"));

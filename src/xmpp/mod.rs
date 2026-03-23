@@ -30,6 +30,9 @@ pub struct IncomingMessage {
     pub id: String,
     pub from: String,
     pub body: String,
+    /// True when this message was retrieved from MAM archive history.
+    /// Notifications and sounds should be suppressed for historical messages.
+    pub is_historical: bool,
 }
 
 /// Events emitted by the XMPP engine to the UI layer.
@@ -97,6 +100,13 @@ pub enum XmppEvent {
         from: String,
         emojis: Vec<String>,
     },
+
+    // H4: vCard received
+    VCardReceived {
+        jid: String,
+        name: Option<String>,
+        email: Option<String>,
+    },
 }
 
 /// Commands sent from the UI to the XMPP engine.
@@ -112,6 +122,10 @@ pub enum XmppCommand {
     SendChatState { to: String, composing: bool },
     /// H3: Add a contact to the roster.
     AddContact(String),
+    /// H3: Remove a contact from the roster.
+    RemoveContact(String),
+    /// H3: Rename a contact in the roster.
+    RenameContact { jid: String, name: String },
     /// Gracefully close the current session.
     #[allow(dead_code)]
     Disconnect,
@@ -129,4 +143,8 @@ pub enum XmppCommand {
     SendCorrection { to: String, original_id: String, new_body: String },
     /// E2: Send a message retraction (XEP-0424).
     SendRetraction { to: String, origin_id: String },
+    /// H4: Fetch vCard for a JID.
+    FetchVCard(String),
+    /// G8: Fetch older MAM history before a given message ID.
+    FetchHistory { jid: String, before_id: Option<String> },
 }

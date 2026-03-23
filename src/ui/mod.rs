@@ -502,9 +502,10 @@ impl App {
                         } else {
                             false
                         };
-                        // A5: fire desktop notification for background conversations (J3: skip muted)
+                        // A5: fire desktop notification for background conversations (J3: skip muted, BUG-1: skip historical)
                         let notif_task: Task<Message> = if self.settings.notifications_enabled
                             && !is_active
+                            && !msg.is_historical
                             && !self.settings.muted_jids.contains(&bare_from)
                         {
                             let notif_from = bare_from.clone();
@@ -609,6 +610,9 @@ impl App {
                         if let Screen::Chat(ref mut chat) = self.screen {
                             chat.on_reaction_received(msg_id.clone(), from.clone(), emojis.clone());
                         }
+                    }
+                    XmppEvent::VCardReceived { jid, name, .. } => {
+                        tracing::debug!("H4: vCard received for {jid}: name={:?}", name);
                     }
                 }
                 Task::none()

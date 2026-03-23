@@ -288,6 +288,12 @@ async fn run_session(
                             outbox.push_back(make_retraction_message(to_jid, &origin_id));
                         }
                     }
+                    Some(XmppCommand::RemoveContact(_))
+                    | Some(XmppCommand::RenameContact { .. })
+                    | Some(XmppCommand::FetchVCard(_))
+                    | Some(XmppCommand::FetchHistory { .. }) => {
+                        // Not yet implemented — silently ignore.
+                    }
                 }
             }
         }
@@ -476,6 +482,7 @@ async fn dispatch_stanza(
                                 id: mam_msg.archive_id,
                                 from: mam_msg.forwarded_from,
                                 body: mam_msg.body,
+                                is_historical: true,
                             }))
                             .await;
                     }
@@ -495,6 +502,7 @@ async fn dispatch_stanza(
                             id: inner.attr("id").unwrap_or("").to_string(),
                             from: own_jid_str.to_string(),
                             body,
+                            is_historical: false,
                         }))
                         .await;
                 }
@@ -757,6 +765,7 @@ async fn handle_message(
             id,
             from,
             body,
+            is_historical: false,
         }))
         .await;
 }
@@ -966,6 +975,7 @@ mod tests {
             id: "m1".into(),
             from: "alice@example.com".into(),
             body: "Hello!".into(),
+            is_historical: false,
         });
         let _ = format!("{e:?}");
     }
