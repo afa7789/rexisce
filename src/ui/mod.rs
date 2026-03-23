@@ -12,6 +12,7 @@ pub mod avatar;
 pub mod benchmark;
 pub mod chat;
 pub mod conversation;
+pub mod data_forms;
 mod login;
 pub mod muc_panel;
 pub mod settings;
