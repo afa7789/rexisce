@@ -62,6 +62,8 @@ pub struct App {
     // S1: idle state tracking
     last_activity: std::time::Instant,
     idle_state: IdleState,
+    // J10: MAM archiving default mode ("roster", "always", or "never")
+    mam_default_mode: Option<String>,
 }
 
 /// S1: tracks which auto-away stage has been sent to the engine.
@@ -116,6 +118,7 @@ enum Screen {
 
 impl App {
     pub fn new_with_settings(settings: Settings, db: Arc<SqlitePool>) -> (Self, Task<Message>) {
+        let mam_mode = settings.mam_default_mode.clone();
         let password = config::load_password(&settings.last_jid).unwrap_or_default();
         let login = LoginScreen::with_saved(
             settings.last_jid.clone(),
@@ -141,6 +144,7 @@ impl App {
                 own_presence: PresenceStatus::Available,
                 last_activity: std::time::Instant::now(),
                 idle_state: IdleState::Active,
+                mam_default_mode: mam_mode,
             },
             Task::none(),
         )
@@ -896,9 +900,12 @@ impl App {
                             chat.on_message_read(from, id.clone());
                         }
                     }
-                    // J10: MAM prefs received — log only for now
+                    // J10: MAM prefs received — persist to settings and update UI state
                     XmppEvent::MamPrefsReceived { ref default_mode } => {
                         tracing::debug!("J10: MAM prefs default_mode={default_mode}");
+                        self.mam_default_mode = Some(default_mode.clone());
+                        self.settings.mam_default_mode = Some(default_mode.clone());
+                        let _ = config::save(&self.settings);
                     }
                     XmppEvent::BookmarksReceived(bookmarks) => {
                         tracing::info!("D4: {} bookmark(s) received", bookmarks.len());

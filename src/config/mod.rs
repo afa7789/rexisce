@@ -47,6 +47,9 @@ pub struct Settings {
     /// S6: whether to send XEP-0333 displayed markers (read receipts).
     #[serde(default = "default_true")]
     pub send_read_markers: bool,
+    /// J10: MAM archiving default mode ("roster", "always", or "never").
+    #[serde(default)]
+    pub mam_default_mode: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -80,6 +83,7 @@ impl Default for Settings {
             send_receipts: true,
             send_typing: true,
             send_read_markers: true,
+            mam_default_mode: None,
         }
     }
 }
@@ -191,6 +195,7 @@ mod tests {
             send_receipts: false,
             send_typing: false,
             send_read_markers: false,
+            mam_default_mode: Some("roster".into()),
         };
         let json = serde_json::to_string(&s).unwrap();
         let s2: Settings = serde_json::from_str(&json).unwrap();
@@ -201,6 +206,7 @@ mod tests {
         assert!(!s2.send_receipts);
         assert!(!s2.send_typing);
         assert!(!s2.send_read_markers);
+        assert_eq!(s2.mam_default_mode, Some("roster".into()));
     }
 
     #[test]

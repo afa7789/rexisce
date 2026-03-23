@@ -25,6 +25,8 @@ pub enum Message {
     SendReceiptsToggled(bool),
     SendTypingToggled(bool),
     SendReadMarkersToggled(bool),
+    // J10: MAM archiving default mode selector
+    MamModeSelected(String),
     Back,
 }
 
@@ -96,6 +98,11 @@ impl SettingsScreen {
             }
             Message::SendReadMarkersToggled(enabled) => {
                 self.settings.send_read_markers = enabled;
+                let _ = config::save(&self.settings);
+                Task::none()
+            }
+            Message::MamModeSelected(mode) => {
+                self.settings.mam_default_mode = Some(mode.clone());
                 let _ = config::save(&self.settings);
                 Task::none()
             }
@@ -173,6 +180,28 @@ impl SettingsScreen {
         .spacing(8)
         .align_y(Alignment::Center);
 
+        // J10: MAM archiving mode selector
+        let mam_mode = self
+            .settings
+            .mam_default_mode
+            .as_deref()
+            .unwrap_or("roster");
+        let mam_mode_row: Element<Message> = row![
+            text("MAM:").size(14).width(Length::Fill),
+            button("roster")
+                .on_press(Message::MamModeSelected("roster".into()))
+                .padding([4, 8]),
+            button("always")
+                .on_press(Message::MamModeSelected("always".into()))
+                .padding([4, 8]),
+            button("never")
+                .on_press(Message::MamModeSelected("never".into()))
+                .padding([4, 8]),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into();
+
         let back_btn = button("Back").on_press(Message::Back).padding([6, 14]);
 
         let content = column![
@@ -185,6 +214,7 @@ impl SettingsScreen {
             receipts_row,
             typing_row,
             read_markers_row,
+            mam_mode_row,
             back_btn
         ]
         .spacing(16)

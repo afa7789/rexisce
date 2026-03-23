@@ -209,6 +209,7 @@ fn settings_json_round_trip() {
         send_receipts: true,
         send_typing: true,
         send_read_markers: true,
+        mam_default_mode: None,
     };
 
     let json = serde_json::to_string(&original).unwrap();
