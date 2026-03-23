@@ -1119,6 +1119,8 @@ F1–F5 independent of each other (depend on B1 only)
 - S1 ✅ Auto-away after 5min idle, extended after 15min
 - S6 ✅ Privacy panel — per-account toggles for receipts/typing/read markers
 - J10 ✅ MAM archiving preferences UI
+- S10 ✅ XEP-0004 data forms renderer
+- S3 ✅ MUC admin modules (affiliations, room config, voice requests)
 
 ---
 
