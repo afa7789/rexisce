@@ -90,6 +90,10 @@ pub struct DiscoManager {
     pending_items: HashMap<String, String>,
     /// Our own caps to embed in outbound presence stanzas.
     own_caps: Caps,
+    /// Our own identities (used to answer incoming disco#info requests).
+    own_identities: Vec<DiscoIdentity>,
+    /// Our own features (used to answer incoming disco#info requests).
+    own_features: Vec<String>,
 }
 
 impl DiscoManager {
@@ -114,7 +118,46 @@ impl DiscoManager {
             pending_info: HashMap::new(),
             pending_items: HashMap::new(),
             own_caps,
+            own_identities: identities.to_vec(),
+            own_features: features.iter().map(|f| f.to_string()).collect(),
         }
+    }
+
+    /// Build a disco#info result IQ in response to an incoming `get` request.
+    ///
+    /// Returns the response element, or `None` if the incoming element is not
+    /// a disco#info get IQ.
+    ///
+    /// ```xml
+    /// <iq type='result' id='{iq_id}' to='{requester_jid}'>
+    ///   <query xmlns='http://jabber.org/protocol/disco#info'>
+    ///     <identity category='…' type='…' name='…'/>
+    ///     <feature var='…'/>
+    ///   </query>
+    /// </iq>
+    /// ```
+    pub fn build_info_response(&self, iq_id: &str, to_jid: &str) -> Element {
+        let mut query_builder = Element::builder("query", NS_DISCO_INFO);
+        for id in &self.own_identities {
+            let identity_el = Element::builder("identity", NS_DISCO_INFO)
+                .attr("category", &id.category)
+                .attr("type", &id.kind)
+                .attr("name", &id.name)
+                .build();
+            query_builder = query_builder.append(identity_el);
+        }
+        for feat in &self.own_features {
+            let feat_el = Element::builder("feature", NS_DISCO_INFO)
+                .attr("var", feat.as_str())
+                .build();
+            query_builder = query_builder.append(feat_el);
+        }
+        Element::builder("iq", NS_CLIENT)
+            .attr("type", "result")
+            .attr("id", iq_id)
+            .attr("to", to_jid)
+            .append(query_builder.build())
+            .build()
     }
 
     /// Build a disco#info IQ get request targeting `to_jid`.

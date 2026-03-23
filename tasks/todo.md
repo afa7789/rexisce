@@ -25,9 +25,9 @@
 ## Phase C — XMPP Engine Wiring
 - [x] ✅ **C1**: Wire StreamMgmt into engine loop (already wired in engine.rs)
 - [x] ✅ **C2**: Wire PresenceMachine into engine + SetPresence command + UI picker (2026-03-22)
-- [ ] **C3**: MAM post-connect history sync (depends on A1, A2)
-- [ ] **C4**: Wire BlockingManager into engine
-- [ ] **C5**: Wire DiscoManager / caps into presence
+- [x] ✅ **C3**: MAM post-connect history sync (2026-03-22) — catchup query on Online, MAM result/fin handling, CatchupFinished event
+- [x] ✅ **C4**: Wire BlockingManager into engine (2026-03-22) — fetch on Online, result/push handling, message filter
+- [x] ✅ **C5**: Wire DiscoManager caps into presence (2026-03-22) — caps in presence, disco#info get response added
 
 ## Phase D — UI Panels
 - [ ] **D1**: Render OccupantPanel in MUC conversations
@@ -36,31 +36,31 @@
 - [ ] **D4**: Bookmarks autojoin on connect
 
 ## Phase E — Rich Features
-- [ ] **E1**: Message corrections (XEP-0308)
-- [ ] **E2**: Message retractions (XEP-0424)
+- [x] ✅ **E1**: Message corrections (XEP-0308) (2026-03-22) — SendCorrection command wired in engine, make_correction_message builder
+- [x] ✅ **E2**: Message retractions (XEP-0424) (2026-03-22) — SendRetraction command wired in engine, make_retraction_message builder
 - [ ] **E4**: File upload (XEP-0363)
 
 ## Phase F — Polish
-- [ ] **F3**: Settings panel (font size, timestamps, theme toggle)
+- [x] ✅ **F3**: Settings panel (font size, timestamps, theme toggle) — already implemented (2026-03-22)
 - [ ] **F4**: Reconnect logic with backoff
 - [ ] **F5**: Avatar fetching (XEP-0084 + vCard fallback)
 
 ## Phase G — Conversation UX
-- [ ] **G1**: Close/remove conversation
-- [ ] **G2**: Typing indicators (XEP-0085)
-- [ ] **G3**: Message replies (XEP-0461)
-- [ ] **G4**: /me action messages (XEP-0245)
+- [x] ✅ **G1**: Close/remove conversation — (2026-03-22)
+- [x] ✅ **G2**: Typing indicators (XEP-0085) — (2026-03-22)
+- [x] ✅ **G3**: Message replies (XEP-0461) — already implemented (2026-03-22)
+- [x] ✅ **G4**: /me action messages (XEP-0245) — already implemented (2026-03-22)
 - [x] ✅ **G5** — (2026-03-22)
-- [ ] **G7**: Copy message to clipboard
+- [x] ✅ **G7**: Copy message to clipboard — (2026-03-22)
 - [ ] **G8**: MAM lazy-load (scroll up for older history)
-- [ ] **G9**: Message search within conversation
+- [x] ✅ **G9**: Message search within conversation — (2026-03-22)
 
 ## Phase H — Avatars & Contact Management
 - [ ] **H1**: Show user avatars (XEP-0084 + XEP-0153)
 - [ ] **H2**: Own avatar upload (XEP-0084)
 - [ ] **H3**: Add/remove/rename contacts
 - [ ] **H4**: Contact profile popover (vCard)
-- [ ] **H5**: Consistent avatar colors (XEP-0392)
+- [x] ✅ **H5**: Consistent avatar colors (XEP-0392) — already implemented (2026-03-22)
 
 ## Phase I — File & Media
 - [ ] **I1**: Paste image from clipboard

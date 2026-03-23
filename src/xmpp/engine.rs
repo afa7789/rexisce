@@ -276,6 +276,18 @@ async fn run_session(
                             outbox.push_back(stanza);
                         }
                     }
+                    Some(XmppCommand::SendCorrection { to, original_id, new_body }) => {
+                        // E1: XEP-0308 message correction
+                        if let Ok(to_jid) = to.parse::<Jid>() {
+                            outbox.push_back(make_correction_message(to_jid, &original_id, &new_body));
+                        }
+                    }
+                    Some(XmppCommand::SendRetraction { to, origin_id }) => {
+                        // E2: XEP-0424 message retraction
+                        if let Ok(to_jid) = to.parse::<Jid>() {
+                            outbox.push_back(make_retraction_message(to_jid, &origin_id));
+                        }
+                    }
                 }
             }
         }
@@ -438,6 +450,7 @@ async fn dispatch_stanza(
             handle_iq(
                 el,
                 event_tx,
+                outbox,
                 blocking_mgr,
                 mam_mgr,
                 catchup_mgr,
@@ -507,6 +520,7 @@ async fn dispatch_stanza(
 async fn handle_iq(
     el: Element,
     event_tx: &mpsc::Sender<XmppEvent>,
+    outbox: &mut VecDeque<Element>,
     blocking_mgr: &mut BlockingManager,
     mam_mgr: &mut MamManager,
     catchup_mgr: &mut CatchupManager,
@@ -514,6 +528,19 @@ async fn handle_iq(
     file_upload_mgr: &mut FileUploadManager,
     avatar_mgr: &mut AvatarManager,
 ) {
+    // C5: respond to disco#info get requests with our feature list
+    if el.attr("type") == Some("get") {
+        let has_disco_info = el
+            .children()
+            .any(|c| c.name() == "query" && c.ns() == "http://jabber.org/protocol/disco#info");
+        if has_disco_info {
+            let iq_id = el.attr("id").unwrap_or("").to_string();
+            let requester = el.attr("from").unwrap_or("").to_string();
+            outbox.push_back(disco_mgr.build_info_response(&iq_id, &requester));
+            tracing::debug!("disco: responded to disco#info get from {requester}");
+            return;
+        }
+    }
     // C3: detect MAM <fin> stanza
     if el.attr("type") == Some("result") {
         let has_fin = el.children().any(|c| c.name() == "fin" && c.ns() == NS_MAM);
@@ -840,6 +867,39 @@ fn make_roster_set(jid: &str) -> Element {
         .build();
     iq.append_child(query);
     iq
+}
+
+/// E1: Build a XEP-0308 message correction stanza.
+fn make_correction_message(to: Jid, original_id: &str, new_body: &str) -> Element {
+    let replace_el = Element::builder("replace", "urn:xmpp:message-correct:0")
+        .attr("id", original_id)
+        .build();
+    let body_el = Element::builder("body", "jabber:client")
+        .append(new_body)
+        .build();
+    let mut raw = Element::builder("message", "jabber:client")
+        .attr("type", "chat")
+        .attr("to", to.to_string())
+        .attr("id", uuid::Uuid::new_v4().to_string())
+        .build();
+    raw.append_child(body_el);
+    raw.append_child(replace_el);
+    raw
+}
+
+/// E2: Build a XEP-0424 message retraction stanza.
+fn make_retraction_message(to: Jid, origin_id: &str) -> Element {
+    let apply_to_el = Element::builder("apply-to", "urn:xmpp:fasten:0")
+        .attr("id", origin_id)
+        .append(Element::builder("retract", "urn:xmpp:message-retract:1").build())
+        .build();
+    let mut raw = Element::builder("message", "jabber:client")
+        .attr("type", "chat")
+        .attr("to", to.to_string())
+        .attr("id", uuid::Uuid::new_v4().to_string())
+        .build();
+    raw.append_child(apply_to_el);
+    raw
 }
 
 // ---------------------------------------------------------------------------
