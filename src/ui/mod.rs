@@ -8,6 +8,7 @@ use iced::{Element, Subscription, Task};
 use sqlx::SqlitePool;
 use tokio::sync::mpsc;
 
+pub mod about;
 pub mod avatar;
 pub mod benchmark;
 pub mod chat;
@@ -31,6 +32,7 @@ use toast::{Toast, ToastKind};
 // F2: hardcoded command palette entries
 const PALETTE_COMMANDS: &[&str] = &[
     "Open Settings",
+    "Open About",
     "Toggle Console",
     "Add Contact",
     "Disconnect",
@@ -108,6 +110,9 @@ pub enum Message {
     Logout,
     // S1: periodic idle timer tick — checked to trigger auto-away
     IdleTick,
+    // M7: about modal
+    GoToAbout,
+    About(about::Message),
 }
 
 enum Screen {
@@ -115,6 +120,7 @@ enum Screen {
     Benchmark(BenchmarkScreen),
     Chat(Box<ChatScreen>),
     Settings(Box<settings::SettingsScreen>, Box<Screen>),
+    About(Box<about::AboutScreen>),
 }
 
 impl App {
@@ -232,6 +238,7 @@ impl App {
                 if let Some(&label) = filtered.get(i) {
                     match label {
                         "Open Settings" => return self.update(Message::GoToSettings),
+                        "Open About" => return self.update(Message::GoToAbout),
                         "Disconnect" => {
                             if let Some(ref tx) = self.xmpp_tx {
                                 let tx = tx.clone();
@@ -367,6 +374,28 @@ impl App {
                     Box::new(settings::SettingsScreen::new(self.settings.clone())),
                     Box::new(prev),
                 );
+                Task::none()
+            }
+
+            Message::GoToAbout => {
+                self.screen = Screen::About(Box::new(about::AboutScreen::new()));
+                Task::none()
+            }
+
+            Message::About(msg) => {
+                if let Screen::About(ref mut about) = self.screen {
+                    about.update(msg);
+                    if let about::Message::Back = msg {
+                        // For now, go back to the last active chat or login
+                        if let Screen::Chat(_) = &self.screen {
+                            // Already on chat, do nothing
+                        } else {
+                            self.screen = Screen::Chat(Box::new(ChatScreen::new(
+                                "user@server".to_string(), // placeholder until connected
+                            )));
+                        }
+                    }
+                }
                 Task::none()
             }
 
@@ -952,6 +981,7 @@ impl App {
             Screen::Benchmark(bench) => bench.view().map(Message::Benchmark),
             Screen::Chat(chat) => chat.view().map(Message::Chat),
             Screen::Settings(ss, _) => ss.view().map(Message::Settings),
+            Screen::About(about) => about.view().map(Message::About),
         };
 
         // F1: build the XML toggle button (always visible, bottom-left corner)

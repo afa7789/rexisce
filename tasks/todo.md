@@ -85,6 +85,12 @@
 - [x] ✅ **BUG-1**: Historical MAM messages triggering notifications — fixed (2026-03-22)
 - [x] ✅ **BUG-2**: Finder modals on connect — fixed (2026-03-22, root cause was BUG-1)
 - [x] ✅ **BUG-3**: MAM fetched count was total archive size — fixed (2026-03-22)
+- [ ] **BUG-4**: Auto-away does not escalate to extended away (XA) after 15 minutes
+	- Context: in `Message::IdleTick`, transition checks only `IdleState::Active`; once app enters `AutoAway`, it never reaches `AutoXa`.
+	- Location: `src/ui/mod.rs` (idle state match in `Message::IdleTick`).
+- [ ] **BUG-5**: Duplicate `Message::PaletteQuery(q)` match arm in `App::update`
+	- Context: second arm is unreachable and is currently reported by compiler warning (`unreachable pattern`).
+	- Location: `src/ui/mod.rs` (duplicate arm around lines ~170 and ~285).
 
 ## Phase J — High Priority (from gap analysis)
 - [ ] **J5**: OMEMO end-to-end encryption (XEP-0384) — Critical

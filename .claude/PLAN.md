@@ -1122,6 +1122,15 @@ F1–F5 independent of each other (depend on B1 only)
 - S10 ✅ XEP-0004 data forms renderer
 - S3 ✅ MUC admin modules (affiliations, room config, voice requests)
 
+## Open review findings (2026-03-22)
+
+- BUG: Auto-away is not escalating to XA after 15 minutes.
+   - Evidence: `Message::IdleTick` checks transitions only while state is `IdleState::Active`; after entering `AutoAway`, no branch upgrades to `AutoXa`.
+   - File: `src/ui/mod.rs`.
+- BUG: Duplicate `Message::PaletteQuery(q)` arm in `App::update`.
+   - Evidence: compiler warns with `unreachable pattern` in `src/ui/mod.rs` because the earlier `PaletteQuery` arm already matches all cases.
+   - File: `src/ui/mod.rs`.
+
 ---
 
 *Last updated: 2026-03-22*
