@@ -147,4 +147,8 @@ pub enum XmppCommand {
     FetchVCard(String),
     /// G8: Fetch older MAM history before a given message ID.
     FetchHistory { jid: String, before_id: Option<String> },
+    /// D3: Join a MUC room with the given nickname (XEP-0045).
+    JoinRoom { jid: String, nick: String },
+    /// D3: Leave a MUC room (XEP-0045).
+    LeaveRoom(String),
 }

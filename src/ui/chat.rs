@@ -82,13 +82,52 @@ impl ChatScreen {
             self.sidebar.increment_unread(&bare_jid);
         }
 
+        // I4: spawn image fetch tasks for image URL messages
+        let pending_images = convo.take_pending_images();
         // E5: spawn link preview fetch tasks for any URLs in the message
         let pending = convo.take_pending_previews();
+
+        let jid = bare_jid;
+
+        // Combine tasks: images take priority (return early with image handle)
+        if !pending_images.is_empty() {
+            let jid2 = jid.clone();
+            let image_task = Task::future(async move {
+                for (msg_id, url) in pending_images {
+                    let client = reqwest::Client::new();
+                    match client
+                        .get(&url)
+                        .timeout(std::time::Duration::from_secs(15))
+                        .send()
+                        .await
+                    {
+                        Ok(resp) => {
+                            if let Ok(bytes) = resp.bytes().await {
+                                let handle = iced::widget::image::Handle::from_bytes(
+                                    bytes.to_vec(),
+                                );
+                                return Message::Conversation(
+                                    jid2.clone(),
+                                    super::conversation::Message::AttachmentLoaded(
+                                        msg_id, handle,
+                                    ),
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!("I4: failed to fetch image for {}: {}", url, e);
+                        }
+                    }
+                }
+                Message::Conversation(jid2.clone(), super::conversation::Message::Send)
+            });
+            return Some(image_task);
+        }
+
         if pending.is_empty() {
             return None;
         }
 
-        let jid = bare_jid;
         Some(Task::future(async move {
             for (msg_id, url) in pending {
                 let client = reqwest::Client::new();
@@ -188,6 +227,18 @@ impl ChatScreen {
                     let jid = jid.clone();
                     self.pending_commands
                         .push(crate::xmpp::XmppCommand::RemoveContact(jid));
+                    return Task::none();
+                }
+
+                // D3: intercept SubmitJoinRoom
+                if let sidebar::Message::SubmitJoinRoom = smsg {
+                    let jid = self.sidebar.join_room_jid().to_owned();
+                    let nick = self.sidebar.join_room_nick().to_owned();
+                    if !jid.trim().is_empty() && !nick.trim().is_empty() {
+                        self.pending_commands
+                            .push(crate::xmpp::XmppCommand::JoinRoom { jid, nick });
+                    }
+                    let _ = self.sidebar.update(smsg);
                     return Task::none();
                 }
 
@@ -322,6 +373,21 @@ impl ChatScreen {
                         .push(crate::xmpp::XmppCommand::SendRetraction {
                             to: jid.clone(),
                             origin_id: mid,
+                        });
+                    return Task::none();
+                }
+
+                // G8: intercept RequestOlderHistory to queue a FetchHistory command
+                if let super::conversation::Message::RequestOlderHistory = cmsg {
+                    let before_id = self
+                        .conversations
+                        .get(&jid)
+                        .and_then(|cv| cv.messages().first())
+                        .map(|m| m.id.clone());
+                    self.pending_commands
+                        .push(crate::xmpp::XmppCommand::FetchHistory {
+                            jid: jid.clone(),
+                            before_id,
                         });
                     return Task::none();
                 }
