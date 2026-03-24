@@ -98,7 +98,7 @@ pub async fn find_by_conversation_for_account(
     Ok(rows.iter().map(row_to_message).collect())
 }
 
-#[allow(dead_code)] // future: retraction/correction UI lookup
+
 pub async fn find_by_origin_id(pool: &SqlitePool, origin_id: &str) -> Result<Option<Message>> {
     let row = sqlx::query(
         r#"
@@ -117,7 +117,7 @@ pub async fn find_by_origin_id(pool: &SqlitePool, origin_id: &str) -> Result<Opt
 
 /// Return up to `limit` messages in a conversation whose timestamp is strictly
 /// before `before_ts`, ordered newest-first. Used for MAM backward pagination.
-#[allow(dead_code)] // future: MAM backward pagination UI
+
 pub async fn find_before(
     pool: &SqlitePool,
     conversation_jid: &str,
@@ -145,7 +145,7 @@ pub async fn find_before(
 
 /// Count non-retracted messages that arrived after the message identified by
 /// `last_read_id`. Returns 0 when `last_read_id` does not exist in the table.
-#[allow(dead_code)] // future: unread badge UI
+
 pub async fn count_unread(
     pool: &SqlitePool,
     conversation_jid: &str,

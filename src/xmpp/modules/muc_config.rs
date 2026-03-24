@@ -16,14 +16,12 @@ pub struct MucConfigManager {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum MucConfigQuery {
     RequestConfig { room_jid: String },
     SubmitConfig { room_jid: String },
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct MucRoomConfig {
     pub room_name: Option<String>,
     pub room_description: Option<String>,

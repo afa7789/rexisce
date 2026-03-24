@@ -11,7 +11,6 @@ impl Default for RegistrationManager {
 }
 
 impl RegistrationManager {
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }
@@ -28,7 +27,6 @@ impl RegistrationManager {
 
     /// Build a simple registration submission IQ.
     /// <iq type='set' id='reg2'><query xmlns='jabber:iq:register'><username>...</username><password>...</password></query></iq>
-    #[allow(dead_code)]
     pub fn build_registration_submit(
         id: &str,
         username: &str,

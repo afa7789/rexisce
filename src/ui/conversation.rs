@@ -181,7 +181,6 @@ pub struct DisplayMessage {
 
 /// M2/K5: message delivery/read state for own messages (shown as ✓ indicators)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum MessageState {
     Sending,
     Sent,
@@ -366,7 +365,6 @@ impl ConversationView {
     }
 
     /// G8: Prepend older messages at the front of the message list.
-    #[allow(dead_code)]
     pub fn prepend_messages(&mut self, mut older: Vec<DisplayMessage>) {
         older.append(&mut self.messages);
         self.messages = older;

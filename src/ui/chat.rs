@@ -984,6 +984,8 @@ impl ChatScreen {
                 }
                 Task::none()
             }
+            // OMEMO: bubbled from conversation — handled by App
+            Message::OpenOmemoTrust(_) => Task::none(),
         }
     }
 

@@ -9,7 +9,6 @@ use tokio_xmpp::minidom::Node;
 
 use super::{NS_CLIENT, NS_PUBSUB};
 
-const NS_PUBSUB_PRIVATE: &str = "http://jabber.org/protocol/pubsub#private";
 const CONV_SYNC_NODE: &str = "xmpp-start:conversations";
 
 /// A single conversation entry stored on the server.

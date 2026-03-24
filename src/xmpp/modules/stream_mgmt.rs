@@ -85,7 +85,6 @@ impl StreamMgmt {
     }
 
     /// Builds a `<r xmlns='urn:xmpp:sm:3'/>` nonza (request ack from server).
-    #[allow(dead_code)] // used in stream resumption (future work)
     pub fn build_request(&self) -> Element {
         Element::builder("r", NS_SM).build()
     }
@@ -138,19 +137,16 @@ impl StreamMgmt {
     }
 
     /// Returns the number of stanzas in the unacked queue.
-    #[allow(dead_code)]
     pub fn pending_count(&self) -> usize {
         self.unacked.len()
     }
 
     /// Returns the current inbound stanza counter (`h`).
-    #[allow(dead_code)]
     pub fn h(&self) -> u32 {
         self.h
     }
 
     /// Resets all counters and clears the unacked queue for a new session.
-    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.stanzas_sent = 0;
         self.stanzas_acked = 0;

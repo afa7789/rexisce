@@ -23,7 +23,6 @@ enum LoginState {
     Idle,
     Connecting,
     Registering,
-    #[allow(dead_code)]
     Connected(String), // bound JID
     Error(String),
 }
@@ -92,7 +91,6 @@ impl LoginScreen {
     }
 
     /// Called by App when XmppEvent::Connected arrives.
-    #[allow(dead_code)]
     pub fn on_connected(&mut self, bound_jid: String) {
         self.state = LoginState::Connected(bound_jid);
     }

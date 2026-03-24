@@ -18,7 +18,6 @@ use crate::xmpp::{AccountId, RosterContact};
 
 /// Simple online/offline flag as seen by the UI for a contact.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum PresenceStatus {
     Available,
     Unavailable,
@@ -29,7 +28,6 @@ pub enum PresenceStatus {
 // ---------------------------------------------------------------------------
 
 /// All per-account UI state.
-#[allow(dead_code)]
 pub struct AccountState {
     /// Conversation list, active conversation, composer drafts, etc.
     pub chat: ChatScreen,
@@ -44,7 +42,6 @@ pub struct AccountState {
 }
 
 impl AccountState {
-    #[allow(dead_code)]
     fn new(jid: impl Into<String>) -> Self {
         Self {
             chat: ChatScreen::new(jid.into()),
@@ -61,13 +58,11 @@ impl AccountState {
 // ---------------------------------------------------------------------------
 
 /// Manages per-account UI state and tracks the active account.
-#[allow(dead_code)]
 pub struct AccountStateManager {
     accounts: HashMap<AccountId, AccountState>,
     active: Option<AccountId>,
 }
 
-#[allow(dead_code)]
 impl AccountStateManager {
     pub fn new() -> Self {
         Self {

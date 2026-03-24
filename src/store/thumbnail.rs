@@ -7,10 +7,8 @@ pub const THUMBNAIL_MAX_DIM: u32 = 256;
 #[derive(Debug, Clone)]
 pub struct Thumbnail {
     /// Pixel width of the generated thumbnail.
-    #[allow(dead_code)]
     pub width: u32,
     /// Pixel height of the generated thumbnail.
-    #[allow(dead_code)]
     pub height: u32,
     /// PNG bytes of the thumbnail.
     pub data: Vec<u8>,

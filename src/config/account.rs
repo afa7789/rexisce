@@ -37,7 +37,6 @@ pub struct AccountConfig {
 
 impl AccountConfig {
     /// Construct a minimal account config (enabled, no proxy, no colour).
-    #[allow(dead_code)]
     pub fn new(jid: impl Into<String>) -> Self {
         let jid = jid.into();
         let password_key = jid.clone();

@@ -24,12 +24,10 @@ pub use connection::ConnectConfig;
 pub struct AccountId(pub String);
 
 impl AccountId {
-    #[allow(dead_code)]
     pub fn new(jid: impl Into<String>) -> Self {
         Self(jid.into())
     }
 
-    #[allow(dead_code)]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -59,7 +57,6 @@ pub struct AccountEvent {
 
 impl AccountEvent {
     /// Convenience constructor.
-    #[allow(dead_code)]
     pub fn new(account_id: AccountId, event: XmppEvent) -> Self {
         Self { account_id, event }
     }
@@ -80,7 +77,6 @@ impl std::fmt::Display for AccountEvent {
 pub struct RosterContact {
     pub jid: String,
     pub name: Option<String>,
-    #[allow(dead_code)]
     pub subscription: String,
 }
 
@@ -98,7 +94,6 @@ pub struct IncomingMessage {
 /// Events emitted by the XMPP engine to the UI layer.
 /// Sent through the iced subscription channel.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum XmppEvent {
     // Connection lifecycle
     Connected {
@@ -309,7 +304,6 @@ pub enum XmppEvent {
 
 /// Commands sent from the UI to the XMPP engine.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum XmppCommand {
     /// Start (or restart) a connection with the given credentials.
     Connect(ConnectConfig),
@@ -326,7 +320,6 @@ pub enum XmppCommand {
     /// H3: Rename a contact in the roster.
     RenameContact { jid: String, name: String },
     /// Gracefully close the current session.
-    #[allow(dead_code)]
     Disconnect,
     /// E4: Request an HTTP upload slot (XEP-0363).
     RequestUploadSlot {

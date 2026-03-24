@@ -111,7 +111,6 @@ impl SidebarScreen {
         self.contacts = contacts;
     }
 
-    #[allow(dead_code)]
     pub fn selected_jid(&self) -> Option<&str> {
         self.selected_jid.as_deref()
     }

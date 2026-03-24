@@ -243,7 +243,6 @@ pub fn detect_system_theme() -> Theme {
 }
 
 /// Delete the stored password (e.g. on logout).
-#[allow(dead_code)]
 pub fn delete_password(jid: &str) {
     if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, jid) {
         let _ = entry.delete_credential();
@@ -252,7 +251,6 @@ pub fn delete_password(jid: &str) {
 
 impl TimeFormat {
     /// Format a unix timestamp (milliseconds) into a human-readable string.
-    #[allow(dead_code)]
     pub fn format_timestamp(&self, ts_millis: i64) -> String {
         let ts = chrono::DateTime::from_timestamp_millis(ts_millis);
         match ts {
@@ -265,7 +263,6 @@ impl TimeFormat {
     }
 
     /// Format a unix timestamp with date for date separators.
-    #[allow(dead_code)]
     pub fn format_timestamp_full(&self, ts_millis: i64) -> String {
         let ts = chrono::DateTime::from_timestamp_millis(ts_millis);
         match ts {
