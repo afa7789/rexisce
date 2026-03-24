@@ -6,9 +6,9 @@
 
 use tokio_xmpp::minidom::Element;
 
+use crate::xmpp::modules::{find_child_recursive, NS_CLIENT, NS_PUBSUB};
+
 const NS_OMEMO: &str = "urn:xmpp:omemo:2";
-const NS_PUBSUB: &str = "http://jabber.org/protocol/pubsub";
-const NS_CLIENT: &str = "jabber:client";
 
 /// XEP-0384 device list node name.
 pub const OMEMO_DEVICES_NODE: &str = "urn:xmpp:omemo:2:devices";
@@ -202,15 +202,7 @@ impl DeviceManager {
 
 /// Walk an element tree to find the first `<devices xmlns="urn:xmpp:omemo:2">`.
 fn find_devices_element(el: &Element) -> Option<&Element> {
-    if el.name() == "devices" && el.ns() == NS_OMEMO {
-        return Some(el);
-    }
-    for child in el.children() {
-        if let Some(found) = find_devices_element(child) {
-            return Some(found);
-        }
-    }
-    None
+    find_child_recursive(el, "devices", NS_OMEMO)
 }
 
 // ---------------------------------------------------------------------------

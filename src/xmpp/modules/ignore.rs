@@ -10,9 +10,9 @@ use std::collections::{HashMap, HashSet};
 use tokio_xmpp::minidom::Element;
 use tokio_xmpp::minidom::Node;
 
+use super::{NS_CLIENT, NS_PUBSUB};
+
 const IGNORE_NODE_PREFIX: &str = "xmpp-start:ignore:";
-const NS_PUBSUB: &str = "http://jabber.org/protocol/pubsub";
-const NS_CLIENT: &str = "jabber:client";
 const NS_IGNORED: &str = "xmpp-start:ignored";
 
 /// Manages per-room ignored-user lists and their PubSub persistence stanzas.

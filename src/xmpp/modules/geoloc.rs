@@ -7,9 +7,9 @@
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::{find_child_recursive, NS_CLIENT, NS_PUBSUB};
+
 const NS_GEOLOC: &str = "http://jabber.org/protocol/geoloc";
-const NS_PUBSUB: &str = "http://jabber.org/protocol/pubsub";
-const NS_CLIENT: &str = "jabber:client";
 
 // ---------------------------------------------------------------------------
 // Domain type
@@ -148,15 +148,7 @@ pub fn parse_geoloc(element: &Element) -> Option<GeoLocation> {
 
 /// Recursively search `el` (depth-first) for a `<geoloc>` element.
 fn find_geoloc(el: &Element) -> Option<&Element> {
-    if el.name() == "geoloc" && el.ns() == NS_GEOLOC {
-        return Some(el);
-    }
-    for child in el.children() {
-        if let Some(found) = find_geoloc(child) {
-            return Some(found);
-        }
-    }
-    None
+    find_child_recursive(el, "geoloc", NS_GEOLOC)
 }
 
 // ---------------------------------------------------------------------------

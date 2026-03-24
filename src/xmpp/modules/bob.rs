@@ -8,8 +8,9 @@
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::{find_child_recursive, NS_CLIENT};
+
 const NS_BOB: &str = "urn:xmpp:bob";
-const NS_CLIENT: &str = "jabber:client";
 
 // ---------------------------------------------------------------------------
 // Domain type
@@ -107,15 +108,7 @@ pub fn build_bob_request(cid: &str, from: &str) -> Element {
 
 /// Recursively search `el` for a `<data xmlns="urn:xmpp:bob">` element.
 fn find_bob_data(el: &Element) -> Option<&Element> {
-    if el.name() == "data" && el.ns() == NS_BOB {
-        return Some(el);
-    }
-    for child in el.children() {
-        if let Some(found) = find_bob_data(child) {
-            return Some(found);
-        }
-    }
-    None
+    find_child_recursive(el, "data", NS_BOB)
 }
 
 // ---------------------------------------------------------------------------

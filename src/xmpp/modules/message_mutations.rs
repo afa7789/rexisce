@@ -11,10 +11,11 @@
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::NS_CLIENT;
+
 const NS_REACTIONS: &str = "urn:xmpp:reactions:0";
 const NS_CORRECTION: &str = "urn:xmpp:message-correct:0";
 const NS_RETRACTION: &str = "urn:xmpp:message-retract:0";
-const NS_CLIENT: &str = "jabber:client";
 
 // ---------------------------------------------------------------------------
 // Public types

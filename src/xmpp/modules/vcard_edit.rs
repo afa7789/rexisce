@@ -12,8 +12,9 @@ use std::collections::HashMap;
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::NS_CLIENT;
+
 const NS_VCARD: &str = "vcard-temp";
-const NS_CLIENT: &str = "jabber:client";
 
 // ---------------------------------------------------------------------------
 // Domain types

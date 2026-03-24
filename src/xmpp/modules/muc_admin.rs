@@ -13,8 +13,9 @@
 
 use tokio_xmpp::minidom::Element;
 
+use super::NS_CLIENT;
+
 const NS_MUC_ADMIN: &str = "http://jabber.org/protocol/muc#admin";
-const NS_CLIENT: &str = "jabber:client";
 
 #[derive(Debug, Clone)]
 pub enum AffiliationAction {

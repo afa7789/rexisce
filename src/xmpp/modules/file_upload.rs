@@ -12,8 +12,9 @@ use std::collections::HashMap;
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::NS_CLIENT;
+
 const NS_UPLOAD: &str = "urn:xmpp:http:upload:0";
-const NS_CLIENT: &str = "jabber:client";
 
 // ---------------------------------------------------------------------------
 // Public types

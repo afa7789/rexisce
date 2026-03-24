@@ -13,7 +13,7 @@
 
 use tokio_xmpp::minidom::Element;
 
-const NS_CLIENT: &str = "jabber:client";
+use super::NS_CLIENT;
 
 /// The full set of presence values visible to the outside world and to the
 /// XMPP server.

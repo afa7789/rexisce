@@ -1,6 +1,26 @@
 // XMPP modules — one file per XEP.
 // Port order follows the rewrite roadmap in CLAUDE.md.
 
+use tokio_xmpp::minidom::Element;
+
+/// Shared XMPP namespace constants used across many modules.
+pub const NS_CLIENT: &str = "jabber:client";
+pub const NS_PUBSUB: &str = "http://jabber.org/protocol/pubsub";
+
+/// Recursively search an element tree for a child with the given local name
+/// and namespace. Returns the first match (depth-first).
+pub fn find_child_recursive<'a>(el: &'a Element, name: &str, ns: &str) -> Option<&'a Element> {
+    if el.name() == name && el.ns() == ns {
+        return Some(el);
+    }
+    for child in el.children() {
+        if let Some(found) = find_child_recursive(child, name, ns) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 // Phase 1 (Core)
 // pub mod connection;    // Task P1.9 — connection state machine
 // pub mod roster;        // Task P1.4 — RFC 6121 roster + presence

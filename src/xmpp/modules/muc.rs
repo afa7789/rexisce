@@ -15,9 +15,10 @@ use tokio_xmpp::jid::Jid;
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::NS_CLIENT;
+
 const NS_MUC: &str = "http://jabber.org/protocol/muc";
 const NS_MUC_ADMIN: &str = "http://jabber.org/protocol/muc#admin";
-const NS_CLIENT: &str = "jabber:client";
 const NS_X_CONFERENCE: &str = "jabber:x:conference";
 
 // ---------------------------------------------------------------------------

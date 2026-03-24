@@ -8,8 +8,9 @@
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::NS_CLIENT;
+
 const NS_REGISTER: &str = "jabber:iq:register";
-const NS_CLIENT: &str = "jabber:client";
 
 // ---------------------------------------------------------------------------
 // AccountManager

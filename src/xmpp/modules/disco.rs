@@ -18,10 +18,11 @@ use sha1::{Digest, Sha1};
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::NS_CLIENT;
+
 const NS_CAPS: &str = "http://jabber.org/protocol/caps";
 const NS_DISCO_INFO: &str = "http://jabber.org/protocol/disco#info";
 const NS_DISCO_ITEMS: &str = "http://jabber.org/protocol/disco#items";
-const NS_CLIENT: &str = "jabber:client";
 
 // ---------------------------------------------------------------------------
 // XEP-0030 domain types

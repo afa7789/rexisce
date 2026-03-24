@@ -7,8 +7,9 @@
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::NS_CLIENT;
+
 const NS_ABUSE: &str = "urn:xmpp:reporting:1";
-const NS_CLIENT: &str = "jabber:client";
 
 // ---------------------------------------------------------------------------
 // Stanza builder

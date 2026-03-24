@@ -11,8 +11,9 @@ use tokio_xmpp::minidom::Element;
 use tokio_xmpp::minidom::Node;
 use uuid::Uuid;
 
+use super::NS_CLIENT;
+
 const NS_TIME: &str = "urn:xmpp:time";
-const NS_CLIENT: &str = "jabber:client";
 
 /// Cached entity time information for a remote JID.
 #[derive(Debug, Clone, PartialEq)]

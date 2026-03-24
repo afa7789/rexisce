@@ -10,8 +10,9 @@ use std::collections::HashMap;
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::NS_CLIENT;
+
 const NS_PUSH: &str = "urn:xmpp:push:0";
-const NS_CLIENT: &str = "jabber:client";
 
 /// Push subscription state.
 ///

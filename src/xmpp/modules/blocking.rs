@@ -9,8 +9,9 @@ use std::collections::HashSet;
 use tokio_xmpp::minidom::Element;
 use uuid::Uuid;
 
+use super::NS_CLIENT;
+
 const NS_BLOCKING: &str = "urn:xmpp:blocking";
-const NS_CLIENT: &str = "jabber:client";
 
 // ---------------------------------------------------------------------------
 // BlockingManager
