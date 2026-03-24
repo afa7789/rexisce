@@ -188,9 +188,6 @@ async fn run_session(
     let mut vcard_edit_mgr = VCardEditManager::new();
     // L4: XEP-0050 ad-hoc commands manager
     let mut adhoc_mgr = AdhocManager::new();
-    // K2/L4: vCard edit and ad-hoc commands managers
-    let mut vcard_edit_mgr = VCardEditManager::new();
-    let mut adhoc_mgr = AdhocManager::new();
 
     // S6: privacy settings — control whether we send receipts, typing, read markers
     let flags = (config.send_receipts as u8)

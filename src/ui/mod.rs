@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 
 pub mod about;
 pub mod account_details;
+pub mod adhoc;
 pub mod avatar;
 pub mod benchmark;
 pub mod blocklist;
@@ -22,6 +23,7 @@ pub mod settings;
 pub mod sidebar;
 pub mod styling;
 pub mod toast;
+pub mod vcard_editor;
 
 pub use benchmark::BenchmarkScreen;
 pub use chat::ChatScreen;
@@ -400,7 +402,13 @@ impl App {
             }
 
             Message::Settings(smsg) => {
+                // AUTH-2: intercept Logout from settings panel before delegating.
+                if matches!(smsg, settings::Message::Logout) {
+                    return self.update(Message::Logout);
+                }
                 let go_back = matches!(smsg, settings::Message::Back);
+                // M6: detect clear-history confirmation before delegating
+                let is_clear_history = matches!(smsg, settings::Message::ClearHistoryConfirm);
                 let mut avatar_task = Task::none();
                 if let settings::Message::AvatarSelected(ref data, ref mime_type) = smsg {
                     if let Some(ref tx) = self.xmpp_tx {
@@ -417,6 +425,26 @@ impl App {
                 if let Screen::Settings(ref mut ss, _) = self.screen {
                     update_task = ss.update(smsg).map(Message::Settings);
                     self.settings = ss.settings().clone();
+                    // M3: drain block/unblock commands produced by the settings panel
+                    let cmds = ss.drain_commands();
+                    if !cmds.is_empty() {
+                        if let Some(ref tx) = self.xmpp_tx {
+                            let tx = tx.clone();
+                            tokio::spawn(async move {
+                                for cmd in cmds {
+                                    let _ = tx.send(cmd).await;
+                                }
+                            });
+                        }
+                    }
+                }
+                // M6: clear all chat history from the DB
+                if is_clear_history {
+                    let pool = self.db.clone();
+                    tokio::spawn(async move {
+                        let _ = crate::store::message_repo::clear_all(&pool).await;
+                        let _ = crate::store::conversation_repo::clear_all(&pool).await;
+                    });
                 }
                 if go_back {
                     return Task::batch([avatar_task, update_task, self.update(Message::GoBack)]);

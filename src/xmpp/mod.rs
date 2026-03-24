@@ -168,6 +168,19 @@ pub enum XmppEvent {
     },
     RegistrationSuccess,
     RegistrationFailure(String),
+
+    // K2: Own vCard fetched successfully (XEP-0054).
+    OwnVCardReceived(modules::vcard_edit::VCardFields),
+    // K2: Own vCard published successfully.
+    OwnVCardSaved,
+
+    // L4: Ad-hoc command result received (XEP-0050).
+    AdhocCommandResult(modules::adhoc::CommandResponse),
+    // L4: Ad-hoc command discovery result — list of (node, name) pairs.
+    AdhocCommandsDiscovered {
+        from_jid: String,
+        commands: Vec<(String, String)>,
+    },
 }
 
 /// Commands sent from the UI to the XMPP engine.
@@ -292,5 +305,31 @@ pub enum XmppCommand {
     SubmitRegistration {
         server: String,
         form: Element,
+    },
+    /// K2: Fetch the logged-in user's own vCard (XEP-0054).
+    FetchOwnVCard,
+    /// K2: Publish updated vCard fields for the logged-in user (XEP-0054).
+    SetOwnVCard(modules::vcard_edit::VCardFields),
+    /// L4: Execute an ad-hoc command on `to_jid` (XEP-0050).
+    ExecuteAdhocCommand {
+        to_jid: String,
+        node: String,
+    },
+    /// L4: Continue an in-progress ad-hoc command session with filled fields.
+    ContinueAdhocCommand {
+        to_jid: String,
+        node: String,
+        session_id: String,
+        fields: Vec<modules::adhoc::DataField>,
+    },
+    /// L4: Cancel an in-progress ad-hoc command session.
+    CancelAdhocCommand {
+        to_jid: String,
+        node: String,
+        session_id: String,
+    },
+    /// L4: Discover ad-hoc commands available on a JID (disco#items with commands node).
+    DiscoverAdhocCommands {
+        target_jid: String,
     },
 }

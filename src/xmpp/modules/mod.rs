@@ -40,4 +40,5 @@ pub mod ignore; // Task P6.4 — per-room ignored users via PubSub
 pub mod push; // Task K7: XEP-0357 push notifications
 pub mod push_cleanup; // Task P6.5 — XEP-0357 push-disable / WebPush VAPID unsubscribe
 pub mod registration;
+pub mod vcard_edit; // K2: XEP-0054 own vCard editing
 pub mod xmpp_uri; // Task P6.3 — XEP-0147 xmpp: URI parser
