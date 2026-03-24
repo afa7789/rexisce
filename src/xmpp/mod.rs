@@ -270,7 +270,6 @@ pub enum XmppEvent {
     AccountSwitched(AccountId),
 
     // MEMO: OMEMO E2E encryption events (XEP-0384)
-
     /// A peer's OMEMO device list was received or updated via PEP.
     OmemoDeviceListReceived {
         jid: String,
@@ -300,6 +299,12 @@ pub enum XmppEvent {
 
     // DC-10: Conversation list received from PubSub private storage.
     ConversationsReceived(Vec<modules::conversation_sync::SyncedConversation>),
+
+    // DC-9: XEP-0077 account management IQ results.
+    /// The server responded to a change-password request.
+    PasswordChanged { success: bool },
+    /// The server responded to a delete-account request.
+    AccountDeleted { success: bool },
 }
 
 /// Commands sent from the UI to the XMPP engine.
@@ -420,66 +425,36 @@ pub enum XmppCommand {
         reason: Option<String>,
     },
     /// DC-6: Kick a room occupant (MUC role=none).
-    KickUser {
-        room_jid: String,
-        nick: String,
-    },
+    KickUser { room_jid: String, nick: String },
     /// DC-6: Ban a user from a room (MUC affiliation=outcast).
-    BanUser {
-        room_jid: String,
-        jid: String,
-    },
+    BanUser { room_jid: String, jid: String },
     /// DC-6: Set arbitrary MUC affiliation action.
     SetAffiliation {
         room_jid: String,
         action: modules::muc_admin::AffiliationAction,
     },
     /// DC-6: Grant voice (role=participant).
-    GrantVoice {
-        room_jid: String,
-        nick: String,
-    },
+    GrantVoice { room_jid: String, nick: String },
     /// DC-6: Revoke voice (role=visitor).
-    RevokeVoice {
-        room_jid: String,
-        nick: String,
-    },
+    RevokeVoice { room_jid: String, nick: String },
     /// DC-6: Grant moderator role.
-    GrantModerator {
-        room_jid: String,
-        nick: String,
-    },
+    GrantModerator { room_jid: String, nick: String },
     /// DC-6: Request voice in a moderated room.
-    RequestVoice {
-        room_jid: String,
-        nick: String,
-    },
+    RequestVoice { room_jid: String, nick: String },
     /// DC-6: Approve a pending voice request.
-    ApproveVoice {
-        room_jid: String,
-        nick: String,
-    },
+    ApproveVoice { room_jid: String, nick: String },
     /// DC-6: Decline a pending voice request.
-    DeclineVoice {
-        room_jid: String,
-        nick: String,
-    },
+    DeclineVoice { room_jid: String, nick: String },
     /// J9: Register a new account (XEP-0077).
     Register(ConnectConfig),
     /// J9: Submit a registration form.
-    SubmitRegistration {
-        server: String,
-        form: Element,
-    },
+    SubmitRegistration { server: String, form: Element },
     /// K2: Fetch the logged-in user's own vCard (XEP-0054).
     FetchOwnVCard,
     /// K2: Publish updated vCard fields for the logged-in user (XEP-0054).
     SetOwnVCard(modules::vcard_edit::VCardFields),
     /// L4: Execute an ad-hoc command on `to_jid` (XEP-0050).
-    ExecuteAdhocCommand {
-        to_jid: String,
-        node: String,
-    },
+    ExecuteAdhocCommand { to_jid: String, node: String },
     /// L4: Continue an in-progress ad-hoc command session with filled fields.
     ContinueAdhocCommand {
         to_jid: String,
@@ -494,24 +469,16 @@ pub enum XmppCommand {
         session_id: String,
     },
     /// L4: Discover ad-hoc commands available on a JID (disco#items with commands node).
-    DiscoverAdhocCommands {
-        target_jid: String,
-    },
+    DiscoverAdhocCommands { target_jid: String },
 
     /// L5: Report a JID as a spammer (XEP-0377).
-    ReportSpam {
-        jid: String,
-        reason: Option<String>,
-    },
+    ReportSpam { jid: String, reason: Option<String> },
 
     /// L3: Publish the user's current location via PEP (XEP-0080).
     PublishLocation(modules::geoloc::GeoLocation),
 
     /// Q2: Request a Bits of Binary data element from a peer (XEP-0231).
-    RequestBob {
-        cid: String,
-        from: String,
-    },
+    RequestBob { cid: String, from: String },
 
     // MULTI: Account management commands.
     /// Switch the active account to the given account ID.
@@ -527,7 +494,6 @@ pub enum XmppCommand {
     DisconnectAccount(AccountId),
 
     // MEMO: OMEMO E2E encryption commands (XEP-0384)
-
     /// Generate an identity key pair, publish the device list, and publish the pre-key bundle.
     /// This enables OMEMO for the current account.
     OmemoEnable,
@@ -548,23 +514,26 @@ pub enum XmppCommand {
 
     // DC-10: Per-room ignore lists (PubSub private storage).
     /// Add a user to the per-room ignore list and persist to PubSub.
-    IgnoreUser {
-        room_jid: String,
-        user_jid: String,
-    },
+    IgnoreUser { room_jid: String, user_jid: String },
     /// Remove a user from the per-room ignore list and persist to PubSub.
-    UnignoreUser {
-        room_jid: String,
-        user_jid: String,
-    },
+    UnignoreUser { room_jid: String, user_jid: String },
     /// Fetch the ignore list for a given room from PubSub.
-    FetchIgnoreList {
-        room_jid: String,
-    },
+    FetchIgnoreList { room_jid: String },
 
     // DC-10: Conversation sync (PubSub private storage, XEP-0223).
     /// Persist the current conversation list to PubSub private storage.
     SyncConversations(Vec<modules::conversation_sync::SyncedConversation>),
     /// Fetch the conversation list from PubSub private storage.
     FetchConversations,
+
+    // DC-9: XEP-0077 account management IQ commands.
+    /// Change the account password via an in-band registration IQ.
+    ChangePassword { username: String, new_password: String },
+    /// Delete (unregister) the current account via in-band registration IQ.
+    DeleteAccount,
+
+    // P4.4: Post-connect MAM catchup across multiple conversations.
+    /// Kick off a bulk MAM sync for the given conversations.
+    /// Each entry is `(jid, last_stanza_id)` — pass `None` for a full archive fetch.
+    StartMamSync(Vec<(String, Option<String>)>),
 }

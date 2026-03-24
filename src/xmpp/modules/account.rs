@@ -49,7 +49,11 @@ impl AccountManager {
     /// ```
     ///
     /// Returns `(iq_id, element)`.
-    pub fn build_change_password_iq(&mut self, username: &str, new_password: &str) -> (String, Element) {
+    pub fn build_change_password_iq(
+        &mut self,
+        username: &str,
+        new_password: &str,
+    ) -> (String, Element) {
         let id = Uuid::new_v4().to_string();
         self.pending_change_password.insert(id.clone());
 

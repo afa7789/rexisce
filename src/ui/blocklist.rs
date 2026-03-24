@@ -108,10 +108,7 @@ impl BlocklistPanel {
             .blocked
             .iter()
             .filter(|jid| {
-                self.filter.is_empty()
-                    || jid
-                        .to_lowercase()
-                        .contains(&self.filter.to_lowercase())
+                self.filter.is_empty() || jid.to_lowercase().contains(&self.filter.to_lowercase())
             })
             .collect();
 

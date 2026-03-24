@@ -15,7 +15,7 @@ use iced::{
     Alignment, Element, Length, Task,
 };
 
-use crate::ui::data_forms::{DataForm, FieldType, FormField, render_form_interactive};
+use crate::ui::data_forms::{render_form_interactive, DataForm, FieldType, FormField};
 use crate::xmpp::modules::adhoc::{CommandResponse, CommandStatus, DataField};
 
 // ---------------------------------------------------------------------------
@@ -62,7 +62,10 @@ pub enum Message {
     /// User clicked "Discover".
     DiscoverRequested,
     /// Engine returned the command list.
-    CommandsDiscovered { _from_jid: String, commands: Vec<(String, String)> },
+    CommandsDiscovered {
+        _from_jid: String,
+        commands: Vec<(String, String)>,
+    },
     /// User clicked on a command item.
     CommandSelected(String),
     /// Engine returned a command response.
@@ -179,7 +182,10 @@ impl AdhocScreen {
                 self.commands.clear();
                 // Caller intercepts to send XmppCommand::DiscoverAdhocCommands.
             }
-            Message::CommandsDiscovered { _from_jid: _, commands } => {
+            Message::CommandsDiscovered {
+                _from_jid: _,
+                commands,
+            } => {
                 self.commands = commands;
                 self.step = AdhocStep::CommandList;
             }
@@ -246,16 +252,16 @@ impl AdhocScreen {
             AdhocStep::ShowingForm(resp) => self.view_form(resp),
             AdhocStep::Done(msg) => column![
                 text(msg.as_str()),
-                button("Back to list").on_press(Message::BackToList).padding([4, 12]),
+                button("Back to list")
+                    .on_press(Message::BackToList)
+                    .padding([4, 12]),
             ]
             .spacing(8)
             .into(),
         };
 
         let content = column![
-            row![title, close_btn]
-                .spacing(8)
-                .align_y(Alignment::Center),
+            row![title, close_btn].spacing(8).align_y(Alignment::Center),
             body,
         ]
         .spacing(16)
@@ -300,7 +306,11 @@ impl AdhocScreen {
             .commands
             .iter()
             .map(|(node, name)| {
-                let label = if name.is_empty() { node.as_str() } else { name.as_str() };
+                let label = if name.is_empty() {
+                    node.as_str()
+                } else {
+                    name.as_str()
+                };
                 button(text(label))
                     .on_press(Message::CommandSelected(node.clone()))
                     .width(Length::Fill)
@@ -309,8 +319,8 @@ impl AdhocScreen {
             })
             .collect();
 
-        let list = scrollable(column(items).spacing(4).width(Length::Fill))
-            .height(Length::Fixed(300.0));
+        let list =
+            scrollable(column(items).spacing(4).width(Length::Fill)).height(Length::Fixed(300.0));
 
         column![
             text(format!("{} command(s) available:", self.commands.len())),
@@ -338,12 +348,7 @@ impl AdhocScreen {
             .on_press(Message::CancelCommand)
             .padding([6, 12]);
 
-        let col = column![
-            form_el,
-            notes_col,
-            row![submit_btn, cancel_btn].spacing(8),
-        ]
-        .spacing(8);
+        let col = column![form_el, notes_col, row![submit_btn, cancel_btn].spacing(8),].spacing(8);
 
         scrollable(col).height(Length::Fixed(400.0)).into()
     }

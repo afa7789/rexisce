@@ -73,7 +73,10 @@ pub fn parse_sticker_pack(element: &Element) -> Option<StickerPack> {
     let name = element
         .children()
         .find(|c| c.name() == "name" && c.ns() == NS_STICKERS)
-        .map_or_else(|| "Unnamed Pack".to_string(), tokio_xmpp::minidom::Element::text);
+        .map_or_else(
+            || "Unnamed Pack".to_string(),
+            tokio_xmpp::minidom::Element::text,
+        );
 
     let mut stickers = Vec::new();
     for item in element.children().filter(|c| c.name() == "item") {
@@ -100,21 +103,19 @@ fn parse_sticker_item(item: &Element) -> Option<Sticker> {
     let content_type = file
         .children()
         .find(|c| c.name() == "media-type")
-        .map_or_else(|| "image/png".to_string(), tokio_xmpp::minidom::Element::text);
+        .map_or_else(
+            || "image/png".to_string(),
+            tokio_xmpp::minidom::Element::text,
+        );
 
     // URI is either an attribute on <uri> or the text content prefixed "cid:"
-    let cid = file
-        .children()
-        .find(|c| c.name() == "uri")
-        .and_then(|u| {
-            // Try attribute first, then text
-            u.attr("cid")
-                .map(str::to_string)
-                .or_else(|| {
-                    let txt = u.text();
-                    txt.strip_prefix("cid:").map(str::to_owned)
-                })
-        })?;
+    let cid = file.children().find(|c| c.name() == "uri").and_then(|u| {
+        // Try attribute first, then text
+        u.attr("cid").map(str::to_string).or_else(|| {
+            let txt = u.text();
+            txt.strip_prefix("cid:").map(str::to_owned)
+        })
+    })?;
 
     Some(Sticker {
         id,
@@ -288,10 +289,7 @@ mod tests {
     fn build_sticker_message_contains_file_with_cid() {
         let sticker = sample_sticker();
         let el = build_sticker_message("friend@example.org", "pack-abc", &sticker);
-        let sticker_el = el
-            .children()
-            .find(|c| c.name() == "sticker")
-            .unwrap();
+        let sticker_el = el.children().find(|c| c.name() == "sticker").unwrap();
         let file_el = sticker_el
             .children()
             .find(|c| c.name() == "file")

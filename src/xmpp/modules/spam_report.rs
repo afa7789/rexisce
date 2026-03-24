@@ -28,18 +28,14 @@ const NS_ABUSE: &str = "urn:xmpp:reporting:1";
 pub fn build_spam_report(jid: &str, reason: Option<&str>) -> Element {
     let id = Uuid::new_v4().to_string();
 
-    let jid_el = Element::builder("jid", NS_ABUSE)
-        .append(jid)
-        .build();
+    let jid_el = Element::builder("jid", NS_ABUSE).append(jid).build();
 
     let mut report_builder = Element::builder("report", NS_ABUSE)
         .attr("reason", "spam")
         .append(jid_el);
 
     if let Some(text) = reason {
-        let text_el = Element::builder("text", NS_ABUSE)
-            .append(text)
-            .build();
+        let text_el = Element::builder("text", NS_ABUSE).append(text).build();
         report_builder = report_builder.append(text_el);
     }
 

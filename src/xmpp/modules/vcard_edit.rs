@@ -330,12 +330,8 @@ mod tests {
         let nickname = Element::builder("NICKNAME", NS_VCARD)
             .append("jdoe")
             .build();
-        let fn_el = Element::builder("FN", NS_VCARD)
-            .append("John Doe")
-            .build();
-        let orgname = Element::builder("ORGNAME", NS_VCARD)
-            .append("ACME")
-            .build();
+        let fn_el = Element::builder("FN", NS_VCARD).append("John Doe").build();
+        let orgname = Element::builder("ORGNAME", NS_VCARD).append("ACME").build();
         let org = Element::builder("ORG", NS_VCARD).append(orgname).build();
         let userid = Element::builder("USERID", NS_VCARD)
             .append("john@example.com")

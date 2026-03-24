@@ -31,6 +31,7 @@ use super::{
         proxy::{ProxyLifecycle, TransportKind},
         ConnectConfig,
     },
+    modules::account::{AccountIqKind, AccountManager},
     modules::adhoc::AdhocManager,
     modules::avatar::AvatarManager,
     modules::blocking::BlockingManager,
@@ -38,6 +39,7 @@ use super::{
     modules::bookmarks::BookmarkManager,
     modules::catchup::CatchupManager,
     modules::conversation_sync::ConversationSyncManager,
+    modules::sync::SyncOrchestrator,
     modules::disco::{DiscoIdentity, DiscoManager},
     modules::entity_time::EntityTimeManager,
     modules::file_upload::FileUploadManager,
@@ -67,7 +69,7 @@ use super::{
     modules::stickers,
     modules::stream_mgmt::StreamMgmt,
     modules::vcard_edit::VCardEditManager,
-    modules::{NS_FORWARD, NS_MAM, NS_MUC_OWNER, NS_MUC_USER, NS_REACTIONS, NS_X_CONFERENCE},
+    modules::{NS_FORWARD, NS_MAM, NS_MUC_OWNER, NS_MUC_USER, NS_X_CONFERENCE},
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
 };
 
@@ -290,6 +292,12 @@ async fn run_session(
     // DC-5: XEP-0308 corrections, XEP-0424 retractions, XEP-0444 reactions
     let mutation_mgr = MutationManager::new();
 
+    // P4.4: bulk post-connect MAM sync orchestrator
+    let mut sync_orch = SyncOrchestrator::new();
+
+    // DC-9: XEP-0077 in-band registration (change-password / delete-account)
+    let mut account_mgr = AccountManager::new();
+
     // MEMO: XEP-0384 OMEMO encryption manager — only active when a DB pool is available.
     let mut omemo_mgr: Option<OmemoManager> = db
         .as_ref()
@@ -339,7 +347,7 @@ async fn run_session(
                     }
                     Some(ev) => {
 
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &push_cleanup, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &mut ignore_mgr, &conv_sync_mgr, &config.jid, config.push_service_jid.as_deref()).await;
+                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &push_cleanup, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &mut ignore_mgr, &conv_sync_mgr, &mut account_mgr, &config.jid, config.push_service_jid.as_deref()).await;
                     }
                 }
             }
@@ -713,6 +721,27 @@ async fn run_session(
                         outbox.push_back(conv_sync_mgr.build_fetch_iq());
                         tracing::debug!("conv_sync: fetching conversations");
                     }
+                    // DC-9: XEP-0077 change-password
+                    Some(XmppCommand::ChangePassword { username, new_password }) => {
+                        let (_, iq) = account_mgr.build_change_password_iq(&username, &new_password);
+                        outbox.push_back(iq);
+                        tracing::info!("account: sent change-password IQ for {username}");
+                    }
+                    // DC-9: XEP-0077 delete account
+                    Some(XmppCommand::DeleteAccount) => {
+                        let (_, iq) = account_mgr.build_delete_account_iq();
+                        outbox.push_back(iq);
+                        tracing::info!("account: sent delete-account IQ");
+                    }
+                    // P4.4: bulk post-connect MAM sync across multiple conversations
+                    Some(XmppCommand::StartMamSync(conversations)) => {
+                        let pairs = sync_orch.start_sync(&conversations);
+                        let count = pairs.len();
+                        for (_, iq) in pairs {
+                            outbox.push_back(iq);
+                        }
+                        tracing::info!("sync: started bulk MAM sync for {count} conversation(s)");
+                    }
                     // MEMO: Enable OMEMO — generate keys and publish device list + bundle.
                     Some(XmppCommand::OmemoEnable) => {
                         if let Some(ref mut mgr) = omemo_mgr {
@@ -778,6 +807,26 @@ async fn run_session(
                             }
                         }
                     }
+                    // P4.4: Bulk MAM sync for a list of conversations.
+                    Some(XmppCommand::StartMamSync(conversations)) => {
+                        for (jid, last_id) in conversations {
+                            let query = MamQuery {
+                                query_id: uuid::Uuid::new_v4().to_string(),
+                                filter: MamFilter {
+                                    with: Some(jid.clone()),
+                                    start: last_id,
+                                    end: None,
+                                },
+                                rsm: RsmQuery {
+                                    max: 50,
+                                    after: None,
+                                    before: None,
+                                },
+                            };
+                            outbox.push_back(mam_mgr.build_query_iq(query));
+                            tracing::debug!("mam: started sync for {jid}");
+                        }
+                    }
                 }
             }
         }
@@ -819,6 +868,8 @@ async fn handle_client_event(
     omemo_mgr: &mut Option<OmemoManager>,
     ignore_mgr: &mut IgnoreManager,
     conv_sync_mgr: &ConversationSyncManager,
+    account_mgr: &mut AccountManager,
+    sync_orch: &mut SyncOrchestrator,
     account_jid: &str,
     push_service_jid: Option<&str>,
 ) {
@@ -943,6 +994,7 @@ async fn handle_client_event(
                 own_jid_str,
                 mam_mgr,
                 catchup_mgr,
+                &mut sync_orch,
                 disco_mgr,
                 file_upload_mgr,
                 avatar_mgr,
@@ -954,6 +1006,7 @@ async fn handle_client_event(
                 omemo_mgr,
                 ignore_mgr,
                 conv_sync_mgr,
+                account_mgr,
                 account_jid,
             )
             .await;
@@ -971,6 +1024,7 @@ async fn dispatch_stanza(
     own_jid_str: &str,
     mam_mgr: &mut MamManager,
     catchup_mgr: &mut CatchupManager,
+    sync_orch: &mut SyncOrchestrator,
     disco_mgr: &mut DiscoManager,
     file_upload_mgr: &mut FileUploadManager,
     avatar_mgr: &mut AvatarManager,
@@ -982,6 +1036,7 @@ async fn dispatch_stanza(
     omemo_mgr: &mut Option<OmemoManager>,
     ignore_mgr: &mut IgnoreManager,
     conv_sync_mgr: &ConversationSyncManager,
+    account_mgr: &mut AccountManager,
     account_jid: &str,
 ) {
     // F1: emit received stanza to debug console before routing
@@ -1016,6 +1071,7 @@ async fn dispatch_stanza(
                 blocking_mgr,
                 mam_mgr,
                 catchup_mgr,
+                sync_orch,
                 disco_mgr,
                 file_upload_mgr,
                 avatar_mgr,
@@ -1026,6 +1082,7 @@ async fn dispatch_stanza(
                 ignore_mgr,
                 conv_sync_mgr,
                 omemo_mgr,
+                account_mgr,
                 account_jid,
             )
             .await
@@ -1069,6 +1126,8 @@ async fn dispatch_stanza(
             }
             // C3: XEP-0313 MAM result wrapper — extract forwarded message
             if let Some(mam_msg) = mam_mgr.on_mam_message(&el) {
+                // P4.4: notify bulk sync orchestrator of each incoming MAM result
+                sync_orch.on_mam_result(mam_msg.clone());
                 if !mam_msg.body.is_empty() {
                     let bare_from = mam_msg
                         .forwarded_from
@@ -1274,6 +1333,7 @@ async fn handle_iq(
     blocking_mgr: &mut BlockingManager,
     mam_mgr: &mut MamManager,
     catchup_mgr: &mut CatchupManager,
+    sync_orch: &mut SyncOrchestrator,
     disco_mgr: &mut DiscoManager,
     file_upload_mgr: &mut FileUploadManager,
     avatar_mgr: &mut AvatarManager,
@@ -1284,6 +1344,7 @@ async fn handle_iq(
     ignore_mgr: &mut IgnoreManager,
     conv_sync_mgr: &ConversationSyncManager,
     omemo_mgr: &mut Option<OmemoManager>,
+    account_mgr: &mut AccountManager,
     account_jid: &str,
 ) {
     // C5: respond to disco#info get requests with our feature list
@@ -1324,6 +1385,8 @@ async fn handle_iq(
                     .unwrap_or("__server__")
                     .to_string();
                 catchup_mgr.on_fin(&query_id);
+                // P4.4: also notify the bulk sync orchestrator so it tracks completion
+                sync_orch.on_fin(&query_id);
                 let _ = event_tx
                     .send(XmppEvent::CatchupFinished {
                         conversation_jid: conv_jid,
@@ -1638,6 +1701,33 @@ async fn handle_iq(
                 return;
             }
             _ => {}
+        }
+    }
+
+    // DC-9: XEP-0077 account management IQ results (change-password / delete-account)
+    if matches!(el.attr("type"), Some("result") | Some("error")) {
+        if let Some(result) = account_mgr.on_iq_result(&el) {
+            match result.kind {
+                AccountIqKind::ChangePassword => {
+                    tracing::info!(
+                        "account: change-password {}",
+                        if result.success { "succeeded" } else { "failed" }
+                    );
+                    let _ = event_tx
+                        .send(XmppEvent::PasswordChanged { success: result.success })
+                        .await;
+                }
+                AccountIqKind::DeleteAccount => {
+                    tracing::info!(
+                        "account: delete-account {}",
+                        if result.success { "succeeded" } else { "failed" }
+                    );
+                    let _ = event_tx
+                        .send(XmppEvent::AccountDeleted { success: result.success })
+                        .await;
+                }
+            }
+            return;
         }
     }
 

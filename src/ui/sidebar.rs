@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use iced::{
-    widget::{button, column, container, row, scrollable, text, text_input, tooltip},
     widget::text::Shaping,
+    widget::{button, column, container, row, scrollable, text, text_input, tooltip},
     Alignment, Element, Length, Task,
 };
 
@@ -248,55 +248,53 @@ impl SidebarScreen {
         // MULTI: account indicator bar — shown at the very top of the sidebar
         // when an account is active. Displays a colored dot, truncated JID,
         // and (optionally) an unread badge; clicking opens the account switcher.
-        let account_indicator: Option<Element<Message>> =
-            active_account.map(|(id, unread)| {
-                let color = account_color(id);
-                let dot = container(text("").size(1))
-                    .width(10)
-                    .height(10)
-                    .style(move |_theme: &iced::Theme| iced::widget::container::Style {
-                        background: Some(iced::Background::Color(color)),
-                        border: iced::Border {
-                            radius: 5.0.into(),
-                            ..Default::default()
-                        },
+        let account_indicator: Option<Element<Message>> = active_account.map(|(id, unread)| {
+            let color = account_color(id);
+            let dot = container(text("").size(1)).width(10).height(10).style(
+                move |_theme: &iced::Theme| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(color)),
+                    border: iced::Border {
+                        radius: 5.0.into(),
                         ..Default::default()
-                    });
+                    },
+                    ..Default::default()
+                },
+            );
 
-                // Truncate JID to at most 22 chars so it fits the 200-px sidebar.
-                let jid = id.as_str();
-                let label = if jid.len() > 22 {
-                    format!("{}…", &jid[..21])
-                } else {
-                    jid.to_owned()
-                };
+            // Truncate JID to at most 22 chars so it fits the 200-px sidebar.
+            let jid = id.as_str();
+            let label = if jid.len() > 22 {
+                format!("{}…", &jid[..21])
+            } else {
+                jid.to_owned()
+            };
 
-                let label_elem: Element<Message> = if unread > 0 {
-                    row![
-                        text(label).size(12).width(Length::Fill),
-                        container(text(unread.to_string()).size(10))
-                            .width(18)
-                            .height(18)
-                            .align_x(Alignment::Center)
-                            .align_y(Alignment::Center),
-                    ]
-                    .align_y(Alignment::Center)
-                    .into()
-                } else {
-                    text(label).size(12).width(Length::Fill).into()
-                };
+            let label_elem: Element<Message> = if unread > 0 {
+                row![
+                    text(label).size(12).width(Length::Fill),
+                    container(text(unread.to_string()).size(10))
+                        .width(18)
+                        .height(18)
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                ]
+                .align_y(Alignment::Center)
+                .into()
+            } else {
+                text(label).size(12).width(Length::Fill).into()
+            };
 
-                let indicator_row = row![dot, label_elem]
-                    .spacing(6)
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill);
+            let indicator_row = row![dot, label_elem]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .width(Length::Fill);
 
-                button(indicator_row)
-                    .on_press(Message::OpenAccountSwitcher)
-                    .width(Length::Fill)
-                    .padding([4, 8])
-                    .into()
-            });
+            button(indicator_row)
+                .on_press(Message::OpenAccountSwitcher)
+                .width(Length::Fill)
+                .padding([4, 8])
+                .into()
+        });
 
         let add_btn = button("+")
             .on_press(Message::ToggleAddContact)
@@ -414,7 +412,10 @@ impl SidebarScreen {
                 let unread = self.unread_counts.get(c.jid.as_str()).copied().unwrap_or(0);
                 let name_elem: Element<Message> = if unread > 0 {
                     row![
-                        text(name_label).size(13).width(Length::Fill).shaping(Shaping::Advanced),
+                        text(name_label)
+                            .size(13)
+                            .width(Length::Fill)
+                            .shaping(Shaping::Advanced),
                         container(text(unread.to_string()).size(11))
                             .width(20)
                             .height(20)
@@ -502,10 +503,7 @@ impl SidebarScreen {
             None
         };
 
-        let mut col = column![]
-            .spacing(4)
-            .padding(8)
-            .width(Length::Fill);
+        let mut col = column![].spacing(4).padding(8).width(Length::Fill);
         if let Some(indicator) = account_indicator {
             col = col.push(indicator);
         }

@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use iced::{
-    widget::{button, checkbox, column, container, row, text, text_input},
     widget::text::Shaping,
+    widget::{button, checkbox, column, container, row, text, text_input},
     Alignment, Element, Length, Task,
 };
 
@@ -713,26 +713,24 @@ impl ChatScreen {
                 }
 
                 // R1: intercept RetractReaction — update local state + send empty reaction set
-                if let super::conversation::Message::RetractReaction(ref msg_id, ref emoji) = cmsg
-                {
+                if let super::conversation::Message::RetractReaction(ref msg_id, ref emoji) = cmsg {
                     // Remove emoji locally and collect remaining own reactions
-                    let remaining: Vec<String> = if let Some(convo) =
-                        self.conversations.get_mut(&jid)
-                    {
-                        let own = &self.own_jid;
-                        if let Some(by_jid) = convo.reactions.get_mut(msg_id) {
-                            if let Some(emojis) = by_jid.get_mut(own) {
-                                emojis.retain(|e| e != emoji);
-                                emojis.clone()
+                    let remaining: Vec<String> =
+                        if let Some(convo) = self.conversations.get_mut(&jid) {
+                            let own = &self.own_jid;
+                            if let Some(by_jid) = convo.reactions.get_mut(msg_id) {
+                                if let Some(emojis) = by_jid.get_mut(own) {
+                                    emojis.retain(|e| e != emoji);
+                                    emojis.clone()
+                                } else {
+                                    vec![]
+                                }
                             } else {
                                 vec![]
                             }
                         } else {
                             vec![]
-                        }
-                    } else {
-                        vec![]
-                    };
+                        };
                     // Send the new (reduced) emoji set to the server
                     self.pending_commands
                         .push(crate::xmpp::XmppCommand::SendReaction {
@@ -1009,159 +1007,166 @@ impl ChatScreen {
             .map(Message::Sidebar);
 
         // K3: if there is a pending invite dialog, show it instead of the conversation
-        let main_area: Element<Message> = if let Some((ref room_jid, ref invitee, ref reason)) =
-            self.pending_invite_dialog
-        {
-            let invitee_input = text_input("Invitee JID", invitee)
-                .on_input(Message::InviteJidChanged)
-                .padding(6);
-            let reason_input = text_input("Reason (optional)", reason)
-                .on_input(Message::InviteReasonChanged)
-                .padding(6);
-            let cancel_btn = button(text("Cancel").size(13))
-                .on_press(Message::DismissInviteDialog)
-                .padding([4, 12]);
-            let invite_btn = button(text("Invite").size(13))
-                .on_press(Message::SubmitInvite)
-                .padding([4, 12]);
-            let btn_row = row![cancel_btn, invite_btn]
-                .spacing(8)
-                .align_y(Alignment::Center);
-            let modal_col = column![
-                text(format!("Invite to {}", room_jid)).size(16),
-                text("Invitee JID:").size(12),
-                invitee_input,
-                text("Reason:").size(12),
-                reason_input,
-                btn_row,
-            ]
-            .spacing(12)
-            .padding(24)
-            .width(Length::Fill);
-            container(modal_col)
-                .center(Length::Fill)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-        // K1: if there is a pending room config, show the config modal instead of the conversation
-        } else if let Some((ref room_jid, ref cfg)) = self.pending_room_config {
-            let name_val = cfg.room_name.clone().unwrap_or_default();
-            let public_val = cfg.public.unwrap_or(true);
-            let persistent_val = cfg.persistent_room.unwrap_or(true);
-            let name_input = text_input("Room display name", &name_val)
-                .on_input(Message::RoomConfigNameChanged)
-                .padding(6);
-            let public_check =
-                checkbox("Public room", public_val).on_toggle(Message::RoomConfigPublicChanged);
-            let persistent_check = checkbox("Persistent room", persistent_val)
-                .on_toggle(Message::RoomConfigPersistentChanged);
-            let cancel_btn = button(text("Cancel").size(13))
-                .on_press(Message::DismissRoomConfig)
-                .padding([4, 12]);
-            let create_btn = button(text("Create Room").size(13))
-                .on_press(Message::SubmitRoomConfig)
-                .padding([4, 12]);
-            let btn_row = row![cancel_btn, create_btn]
-                .spacing(8)
-                .align_y(Alignment::Center);
-            let modal_col = column![
-                text(format!("Configure New Room: {}", room_jid)).size(16),
-                text("Room Name:").size(12),
-                name_input,
-                public_check,
-                persistent_check,
-                btn_row,
-            ]
-            .spacing(12)
-            .padding(24)
-            .width(Length::Fill);
-            container(modal_col)
-                .center(Length::Fill)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-        } else {
-            // K3: render incoming invitation banners at the top of the main area
-            let invite_banners: Vec<Element<Message>> = self
-                .pending_invitations
-                .iter()
-                .map(|inv| {
-                    let label = if let Some(ref r) = inv.reason {
-                        format!(
-                            "{} invited you to {} — \"{}\"",
-                            inv.from_jid, inv.room_jid, r
-                        )
-                    } else {
-                        format!("{} invited you to {}", inv.from_jid, inv.room_jid)
-                    };
-                    let accept_btn = button(text("Accept").size(11))
-                        .on_press(Message::AcceptInvitation(inv.room_jid.clone()))
-                        .padding([2, 8]);
-                    let decline_btn = button(text("Decline").size(11))
-                        .on_press(Message::DeclineInvitation(inv.room_jid.clone()))
-                        .padding([2, 8]);
-                    container(
-                        row![text(label).size(12).shaping(Shaping::Advanced), accept_btn, decline_btn]
-                            .spacing(8)
-                            .align_y(iced::Alignment::Center),
-                    )
-                    .padding([4, 8])
-                    .width(Length::Fill)
-                    .into()
-                })
-                .collect();
-
-            let conversation_area: Element<Message> = match &self.active_jid {
-                None => container(text("Select a contact to start chatting").size(14))
+        let main_area: Element<Message> =
+            if let Some((ref room_jid, ref invitee, ref reason)) = self.pending_invite_dialog {
+                let invitee_input = text_input("Invitee JID", invitee)
+                    .on_input(Message::InviteJidChanged)
+                    .padding(6);
+                let reason_input = text_input("Reason (optional)", reason)
+                    .on_input(Message::InviteReasonChanged)
+                    .padding(6);
+                let cancel_btn = button(text("Cancel").size(13))
+                    .on_press(Message::DismissInviteDialog)
+                    .padding([4, 12]);
+                let invite_btn = button(text("Invite").size(13))
+                    .on_press(Message::SubmitInvite)
+                    .padding([4, 12]);
+                let btn_row = row![cancel_btn, invite_btn]
+                    .spacing(8)
+                    .align_y(Alignment::Center);
+                let modal_col = column![
+                    text(format!("Invite to {}", room_jid)).size(16),
+                    text("Invitee JID:").size(12),
+                    invitee_input,
+                    text("Reason:").size(12),
+                    reason_input,
+                    btn_row,
+                ]
+                .spacing(12)
+                .padding(24)
+                .width(Length::Fill);
+                container(modal_col)
                     .center(Length::Fill)
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .into(),
-
-                Some(jid) => {
-                    if let Some(convo) = self.conversations.get(jid) {
-                        let jid2 = jid.clone();
-                        // G2: show "is typing" if peer typed in the last 5 seconds
-                        let is_typing = self
-                            .typing_peers
-                            .get(jid)
-                            .is_some_and(|t| t.elapsed().as_secs() < 5);
-                        // L2: pass occupant list and own nick for @mention autocomplete
-                        let occupants: &[crate::ui::muc_panel::OccupantEntry] = self
-                            .muc_occupants
-                            .get(jid.as_str())
-                            .map_or(&[], Vec::as_slice);
-                        let own_nick = self
-                            .muc_own_nicks
-                            .get(jid.as_str())
-                            .map_or("", String::as_str);
-                        let conv_view = convo
-                            .view(&self.avatars, time_format, occupants, own_nick)
-                            .map(move |m| Message::Conversation(jid2.clone(), m));
-                        if is_typing {
-                            let indicator = container(text(format!("{} is typing…", jid)).size(11).shaping(Shaping::Advanced))
-                                .padding([2, 8]);
-                            column![conv_view, indicator]
-                                .height(iced::Length::Fill)
-                                .into()
+                    .into()
+            // K1: if there is a pending room config, show the config modal instead of the conversation
+            } else if let Some((ref room_jid, ref cfg)) = self.pending_room_config {
+                let name_val = cfg.room_name.clone().unwrap_or_default();
+                let public_val = cfg.public.unwrap_or(true);
+                let persistent_val = cfg.persistent_room.unwrap_or(true);
+                let name_input = text_input("Room display name", &name_val)
+                    .on_input(Message::RoomConfigNameChanged)
+                    .padding(6);
+                let public_check =
+                    checkbox("Public room", public_val).on_toggle(Message::RoomConfigPublicChanged);
+                let persistent_check = checkbox("Persistent room", persistent_val)
+                    .on_toggle(Message::RoomConfigPersistentChanged);
+                let cancel_btn = button(text("Cancel").size(13))
+                    .on_press(Message::DismissRoomConfig)
+                    .padding([4, 12]);
+                let create_btn = button(text("Create Room").size(13))
+                    .on_press(Message::SubmitRoomConfig)
+                    .padding([4, 12]);
+                let btn_row = row![cancel_btn, create_btn]
+                    .spacing(8)
+                    .align_y(Alignment::Center);
+                let modal_col = column![
+                    text(format!("Configure New Room: {}", room_jid)).size(16),
+                    text("Room Name:").size(12),
+                    name_input,
+                    public_check,
+                    persistent_check,
+                    btn_row,
+                ]
+                .spacing(12)
+                .padding(24)
+                .width(Length::Fill);
+                container(modal_col)
+                    .center(Length::Fill)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            } else {
+                // K3: render incoming invitation banners at the top of the main area
+                let invite_banners: Vec<Element<Message>> = self
+                    .pending_invitations
+                    .iter()
+                    .map(|inv| {
+                        let label = if let Some(ref r) = inv.reason {
+                            format!(
+                                "{} invited you to {} — \"{}\"",
+                                inv.from_jid, inv.room_jid, r
+                            )
                         } else {
-                            conv_view
+                            format!("{} invited you to {}", inv.from_jid, inv.room_jid)
+                        };
+                        let accept_btn = button(text("Accept").size(11))
+                            .on_press(Message::AcceptInvitation(inv.room_jid.clone()))
+                            .padding([2, 8]);
+                        let decline_btn = button(text("Decline").size(11))
+                            .on_press(Message::DeclineInvitation(inv.room_jid.clone()))
+                            .padding([2, 8]);
+                        container(
+                            row![
+                                text(label).size(12).shaping(Shaping::Advanced),
+                                accept_btn,
+                                decline_btn
+                            ]
+                            .spacing(8)
+                            .align_y(iced::Alignment::Center),
+                        )
+                        .padding([4, 8])
+                        .width(Length::Fill)
+                        .into()
+                    })
+                    .collect();
+
+                let conversation_area: Element<Message> = match &self.active_jid {
+                    None => container(text("Select a contact to start chatting").size(14))
+                        .center(Length::Fill)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into(),
+
+                    Some(jid) => {
+                        if let Some(convo) = self.conversations.get(jid) {
+                            let jid2 = jid.clone();
+                            // G2: show "is typing" if peer typed in the last 5 seconds
+                            let is_typing = self
+                                .typing_peers
+                                .get(jid)
+                                .is_some_and(|t| t.elapsed().as_secs() < 5);
+                            // L2: pass occupant list and own nick for @mention autocomplete
+                            let occupants: &[crate::ui::muc_panel::OccupantEntry] = self
+                                .muc_occupants
+                                .get(jid.as_str())
+                                .map_or(&[], Vec::as_slice);
+                            let own_nick = self
+                                .muc_own_nicks
+                                .get(jid.as_str())
+                                .map_or("", String::as_str);
+                            let conv_view = convo
+                                .view(&self.avatars, time_format, occupants, own_nick)
+                                .map(move |m| Message::Conversation(jid2.clone(), m));
+                            if is_typing {
+                                let indicator = container(
+                                    text(format!("{} is typing…", jid))
+                                        .size(11)
+                                        .shaping(Shaping::Advanced),
+                                )
+                                .padding([2, 8]);
+                                column![conv_view, indicator]
+                                    .height(iced::Length::Fill)
+                                    .into()
+                            } else {
+                                conv_view
+                            }
+                        } else {
+                            container(text("Loading…")).center(Length::Fill).into()
                         }
-                    } else {
-                        container(text("Loading…")).center(Length::Fill).into()
                     }
+                };
+
+                // K3: prepend invitation banners above the conversation area
+                if invite_banners.is_empty() {
+                    conversation_area
+                } else {
+                    let mut col = column(invite_banners).spacing(4);
+                    col = col.push(conversation_area);
+                    col.height(Length::Fill).width(Length::Fill).into()
                 }
             };
-
-            // K3: prepend invitation banners above the conversation area
-            if invite_banners.is_empty() {
-                conversation_area
-            } else {
-                let mut col = column(invite_banners).spacing(4);
-                col = col.push(conversation_area);
-                col.height(Length::Fill).width(Length::Fill).into()
-            }
-        };
 
         let own_label = text(format!("Signed in as {}", self.own_jid)).size(11);
         let settings_btn = iced::widget::button(text("Settings").size(11))

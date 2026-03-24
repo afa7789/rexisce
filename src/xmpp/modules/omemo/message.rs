@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // OMEMO encrypted message stanza builder and parser (XEP-0384)
 //
 // Builds and parses the <encrypted xmlns="eu.siacs.conversations.axolotl">
@@ -220,8 +219,8 @@ mod tests {
         };
 
         let message_el = build_encrypted_message("bob@example.com", 12345, &original);
-        let parsed = parse_encrypted_message(&message_el)
-            .expect("parse_encrypted_message must succeed");
+        let parsed =
+            parse_encrypted_message(&message_el).expect("parse_encrypted_message must succeed");
 
         assert_eq!(parsed, original);
     }
@@ -273,9 +272,21 @@ mod tests {
             header: MessageHeader {
                 sid: 42,
                 keys: vec![
-                    MessageKey { rid: 1, prekey: true, data: vec![0x01, 0x02] },
-                    MessageKey { rid: 2, prekey: false, data: vec![0x03, 0x04] },
-                    MessageKey { rid: 3, prekey: true, data: vec![0x05, 0x06] },
+                    MessageKey {
+                        rid: 1,
+                        prekey: true,
+                        data: vec![0x01, 0x02],
+                    },
+                    MessageKey {
+                        rid: 2,
+                        prekey: false,
+                        data: vec![0x03, 0x04],
+                    },
+                    MessageKey {
+                        rid: 3,
+                        prekey: true,
+                        data: vec![0x05, 0x06],
+                    },
                 ],
                 iv: vec![0xff; 12],
             },
@@ -325,7 +336,10 @@ mod tests {
         };
         let el = build_encrypted_message("x@x.com", 1, &msg);
         let encrypted = el.get_child("encrypted", NS_OMEMO);
-        assert!(encrypted.is_some(), "must have <encrypted> child in NS_OMEMO");
+        assert!(
+            encrypted.is_some(),
+            "must have <encrypted> child in NS_OMEMO"
+        );
     }
 
     #[test]
@@ -334,8 +348,16 @@ mod tests {
             header: MessageHeader {
                 sid: 1,
                 keys: vec![
-                    MessageKey { rid: 10, prekey: true, data: vec![0xaa] },
-                    MessageKey { rid: 20, prekey: false, data: vec![0xbb] },
+                    MessageKey {
+                        rid: 10,
+                        prekey: true,
+                        data: vec![0xaa],
+                    },
+                    MessageKey {
+                        rid: 20,
+                        prekey: false,
+                        data: vec![0xbb],
+                    },
                 ],
                 iv: vec![0x00; 12],
             },

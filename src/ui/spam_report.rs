@@ -79,7 +79,11 @@ impl SpamReportModal {
                 let reason = self.reason.trim().to_string();
                 Some(SpamReportCommand {
                     jid,
-                    reason: if reason.is_empty() { None } else { Some(reason) },
+                    reason: if reason.is_empty() {
+                        None
+                    } else {
+                        Some(reason)
+                    },
                 })
             }
             Message::Cancel => None,

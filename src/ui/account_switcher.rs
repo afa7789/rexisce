@@ -94,12 +94,10 @@ impl AccountSwitcherScreen {
             .on_press(Message::AddAccount)
             .padding([8, 16]);
 
-        let close_btn = button("Close")
-            .on_press(Message::Close)
-            .padding([8, 16]);
+        let close_btn = button("Close").on_press(Message::Close).padding([8, 16]);
 
-        let footer = row![add_btn, Space::with_width(Length::Fill), close_btn]
-            .align_y(Alignment::Center);
+        let footer =
+            row![add_btn, Space::with_width(Length::Fill), close_btn].align_y(Alignment::Center);
 
         let content = column![
             title,
@@ -111,9 +109,7 @@ impl AccountSwitcherScreen {
         .spacing(8)
         .padding(20);
 
-        container(content)
-            .width(Length::Fixed(320.0))
-            .into()
+        container(content).width(Length::Fixed(320.0)).into()
     }
 
     fn account_row<'a>(&self, entry: &'a AccountEntry) -> Element<'a, Message> {
@@ -177,7 +173,10 @@ mod tests {
     #[test]
     fn switch_account_updates_active() {
         let mut screen = make_screen();
-        assert_eq!(screen.active.as_ref().unwrap().as_str(), "alice@example.com");
+        assert_eq!(
+            screen.active.as_ref().unwrap().as_str(),
+            "alice@example.com"
+        );
 
         screen.update(Message::SwitchTo(AccountId::new("bob@example.com")));
         assert_eq!(screen.active.as_ref().unwrap().as_str(), "bob@example.com");

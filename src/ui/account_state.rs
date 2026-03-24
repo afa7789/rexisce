@@ -106,7 +106,9 @@ impl AccountStateManager {
     pub fn add_account(&mut self, id: AccountId) -> &mut AccountState {
         let is_first = self.accounts.is_empty();
         let jid = id.0.clone();
-        self.accounts.entry(id.clone()).or_insert_with(|| AccountState::new(jid));
+        self.accounts
+            .entry(id.clone())
+            .or_insert_with(|| AccountState::new(jid));
         if is_first {
             self.active = Some(id.clone());
         }
@@ -253,9 +255,8 @@ mod tests {
         assert!(c1.r >= 0.0 && c1.r <= 1.0);
         assert!(c2.r >= 0.0 && c2.r <= 1.0);
         // These two JIDs produce different hues
-        let equal = (c1.r - c2.r).abs() < 1e-6
-            && (c1.g - c2.g).abs() < 1e-6
-            && (c1.b - c2.b).abs() < 1e-6;
+        let equal =
+            (c1.r - c2.r).abs() < 1e-6 && (c1.g - c2.g).abs() < 1e-6 && (c1.b - c2.b).abs() < 1e-6;
         assert!(!equal, "different JIDs should produce different colors");
     }
 

@@ -68,9 +68,7 @@ pub fn parse_bob_data(element: &Element) -> Option<BobData> {
 
     let cid = data_el.attr("cid")?.to_string();
     let content_type = data_el.attr("type")?.to_string();
-    let max_age = data_el
-        .attr("max-age")
-        .and_then(|v| v.parse::<u32>().ok());
+    let max_age = data_el.attr("max-age").and_then(|v| v.parse::<u32>().ok());
 
     let raw = data_el.text();
     let trimmed = raw.split_whitespace().collect::<String>();
@@ -94,9 +92,7 @@ pub fn parse_bob_data(element: &Element) -> Option<BobData> {
 pub fn build_bob_request(cid: &str, from: &str) -> Element {
     let id = Uuid::new_v4().to_string();
 
-    let data_el = Element::builder("data", NS_BOB)
-        .attr("cid", cid)
-        .build();
+    let data_el = Element::builder("data", NS_BOB).attr("cid", cid).build();
 
     Element::builder("iq", NS_CLIENT)
         .attr("type", "get")
@@ -181,10 +177,7 @@ mod tests {
             .find(|c| c.name() == "data")
             .expect("no data child");
         assert_eq!(data_el.ns(), NS_BOB);
-        assert_eq!(
-            data_el.attr("cid"),
-            Some("sha1+aabbcc@bob.xmpp.org")
-        );
+        assert_eq!(data_el.attr("cid"), Some("sha1+aabbcc@bob.xmpp.org"));
     }
 
     #[test]

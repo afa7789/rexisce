@@ -204,7 +204,8 @@ impl OmemoManager {
 
     /// Record a pending bundle-fetch IQ so we can correlate the response.
     pub fn track_bundle_fetch(&mut self, iq_id: String, peer_jid: String, device_id: u32) {
-        self.pending_bundle_fetches.insert(iq_id, (peer_jid, device_id));
+        self.pending_bundle_fetches
+            .insert(iq_id, (peer_jid, device_id));
     }
 
     /// Consume a pending bundle-fetch entry by IQ id, returning `(peer_jid, device_id)`.
@@ -322,8 +323,7 @@ mod tests {
         let iq = build_bundle_publish(99, &original);
 
         // Extract the inner <bundle> element and parse it directly
-        let bundle_el =
-            find_child_recursive(&iq, "bundle", NS_OMEMO).expect("must find <bundle>");
+        let bundle_el = find_child_recursive(&iq, "bundle", NS_OMEMO).expect("must find <bundle>");
         let parsed = parse_bundle(bundle_el).expect("must parse bare <bundle>");
         assert_eq!(parsed, original);
     }

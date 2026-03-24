@@ -444,6 +444,9 @@ mod tests {
         let el = mgr.build_retraction("alice@example.com", "origin-777");
 
         let body_el = el.children().find(|c| c.name() == "body");
-        assert!(body_el.is_none(), "retraction stanza must not carry a <body>");
+        assert!(
+            body_el.is_none(),
+            "retraction stanza must not carry a <body>"
+        );
     }
 }

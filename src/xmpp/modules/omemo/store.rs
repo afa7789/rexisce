@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // OMEMO key/session storage backed by SQLite (XEP-0384)
 //
 // All cryptographic material is stored as opaque blobs serialized by vodozemac.
@@ -189,10 +188,7 @@ impl OmemoStore {
     }
 
     /// Fetch all unconsumed pre-keys for `account_jid`.
-    pub async fn load_unconsumed_prekeys(
-        &self,
-        account_jid: &str,
-    ) -> Result<Vec<StoredPreKey>> {
+    pub async fn load_unconsumed_prekeys(&self, account_jid: &str) -> Result<Vec<StoredPreKey>> {
         let rows = sqlx::query(
             "SELECT prekey_id, key_data FROM omemo_prekeys
              WHERE account_jid = ? AND consumed = 0",
@@ -313,11 +309,7 @@ impl OmemoStore {
     // -----------------------------------------------------------------------
 
     /// Load all known devices for a peer JID.
-    pub async fn load_devices(
-        &self,
-        account_jid: &str,
-        peer_jid: &str,
-    ) -> Result<Vec<PeerDevice>> {
+    pub async fn load_devices(&self, account_jid: &str, peer_jid: &str) -> Result<Vec<PeerDevice>> {
         let rows = sqlx::query(
             "SELECT peer_jid, device_id, trust, label, active
              FROM omemo_devices WHERE account_jid = ? AND peer_jid = ?",
@@ -399,13 +391,11 @@ impl OmemoStore {
         active_device_ids: &[u32],
     ) -> Result<()> {
         // Deactivate all first.
-        sqlx::query(
-            "UPDATE omemo_devices SET active = 0 WHERE account_jid = ? AND peer_jid = ?",
-        )
-        .bind(account_jid)
-        .bind(peer_jid)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("UPDATE omemo_devices SET active = 0 WHERE account_jid = ? AND peer_jid = ?")
+            .bind(account_jid)
+            .bind(peer_jid)
+            .execute(&self.pool)
+            .await?;
 
         // Re-activate the reported ones (insert if unknown).
         for &id in active_device_ids {

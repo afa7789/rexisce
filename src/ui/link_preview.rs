@@ -138,10 +138,7 @@ mod tests {
 
     #[test]
     fn extract_domain_http() {
-        assert_eq!(
-            extract_domain("http://example.com"),
-            Some("example.com")
-        );
+        assert_eq!(extract_domain("http://example.com"), Some("example.com"));
     }
 
     #[test]

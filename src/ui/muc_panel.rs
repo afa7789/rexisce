@@ -2,8 +2,8 @@
 // XEP reference: https://xmpp.org/extensions/xep-0045.html
 
 use iced::{
-    widget::{button, column, container, row, scrollable, text},
     widget::text::Shaping,
+    widget::{button, column, container, row, scrollable, text},
     Element, Length,
 };
 

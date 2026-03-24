@@ -227,5 +227,3 @@ fn message_moderation_command_building() {
     assert!(moderation_xml.contains("Violation of room rules"));
     assert!(moderation_xml.contains("to=\"room@conference.example.com\""));
 }
-
-

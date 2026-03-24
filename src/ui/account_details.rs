@@ -33,24 +33,15 @@ pub struct AccountInfo {
 
 impl AccountInfo {
     fn bare_jid(&self) -> &str {
-        self.bound_jid
-            .split('/')
-            .next()
-            .unwrap_or(&self.bound_jid)
+        self.bound_jid.split('/').next().unwrap_or(&self.bound_jid)
     }
 
     fn server(&self) -> &str {
-        self.bare_jid()
-            .split('@')
-            .nth(1)
-            .unwrap_or("")
+        self.bare_jid().split('@').nth(1).unwrap_or("")
     }
 
     fn resource(&self) -> &str {
-        self.bound_jid
-            .split('/')
-            .nth(1)
-            .unwrap_or("")
+        self.bound_jid.split('/').nth(1).unwrap_or("")
     }
 }
 

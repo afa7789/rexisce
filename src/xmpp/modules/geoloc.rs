@@ -237,10 +237,7 @@ mod tests {
         assert!((parsed.lon - loc.lon).abs() < 1e-6);
         assert_eq!(parsed.accuracy, Some(10.0));
         assert_eq!(parsed.description.as_deref(), Some("Paris city centre"));
-        assert_eq!(
-            parsed.timestamp.as_deref(),
-            Some("2024-01-15T12:00:00Z")
-        );
+        assert_eq!(parsed.timestamp.as_deref(), Some("2024-01-15T12:00:00Z"));
     }
 
     #[test]
@@ -253,19 +250,17 @@ mod tests {
 
     #[test]
     fn parse_geoloc_missing_lat_returns_none() {
-        let lon_el = Element::builder("lon", NS_GEOLOC).append("-74.0060").build();
-        let geoloc = Element::builder("geoloc", NS_GEOLOC)
-            .append(lon_el)
+        let lon_el = Element::builder("lon", NS_GEOLOC)
+            .append("-74.0060")
             .build();
+        let geoloc = Element::builder("geoloc", NS_GEOLOC).append(lon_el).build();
         assert!(parse_geoloc(&geoloc).is_none());
     }
 
     #[test]
     fn parse_geoloc_missing_lon_returns_none() {
         let lat_el = Element::builder("lat", NS_GEOLOC).append("40.7128").build();
-        let geoloc = Element::builder("geoloc", NS_GEOLOC)
-            .append(lat_el)
-            .build();
+        let geoloc = Element::builder("geoloc", NS_GEOLOC).append(lat_el).build();
         assert!(parse_geoloc(&geoloc).is_none());
     }
 }

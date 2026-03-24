@@ -118,7 +118,10 @@ impl VCardEditorScreen {
         let row_width = Length::Fixed(400.0);
         let label_width = Length::Fixed(120.0);
 
-        let mk_row = |label: &'static str, value: &str, msg: fn(String) -> Message| -> Element<'_, Message> {
+        let mk_row = |label: &'static str,
+                      value: &str,
+                      msg: fn(String) -> Message|
+         -> Element<'_, Message> {
             row![
                 text(label).width(label_width),
                 text_input(label, value)
@@ -131,11 +134,17 @@ impl VCardEditorScreen {
             .into()
         };
 
-        let nickname_row =
-            mk_row("Nickname", &self.fields.nickname, Message::NicknameChanged);
-        let fullname_row =
-            mk_row("Full name", &self.fields.full_name, Message::FullNameChanged);
-        let org_row = mk_row("Organisation", &self.fields.organisation, Message::OrgChanged);
+        let nickname_row = mk_row("Nickname", &self.fields.nickname, Message::NicknameChanged);
+        let fullname_row = mk_row(
+            "Full name",
+            &self.fields.full_name,
+            Message::FullNameChanged,
+        );
+        let org_row = mk_row(
+            "Organisation",
+            &self.fields.organisation,
+            Message::OrgChanged,
+        );
         let email_row = mk_row("Email", &self.fields.email, Message::EmailChanged);
         let phone_row = mk_row("Phone", &self.fields.phone, Message::PhoneChanged);
 
@@ -156,9 +165,7 @@ impl VCardEditorScreen {
         let fetch_btn = button("Refresh")
             .on_press(Message::FetchRequested)
             .padding([6, 12]);
-        let close_btn = button("Close")
-            .on_press(Message::Close)
-            .padding([6, 12]);
+        let close_btn = button("Close").on_press(Message::Close).padding([6, 12]);
 
         let btn_row = row![save_btn, fetch_btn, close_btn].spacing(8);
 

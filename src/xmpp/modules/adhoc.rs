@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // Task P6.2 — XEP-0050 Ad-Hoc Commands
 // XEP reference: https://xmpp.org/extensions/xep-0050.html
 //

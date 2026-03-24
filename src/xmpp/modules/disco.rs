@@ -120,7 +120,10 @@ impl DiscoManager {
             pending_items: HashMap::new(),
             own_caps,
             own_identities: identities.to_vec(),
-            own_features: features.iter().map(std::string::ToString::to_string).collect(),
+            own_features: features
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
         }
     }
 

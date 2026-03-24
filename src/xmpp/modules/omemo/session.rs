@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // OMEMO session management (XEP-0384)
 //
 // Wraps vodozemac's Olm Account and Session types, providing:
@@ -202,7 +201,10 @@ impl OmemoSessionManager {
     /// `ciphertext` — ciphertext || tag (aes-gcm includes the tag at the end).
     pub fn decrypt_payload(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<String> {
         if key.len() != AES_KEY_LEN {
-            return Err(anyhow!("invalid key length: expected {AES_KEY_LEN}, got {}", key.len()));
+            return Err(anyhow!(
+                "invalid key length: expected {AES_KEY_LEN}, got {}",
+                key.len()
+            ));
         }
         if nonce.len() != AES_NONCE_LEN {
             return Err(anyhow!(
@@ -292,11 +294,8 @@ mod tests {
         bob.mark_keys_as_published();
 
         // Alice creates an outbound session to Bob
-        let _session = OmemoSessionManager::create_outbound_session(
-            &alice,
-            bob.curve25519_key(),
-            bob_otk,
-        );
+        let _session =
+            OmemoSessionManager::create_outbound_session(&alice, bob.curve25519_key(), bob_otk);
         // No panic = success
     }
 
@@ -308,11 +307,8 @@ mod tests {
         let bob_otk = *bob.one_time_keys().values().next().unwrap();
         bob.mark_keys_as_published();
 
-        let mut alice_session = OmemoSessionManager::create_outbound_session(
-            &alice,
-            bob.curve25519_key(),
-            bob_otk,
-        );
+        let mut alice_session =
+            OmemoSessionManager::create_outbound_session(&alice, bob.curve25519_key(), bob_otk);
 
         // Alice sends first message — this is always a PreKey message
         let aes_key = b"this-is-a-32-byte-aes-key-123456";
@@ -346,11 +342,8 @@ mod tests {
         let bob_otk = *bob.one_time_keys().values().next().unwrap();
         bob.mark_keys_as_published();
 
-        let mut alice_session = OmemoSessionManager::create_outbound_session(
-            &alice,
-            bob.curve25519_key(),
-            bob_otk,
-        );
+        let mut alice_session =
+            OmemoSessionManager::create_outbound_session(&alice, bob.curve25519_key(), bob_otk);
 
         // Alice encrypts a 32-byte key
         let original_key = b"hello-world-32-byte-aes-key-1234";
@@ -393,11 +386,8 @@ mod tests {
         let bob_otk = *bob.one_time_keys().values().next().unwrap();
         bob.mark_keys_as_published();
 
-        let session = OmemoSessionManager::create_outbound_session(
-            &alice,
-            bob.curve25519_key(),
-            bob_otk,
-        );
+        let session =
+            OmemoSessionManager::create_outbound_session(&alice, bob.curve25519_key(), bob_otk);
 
         let original_id = session.session_id();
         let bytes = OmemoSessionManager::pickle_session(&session).unwrap();

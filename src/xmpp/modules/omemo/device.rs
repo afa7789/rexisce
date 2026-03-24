@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // OMEMO device list management (XEP-0384)
 //
 // Pure state machine — no I/O, no async.
@@ -7,8 +6,8 @@
 
 use tokio_xmpp::minidom::Element;
 
-use crate::xmpp::modules::{find_child_recursive, NS_CLIENT, NS_PUBSUB};
 use super::{NS_OMEMO, NS_OMEMO_BUNDLES, NS_OMEMO_DEVICELIST};
+use crate::xmpp::modules::{find_child_recursive, NS_CLIENT, NS_PUBSUB};
 
 /// XEP-0384 device list node name.
 pub const OMEMO_DEVICES_NODE: &str = NS_OMEMO_DEVICELIST;
@@ -248,10 +247,9 @@ mod tests {
             .append(item_el)
             .build();
 
-        let event_el =
-            Element::builder("event", "http://jabber.org/protocol/pubsub#event")
-                .append(items_el)
-                .build();
+        let event_el = Element::builder("event", "http://jabber.org/protocol/pubsub#event")
+            .append(items_el)
+            .build();
 
         let message_el = Element::builder("message", NS_CLIENT)
             .attr("from", "bob@example.com")
@@ -325,14 +323,12 @@ mod tests {
 
     #[test]
     fn is_device_list_event_detects_push() {
-        let items_el =
-            Element::builder("items", "http://jabber.org/protocol/pubsub#event")
-                .attr("node", OMEMO_DEVICES_NODE)
-                .build();
-        let event_el =
-            Element::builder("event", "http://jabber.org/protocol/pubsub#event")
-                .append(items_el)
-                .build();
+        let items_el = Element::builder("items", "http://jabber.org/protocol/pubsub#event")
+            .attr("node", OMEMO_DEVICES_NODE)
+            .build();
+        let event_el = Element::builder("event", "http://jabber.org/protocol/pubsub#event")
+            .append(items_el)
+            .build();
         let message_el = Element::builder("message", NS_CLIENT)
             .attr("from", "alice@example.com")
             .append(event_el)
@@ -344,14 +340,12 @@ mod tests {
 
     #[test]
     fn is_device_list_event_ignores_other_nodes() {
-        let items_el =
-            Element::builder("items", "http://jabber.org/protocol/pubsub#event")
-                .attr("node", "some:other:node")
-                .build();
-        let event_el =
-            Element::builder("event", "http://jabber.org/protocol/pubsub#event")
-                .append(items_el)
-                .build();
+        let items_el = Element::builder("items", "http://jabber.org/protocol/pubsub#event")
+            .attr("node", "some:other:node")
+            .build();
+        let event_el = Element::builder("event", "http://jabber.org/protocol/pubsub#event")
+            .append(items_el)
+            .build();
         let message_el = Element::builder("message", NS_CLIENT)
             .attr("from", "alice@example.com")
             .append(event_el)

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // Task P4.1 — XEP-0313 Message Archive Management + XEP-0059 Result Set Management
 // XEP references:
 //   https://xmpp.org/extensions/xep-0313.html

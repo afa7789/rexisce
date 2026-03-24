@@ -215,7 +215,11 @@ pub fn render_form<M: Clone + 'static>(form: DataForm) -> Element<'static, M> {
                 for (opt_label, opt_value) in field.options {
                     let is_selected = selected.contains(&opt_value);
                     let prefix = if field.field_type == FieldType::ListMulti {
-                        if is_selected { "☑" } else { "☐" }
+                        if is_selected {
+                            "☑"
+                        } else {
+                            "☐"
+                        }
                     } else if is_selected {
                         "●"
                     } else {
@@ -273,7 +277,11 @@ where
     }
 
     for field in form.fields {
-        let label = field.label.clone().or(field.var.clone()).unwrap_or_default();
+        let label = field
+            .label
+            .clone()
+            .or(field.var.clone())
+            .unwrap_or_default();
 
         match field.field_type {
             FieldType::Hidden => {
@@ -301,7 +309,11 @@ where
                 for (opt_label, opt_value) in field.options {
                     let is_selected = selected.contains(&opt_value);
                     let prefix = if field.field_type == FieldType::ListMulti {
-                        if is_selected { "☑" } else { "☐" }
+                        if is_selected {
+                            "☑"
+                        } else {
+                            "☐"
+                        }
                     } else if is_selected {
                         "●"
                     } else {
