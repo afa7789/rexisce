@@ -38,6 +38,8 @@ use toast::{Toast, ToastKind};
 const PALETTE_COMMANDS: &[&str] = &[
     "Open Settings",
     "Open About",
+    "Edit Profile",
+    "Ad-hoc Commands",
     "Toggle Console",
     "Add Contact",
     "Disconnect",
@@ -120,6 +122,12 @@ pub enum Message {
     // M7: about modal
     GoToAbout,
     About(about::Message),
+    // K2: vCard editor
+    GoToVCardEditor,
+    VCardEditor(vcard_editor::Message),
+    // L4: ad-hoc commands screen
+    GoToAdhoc,
+    Adhoc(adhoc::Message),
 }
 
 enum Screen {
@@ -128,6 +136,8 @@ enum Screen {
     Chat(Box<ChatScreen>),
     Settings(Box<settings::SettingsScreen>, Box<Screen>),
     About(Box<about::AboutScreen>, Box<Screen>),
+    VCardEditor(Box<vcard_editor::VCardEditorScreen>, Box<Screen>),
+    Adhoc(Box<adhoc::AdhocScreen>, Box<Screen>),
 }
 
 impl App {
@@ -231,6 +241,8 @@ impl App {
                     match label {
                         "Open Settings" => return self.update(Message::GoToSettings),
                         "Open About" => return self.update(Message::GoToAbout),
+                        "Edit Profile" => return self.update(Message::GoToVCardEditor),
+                        "Ad-hoc Commands" => return self.update(Message::GoToAdhoc),
                         "Disconnect" => {
                             if let Some(ref tx) = self.xmpp_tx {
                                 let tx = tx.clone();
@@ -389,6 +401,140 @@ impl App {
                 Task::none()
             }
 
+            // K2: navigate to vCard editor
+            Message::GoToVCardEditor => {
+                let prev = std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()));
+                let mut ve = vcard_editor::VCardEditorScreen::new();
+                // Request own vCard from engine.
+                if let Some(ref tx) = self.xmpp_tx {
+                    let tx = tx.clone();
+                    tokio::spawn(async move {
+                        let _ = tx.send(XmppCommand::FetchOwnVCard).await;
+                    });
+                }
+                ve.loading = true;
+                self.screen = Screen::VCardEditor(Box::new(ve), Box::new(prev));
+                Task::none()
+            }
+
+            Message::VCardEditor(msg) => {
+                // Intercept Close (back navigation)
+                let is_close = matches!(msg, vcard_editor::Message::Close);
+                // Intercept SaveRequested to send command to engine
+                let is_save = matches!(msg, vcard_editor::Message::SaveRequested);
+                if let Screen::VCardEditor(ref mut ve, _) = self.screen {
+                    let _ = ve.update(msg);
+                    if is_save {
+                        let fields = ve.current_fields();
+                        if let Some(ref tx) = self.xmpp_tx {
+                            let tx = tx.clone();
+                            tokio::spawn(async move {
+                                let _ = tx.send(XmppCommand::SetOwnVCard(fields)).await;
+                            });
+                        }
+                    }
+                }
+                if is_close {
+                    if let Screen::VCardEditor(_, prev) =
+                        std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()))
+                    {
+                        self.screen = *prev;
+                    }
+                }
+                Task::none()
+            }
+
+            // L4: navigate to ad-hoc commands screen
+            Message::GoToAdhoc => {
+                let prev = std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()));
+                self.screen = Screen::Adhoc(Box::new(adhoc::AdhocScreen::new()), Box::new(prev));
+                Task::none()
+            }
+
+            Message::Adhoc(msg) => {
+                let is_close = matches!(msg, adhoc::Message::Close);
+                let is_discover = matches!(msg, adhoc::Message::DiscoverRequested);
+                let is_submit = matches!(msg, adhoc::Message::SubmitForm);
+                let is_cancel = matches!(msg, adhoc::Message::CancelCommand);
+                if let Screen::Adhoc(ref mut adhoc, _) = self.screen {
+                    if is_discover {
+                        let target = adhoc.target_jid.clone();
+                        if let Some(ref tx) = self.xmpp_tx {
+                            let tx = tx.clone();
+                            tokio::spawn(async move {
+                                let _ = tx
+                                    .send(XmppCommand::DiscoverAdhocCommands { target_jid: target })
+                                    .await;
+                            });
+                        }
+                    }
+                    if let adhoc::Message::CommandSelected(ref node) = msg {
+                        let target = adhoc.target_jid.clone();
+                        let node = node.clone();
+                        if let Some(ref tx) = self.xmpp_tx {
+                            let tx = tx.clone();
+                            tokio::spawn(async move {
+                                let _ = tx
+                                    .send(XmppCommand::ExecuteAdhocCommand {
+                                        to_jid: target,
+                                        node,
+                                    })
+                                    .await;
+                            });
+                        }
+                    }
+                    if is_submit {
+                        if let Some(node) = adhoc.active_node().map(str::to_owned) {
+                            if let Some(session_id) = adhoc.active_session_id().map(str::to_owned) {
+                                let fields = adhoc.collect_fields();
+                                let target = adhoc.target_jid.clone();
+                                if let Some(ref tx) = self.xmpp_tx {
+                                    let tx = tx.clone();
+                                    tokio::spawn(async move {
+                                        let _ = tx
+                                            .send(XmppCommand::ContinueAdhocCommand {
+                                                to_jid: target,
+                                                node,
+                                                session_id,
+                                                fields,
+                                            })
+                                            .await;
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    if is_cancel {
+                        if let Some(node) = adhoc.active_node().map(str::to_owned) {
+                            if let Some(session_id) = adhoc.active_session_id().map(str::to_owned) {
+                                let target = adhoc.target_jid.clone();
+                                if let Some(ref tx) = self.xmpp_tx {
+                                    let tx = tx.clone();
+                                    tokio::spawn(async move {
+                                        let _ = tx
+                                            .send(XmppCommand::CancelAdhocCommand {
+                                                to_jid: target,
+                                                node,
+                                                session_id,
+                                            })
+                                            .await;
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    let _ = adhoc.update(msg);
+                }
+                if is_close {
+                    if let Screen::Adhoc(_, prev) =
+                        std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()))
+                    {
+                        self.screen = *prev;
+                    }
+                }
+                Task::none()
+            }
+
             Message::GoBack => {
                 if let Screen::Settings(ref ss, _) = self.screen {
                     self.settings = ss.settings().clone();
@@ -414,6 +560,10 @@ impl App {
                 // M7: intercept OpenAbout from settings panel before delegating.
                 if matches!(smsg, settings::Message::OpenAbout) {
                     return self.update(Message::GoToAbout);
+                }
+                // K2: intercept OpenVCardEditor from settings panel before delegating.
+                if matches!(smsg, settings::Message::OpenVCardEditor) {
+                    return self.update(Message::GoToVCardEditor);
                 }
                 let go_back = matches!(smsg, settings::Message::Back);
                 // M6: detect clear-history confirmation before delegating
@@ -1066,11 +1216,33 @@ impl App {
                             chat.on_message_moderated(room_jid, message_id);
                         }
                     }
-                    // Not yet handled in UI — silently ignore.
-                    XmppEvent::OwnVCardReceived(_)
-                    | XmppEvent::OwnVCardSaved
-                    | XmppEvent::AdhocCommandResult(_)
-                    | XmppEvent::AdhocCommandsDiscovered { .. } => {}
+                    // K2: own vCard received — populate the vCard editor if it's open
+                    XmppEvent::OwnVCardReceived(fields) => {
+                        if let Screen::VCardEditor(ref mut ve, _) = self.screen {
+                            let _ = ve.update(vcard_editor::Message::VCardLoaded(fields));
+                        }
+                    }
+                    // K2: own vCard saved — confirm to the editor
+                    XmppEvent::OwnVCardSaved => {
+                        if let Screen::VCardEditor(ref mut ve, _) = self.screen {
+                            let _ = ve.update(vcard_editor::Message::VCardSaved);
+                        }
+                    }
+                    // L4: ad-hoc commands discovered — forward to adhoc screen
+                    XmppEvent::AdhocCommandsDiscovered { from_jid, commands } => {
+                        if let Screen::Adhoc(ref mut adhoc, _) = self.screen {
+                            let _ = adhoc.update(adhoc::Message::CommandsDiscovered {
+                                from_jid,
+                                commands,
+                            });
+                        }
+                    }
+                    // L4: ad-hoc command response — forward to adhoc screen
+                    XmppEvent::AdhocCommandResult(resp) => {
+                        if let Screen::Adhoc(ref mut adhoc, _) = self.screen {
+                            let _ = adhoc.update(adhoc::Message::CommandResponseReceived(resp));
+                        }
+                    }
                 }
                 Task::none()
             }
@@ -1089,6 +1261,8 @@ impl App {
             Screen::Chat(chat) => chat.view(self.settings.time_format).map(Message::Chat),
             Screen::Settings(ss, _) => ss.view().map(Message::Settings),
             Screen::About(about, _) => about.view().map(Message::About),
+            Screen::VCardEditor(ve, _) => ve.view().map(Message::VCardEditor),
+            Screen::Adhoc(adhoc, _) => adhoc.view().map(Message::Adhoc),
         };
 
         // F1: build the XML toggle button (always visible, bottom-left corner)

@@ -68,6 +68,8 @@ pub enum Message {
     Logout,
     // M7: open About modal from settings
     OpenAbout,
+    // K2: open vCard editor from settings
+    OpenVCardEditor,
     Back,
 }
 
@@ -316,6 +318,8 @@ impl SettingsScreen {
             Message::Logout => Task::none(),
             // M7: OpenAbout is handled by App::update intercepting this message.
             Message::OpenAbout => Task::none(),
+            // K2: OpenVCardEditor is handled by App::update intercepting this message.
+            Message::OpenVCardEditor => Task::none(),
             Message::Back => Task::none(),
         }
     }
@@ -501,11 +505,15 @@ impl SettingsScreen {
         let data_section = self.view_data_storage();
 
         let back_btn = button("Back").on_press(Message::Back).padding([6, 14]);
+        let edit_profile_btn = button("Edit Profile")
+            .on_press(Message::OpenVCardEditor)
+            .padding([6, 14]);
         let about_btn = button("About").on_press(Message::OpenAbout).padding([6, 14]);
         let logout_btn = button("Logout").on_press(Message::Logout).padding([6, 14]);
         let bottom_row = row![
             back_btn,
             iced::widget::Space::with_width(Length::Fill),
+            edit_profile_btn,
             about_btn,
             logout_btn,
         ]
