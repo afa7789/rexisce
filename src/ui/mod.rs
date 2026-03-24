@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 
 pub mod about;
 pub mod account_details;
+pub mod account_state;
 pub mod account_switcher;
 pub mod adhoc;
 pub mod avatar;
