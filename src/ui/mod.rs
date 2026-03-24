@@ -34,22 +34,27 @@ pub use chat::ChatScreen;
 pub use login::LoginScreen;
 
 use crate::config::{self, Settings, Theme};
-use crate::xmpp::{self, modules::presence_machine::PresenceStatus, modules::xmpp_uri, AccountId, XmppCommand, XmppEvent};
+use crate::xmpp::{self, modules::command_palette, modules::console::XmppConsole, modules::presence_machine::PresenceStatus, modules::xmpp_uri, AccountId, XmppCommand, XmppEvent};
 use account_state::AccountStateManager;
 use toast::{Toast, ToastKind};
 
-// F2: hardcoded command palette entries
-const PALETTE_COMMANDS: &[&str] = &[
-    "Open Settings",
-    "Open About",
-    "Edit Profile",
-    "Ad-hoc Commands",
-    "Toggle Console",
-    "Add Contact",
-    "Switch Account",
-    "Report Spam",
-    "Disconnect",
-];
+// F2: command palette entries — built once and searched via command_palette::search().
+fn palette_commands() -> Vec<command_palette::Command> {
+    use command_palette::Command;
+    vec![
+        Command { id: "open-settings".into(), label: "Open Settings".into(), description: "Open the settings panel".into(), keywords: vec!["preferences".into(), "config".into()] },
+        Command { id: "open-about".into(), label: "Open About".into(), description: "Show app info".into(), keywords: vec!["info".into(), "version".into()] },
+        Command { id: "edit-profile".into(), label: "Edit Profile".into(), description: "Edit your vCard profile".into(), keywords: vec!["vcard".into(), "avatar".into()] },
+        Command { id: "adhoc-commands".into(), label: "Ad-hoc Commands".into(), description: "Run server ad-hoc commands (XEP-0050)".into(), keywords: vec!["adhoc".into(), "server".into()] },
+        Command { id: "toggle-console".into(), label: "Toggle Console".into(), description: "Show or hide the XMPP debug console".into(), keywords: vec!["xml".into(), "debug".into(), "stanza".into()] },
+        Command { id: "add-contact".into(), label: "Add Contact".into(), description: "Add a new roster contact".into(), keywords: vec!["roster".into(), "friend".into()] },
+        Command { id: "switch-account".into(), label: "Switch Account".into(), description: "Switch to a different XMPP account".into(), keywords: vec!["account".into(), "multi".into()] },
+        Command { id: "report-spam".into(), label: "Report Spam".into(), description: "Report a JID as a spammer".into(), keywords: vec!["spam".into(), "block".into()] },
+        Command { id: "disconnect".into(), label: "Disconnect".into(), description: "Gracefully disconnect from the server".into(), keywords: vec!["logout".into(), "quit".into()] },
+        // DC-11: open a chat / room from an xmpp: URI typed in the palette search box
+        Command { id: "open-xmpp-uri".into(), label: "Open XMPP URI".into(), description: "Open a chat or room from an xmpp: URI".into(), keywords: vec!["uri".into(), "link".into(), "xmpp".into()] },
+    ]
+}
 
 /// Top-level application state.
 pub struct App {
@@ -65,8 +70,8 @@ pub struct App {
     last_connect_cfg: Option<crate::xmpp::ConnectConfig>,
     // H1: avatar cache (jid → png bytes)
     avatar_cache: HashMap<String, Vec<u8>>,
-    // F1: debug console entries (direction, xml) and visibility flag
-    console_entries: Vec<(String, String)>,
+    // F1: debug console — circular buffer of raw XML stanzas and visibility flag
+    xmpp_console: XmppConsole,
     show_console: bool,
     // F2: command palette
     show_palette: bool,
@@ -194,7 +199,7 @@ impl App {
                 reconnect_attempt: 0,
                 last_connect_cfg: None,
                 avatar_cache: HashMap::new(),
-                console_entries: vec![],
+                xmpp_console: XmppConsole::new(200),
                 show_console: false,
                 show_palette: false,
                 palette_query: String::new(),
@@ -251,29 +256,30 @@ impl App {
                         });
                     }
                 }
-                let filtered: Vec<&str> = PALETTE_COMMANDS
-                    .iter()
-                    .copied()
-                    .filter(|cmd| {
-                        cmd.to_lowercase()
-                            .contains(&self.palette_query.to_lowercase())
-                    })
-                    .collect();
-                if let Some(&label) = filtered.get(i) {
-                    match label {
-                        "Open Settings" => return self.update(Message::GoToSettings),
-                        "Open About" => return self.update(Message::GoToAbout),
-                        "Edit Profile" => return self.update(Message::GoToVCardEditor),
-                        "Ad-hoc Commands" => return self.update(Message::GoToAdhoc),
-                        "Switch Account" => return self.update(Message::GoToAccountSwitcher),
-                        "Report Spam" => return self.update(Message::OpenSpamReport(String::new())),
-                        "Disconnect" => {
+                let results = command_palette::search(&palette_commands(), &self.palette_query);
+                if let Some(m) = results.get(i) {
+                    match m.command.id.as_str() {
+                        "open-settings" => return self.update(Message::GoToSettings),
+                        "open-about" => return self.update(Message::GoToAbout),
+                        "edit-profile" => return self.update(Message::GoToVCardEditor),
+                        "adhoc-commands" => return self.update(Message::GoToAdhoc),
+                        "toggle-console" => return self.update(Message::ToggleConsole),
+                        "switch-account" => return self.update(Message::GoToAccountSwitcher),
+                        "report-spam" => return self.update(Message::OpenSpamReport(String::new())),
+                        "disconnect" => {
                             if let Some(ref tx) = self.xmpp_tx {
                                 let tx = tx.clone();
                                 tokio::spawn(async move {
                                     let _ = tx.send(crate::xmpp::XmppCommand::Disconnect).await;
                                 });
                             }
+                        }
+                        // DC-11: treat the palette query text as the xmpp: URI to open.
+                        "open-xmpp-uri" => {
+                            let uri = self.palette_query.trim().to_string();
+                            self.palette_query.clear();
+                            self.show_palette = false;
+                            return self.update(Message::HandleXmppUri(uri));
                         }
                         _ => {}
                     }
@@ -1348,9 +1354,14 @@ impl App {
                         }
                     }
                     XmppEvent::ConsoleEntry { direction, xml } => {
-                        self.console_entries.push((direction, xml));
-                        if self.console_entries.len() > 200 {
-                            self.console_entries.remove(0);
+                        let ts = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        if direction == "sent" {
+                            self.xmpp_console.push_sent(&xml, ts);
+                        } else {
+                            self.xmpp_console.push_received(&xml, ts);
                         }
                     }
                     XmppEvent::ReactionReceived {
@@ -1521,7 +1532,9 @@ impl App {
                     | XmppEvent::OmemoDeviceListReceived { .. }
                     | XmppEvent::OmemoMessageDecrypted { .. }
                     | XmppEvent::OmemoKeyExchangeNeeded { .. }
-                    | XmppEvent::StickerPackReceived(_) => {}
+                    | XmppEvent::StickerPackReceived(_)
+                    | XmppEvent::IgnoreListReceived { .. }
+                    | XmppEvent::ConversationsReceived(_) => {}
                 }
                 Task::none()
             }
@@ -1609,20 +1622,12 @@ impl App {
 
         // F2: palette overlay
         if self.show_palette {
-            let filtered: Vec<(usize, &str)> = PALETTE_COMMANDS
-                .iter()
-                .copied()
-                .enumerate()
-                .filter(|(_, cmd)| {
-                    cmd.to_lowercase()
-                        .contains(&self.palette_query.to_lowercase())
-                })
-                .collect();
+            let results = command_palette::search(&palette_commands(), &self.palette_query);
 
             let input = text_input("Search commands...", &self.palette_query)
                 .id(iced::widget::text_input::Id::new("palette_input"))
                 .on_input(Message::PaletteQuery)
-                .on_submit(if filtered.is_empty() {
+                .on_submit(if results.is_empty() {
                     Message::TogglePalette
                 } else {
                     Message::PaletteExecute(0)
@@ -1630,11 +1635,12 @@ impl App {
                 .padding(10)
                 .size(16);
 
-            let cmd_buttons: Vec<Element<Message>> = filtered
-                .iter()
-                .map(|(i, label)| {
-                    button(text(*label).size(14))
-                        .on_press(Message::PaletteExecute(*i))
+            let cmd_buttons: Vec<Element<Message>> = results
+                .into_iter()
+                .enumerate()
+                .map(|(i, m)| {
+                    button(text(m.command.label).size(14))
+                        .on_press(Message::PaletteExecute(i))
                         .width(Length::Fill)
                         .padding([8, 12])
                         .into()
@@ -1757,12 +1763,13 @@ impl App {
 
         // F1: console panel overlay (bottom-left, above console button)
         if self.show_console {
+            use crate::xmpp::modules::console::StanzaDirection;
             let entry_rows: Vec<Element<Message>> = self
-                .console_entries
-                .iter()
-                .map(|(dir, xml)| {
-                    let prefix = if dir == "sent" { "[sent]" } else { "[recv]" };
-                    let snippet: String = xml.chars().take(120).collect();
+                .xmpp_console
+                .entries()
+                .map(|e| {
+                    let prefix = if e.direction == StanzaDirection::Sent { "[sent]" } else { "[recv]" };
+                    let snippet: String = e.xml.chars().take(120).collect();
                     let line = format!("{prefix} {snippet}");
                     text(line).size(10).font(iced::Font::MONOSPACE).into()
                 })
