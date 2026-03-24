@@ -21,8 +21,8 @@ use crate::ui::muc_panel::OccupantEntry;
 
 use chrono::{TimeZone, Utc};
 
-use crate::xmpp::modules::link_preview::LinkPreview;
 use crate::ui::link_preview::render_preview_card;
+use crate::xmpp::modules::link_preview::LinkPreview;
 
 // G4: /me action message prefix (XEP-0245)
 const ME_PREFIX: &str = "/me ";
@@ -252,28 +252,28 @@ pub enum Message {
     Send,
     Scrolled(AbsoluteOffset),
     ScrollToBottom,
-    CopyToClipboard(String),      // G7: copy message body to clipboard
-    Close,                        // G1: close this conversation
-    BlockPeer,                    // C4: block the peer JID
-    UnblockPeer,                  // C4: unblock the peer JID
-    ComposingStarted,             // G2: user started typing
-    ComposingPaused,              // G2: user stopped typing
-    ReplyTo(String, String),      // G3: (msg_id, preview)
-    CancelReply,                  // G3: cancel current reply
-    ToggleMute,                   // J3: toggle notification mute
-    SearchToggled,                // G9: toggle search bar
-    SearchQueryChanged(String),   // G9: search input changed
-    EmojiPickerToggled,           // M3: toggle emoji picker
-    EmojiSelected(String),        // M3: insert emoji into composer
+    CopyToClipboard(String),         // G7: copy message body to clipboard
+    Close,                           // G1: close this conversation
+    BlockPeer,                       // C4: block the peer JID
+    UnblockPeer,                     // C4: unblock the peer JID
+    ComposingStarted,                // G2: user started typing
+    ComposingPaused,                 // G2: user stopped typing
+    ReplyTo(String, String),         // G3: (msg_id, preview)
+    CancelReply,                     // G3: cancel current reply
+    ToggleMute,                      // J3: toggle notification mute
+    SearchToggled,                   // G9: toggle search bar
+    SearchQueryChanged(String),      // G9: search input changed
+    EmojiPickerToggled,              // M3: toggle emoji picker
+    EmojiSelected(String),           // M3: insert emoji into composer
     SendReaction(String, String),    // E3: (msg_id, emoji)
     ToggleReaction(String, String),  // R1: (msg_id, emoji) — toggle own reaction
     RetractReaction(String, String), // R1: (msg_id, emoji) — retract own reaction
     LinkPreviewReady(String, LinkPreview), // E5: (msg_id, preview)
-    StartEdit(String, String),    // E1: (msg_id, current_body) — populate composer for edit
-    CancelEdit,                   // E1: cancel edit mode
-    RetractMessage(String),       // E2: (msg_id) — retract own message
+    StartEdit(String, String),       // E1: (msg_id, current_body) — populate composer for edit
+    CancelEdit,                      // E1: cancel edit mode
+    RetractMessage(String),          // E2: (msg_id) — retract own message
     ModerateMessage(String, Option<String>), // L3: (msg_id, reason) — moderator retract any message
-    RequestOlderHistory,          // G8: emitted on scroll to top to request older MAM history
+    RequestOlderHistory,             // G8: emitted on scroll to top to request older MAM history
     AttachmentLoaded(String, iced_image::Handle), // I4: (msg_id, image_handle)
     // E4/I3: file upload
     OpenFilePicker,                         // E4: open native file picker
@@ -628,8 +628,9 @@ impl ConversationView {
                 if std::fs::write(&tmp_path, &bytes).is_ok() {
                     let size = bytes.len() as u64;
                     // DC-17: generate thumbnail from the PNG bytes we just wrote
-                    let thumbnail =
-                        crate::store::thumbnail::generate(&bytes).ok().map(|t| t.data);
+                    let thumbnail = crate::store::thumbnail::generate(&bytes)
+                        .ok()
+                        .map(|t| t.data);
                     self.pending_attachments.push(Attachment {
                         path: tmp_path,
                         name: "clipboard_paste.png".into(),
@@ -1061,12 +1062,12 @@ impl ConversationView {
                 "Retract message",
                 tooltip::Position::Top,
             );
-            // L3: moderate button — shown on hover, non-own messages, moderator only
+            // P2/L3: moderate button — shown on hover for any MUC message when user is moderator
             let is_moderator = occupants
                 .iter()
                 .any(|o| o.nick == own_nick && o.role == "Moderator");
             let moderate_btn: Option<iced::widget::Tooltip<Message>> =
-                if is_hovered && is_moderator && !m.own && !m.retracted {
+                if is_hovered && is_moderator && !m.retracted {
                     let mod_msg_id = m.id.clone();
                     Some(tooltip(
                         button(text("\u{1F6E1}").size(10))
@@ -1115,9 +1116,13 @@ impl ConversationView {
                 };
 
                 let text_col = if show_sender {
-                    let mut header_row = row![text(sender.clone()).size(11).shaping(Shaping::Advanced), copy_btn, reply_btn,]
-                        .spacing(8)
-                        .align_y(Alignment::Center);
+                    let mut header_row = row![
+                        text(sender.clone()).size(11).shaping(Shaping::Advanced),
+                        copy_btn,
+                        reply_btn,
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center);
                     if let Some(btn) = moderate_btn {
                         header_row = header_row.push(btn);
                     }
@@ -1160,20 +1165,22 @@ impl ConversationView {
                     None
                 };
                 let text_col = if show_sender {
-                    let mut col = column![
-                        row![
-                            text(sender.clone()).size(11).shaping(Shaping::Advanced),
-                            copy_btn,
-                            reply_btn,
-                            edit_btn,
-                            retract_btn
-                        ]
-                        .spacing(8)
-                        .align_y(Alignment::Center),
-                        body_widget,
+                    let mut own_header = row![
+                        text(sender.clone()).size(11).shaping(Shaping::Advanced),
+                        copy_btn,
+                        reply_btn,
+                        edit_btn,
+                        retract_btn
                     ]
-                    .spacing(2)
-                    .padding([6, 10]);
+                    .spacing(8)
+                    .align_y(Alignment::Center);
+                    // P2: moderator retract button — also shown on own messages for moderators
+                    if let Some(btn) = moderate_btn {
+                        own_header = own_header.push(btn);
+                    }
+                    let mut col = column![own_header, body_widget]
+                        .spacing(2)
+                        .padding([6, 10]);
                     if let Some(lbl) = edited_label {
                         col = col.push(lbl);
                     }
@@ -1519,10 +1526,8 @@ impl ConversationView {
                 });
                 // DC-17: show thumbnail preview if available
                 if let Some(ref thumb_bytes) = att.thumbnail {
-                    let handle =
-                        iced_image::Handle::from_bytes(thumb_bytes.clone());
-                    att_col = att_col
-                        .push(iced::widget::image(handle).width(64).height(64));
+                    let handle = iced_image::Handle::from_bytes(thumb_bytes.clone());
+                    att_col = att_col.push(iced::widget::image(handle).width(64).height(64));
                 }
                 let att_row = row![
                     text(label).size(11).width(Length::Fill),
@@ -1655,14 +1660,17 @@ impl ConversationView {
                         .on_submit(Message::SubmitModerate)
                         .padding(8),
                     row![
-                        button("Cancel").on_press(Message::DismissModerateDialog).padding([6, 12]),
+                        button("Cancel")
+                            .on_press(Message::DismissModerateDialog)
+                            .padding([6, 12]),
                         button(text("Moderate").color(Color::from_rgb(1.0, 0.4, 0.4)))
-                            .on_press(Message::SubmitModerate).padding([6, 12]),
+                            .on_press(Message::SubmitModerate)
+                            .padding([6, 12]),
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center)
                 ]
-                .spacing(12)
+                .spacing(12),
             )
             .padding(20)
             .style(|_theme: &iced::Theme| iced::widget::container::Style {
@@ -1687,7 +1695,9 @@ impl ConversationView {
                     .height(Length::Fill)
                     .center(Length::Fill)
                     .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                        background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.7))),
+                        background: Some(iced::Background::Color(Color::from_rgba(
+                            0.0, 0.0, 0.0, 0.7
+                        ))),
                         ..Default::default()
                     })
             ]
