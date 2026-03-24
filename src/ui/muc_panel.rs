@@ -4,6 +4,7 @@
 
 use iced::{
     widget::{button, column, container, row, scrollable, text},
+    widget::text::Shaping,
     Element, Length,
 };
 
@@ -122,7 +123,7 @@ impl OccupantPanel {
                     },
                 };
 
-                let name_widget = text(label).size(13);
+                let name_widget = text(label).size(13).shaping(Shaping::Advanced);
 
                 let entry_row: Element<Message> = if let Some(badge_str) = badge {
                     row![name_widget, text(badge_str).size(11)]

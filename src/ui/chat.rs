@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use iced::{
     widget::{button, checkbox, column, container, row, text, text_input},
+    widget::text::Shaping,
     Alignment, Element, Length, Task,
 };
 
@@ -1079,7 +1080,7 @@ impl ChatScreen {
                         .on_press(Message::DeclineInvitation(inv.room_jid.clone()))
                         .padding([2, 8]);
                     container(
-                        row![text(label).size(12), accept_btn, decline_btn]
+                        row![text(label).size(12).shaping(Shaping::Advanced), accept_btn, decline_btn]
                             .spacing(8)
                             .align_y(iced::Alignment::Center),
                     )
@@ -1126,7 +1127,7 @@ impl ChatScreen {
                             .view(&self.avatars, time_format, occupants, own_nick)
                             .map(move |m| Message::Conversation(jid2.clone(), m));
                         if is_typing {
-                            let indicator = container(text(format!("{} is typing…", jid)).size(11))
+                            let indicator = container(text(format!("{} is typing…", jid)).size(11).shaping(Shaping::Advanced))
                                 .padding([2, 8]);
                             column![conv_view, indicator]
                                 .height(iced::Length::Fill)

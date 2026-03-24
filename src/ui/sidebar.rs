@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use iced::{
     widget::{button, column, container, row, scrollable, text, text_input, tooltip},
+    widget::text::Shaping,
     Alignment, Element, Length, Task,
 };
 
@@ -350,7 +351,7 @@ impl SidebarScreen {
                 let unread = self.unread_counts.get(c.jid.as_str()).copied().unwrap_or(0);
                 let name_elem: Element<Message> = if unread > 0 {
                     row![
-                        text(name_label).size(13).width(Length::Fill),
+                        text(name_label).size(13).width(Length::Fill).shaping(Shaping::Advanced),
                         container(text(unread.to_string()).size(11))
                             .width(20)
                             .height(20)
@@ -360,7 +361,7 @@ impl SidebarScreen {
                     .align_y(Alignment::Center)
                     .into()
                 } else {
-                    text(name_label).size(13).into()
+                    text(name_label).size(13).shaping(Shaping::Advanced).into()
                 };
 
                 let label_row = row![avatar, name_elem]
@@ -473,7 +474,7 @@ impl SidebarScreen {
                 row![text("Profile").size(12).width(Length::Fill), close_btn,]
                     .spacing(4)
                     .align_y(Alignment::Center),
-                text(name).size(13),
+                text(name).size(13).shaping(Shaping::Advanced),
                 text(jid.as_str()).size(11),
             ]
             .spacing(4)
