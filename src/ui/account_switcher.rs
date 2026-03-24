@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // MULTI: Account switcher UI skeleton
 //
 // Displays the list of configured accounts with online/offline status

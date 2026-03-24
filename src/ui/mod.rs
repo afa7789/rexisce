@@ -217,6 +217,8 @@ pub enum Message {
     AccountSwitcher(account_switcher::Message),
     // DC-11: handle an xmpp: deep-link URI
     HandleXmppUri(String),
+    // A3: seed conversations from DB cache at connect time
+    ConversationsPrefill(Vec<String>),
 }
 
 enum Screen {
@@ -476,6 +478,13 @@ impl App {
                 Task::none()
             }
 
+            Message::ConversationsPrefill(jids) => {
+                if let Screen::Chat(ref mut chat) = self.screen {
+                    chat.prefill_conversations(jids);
+                }
+                Task::none()
+            }
+
             Message::GoToSettings => {
                 let prev = std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()));
                 let mut settings_screen = settings::SettingsScreen::new(self.settings.clone());
@@ -715,8 +724,9 @@ impl App {
                     sw.update(msg);
                 }
                 if let Some(ref id) = switch_to {
-                    // MULTI: update per-account state manager.
+                    // MULTI: update per-account state manager and multi-engine focus.
                     self.account_state_mgr.switch_to(id);
+                    self.multi_engine.switch_active(id.clone());
                     // Sync the new active account into the chat screen's indicator bar.
                     let unread = self
                         .account_state_mgr
@@ -737,7 +747,9 @@ impl App {
                 if is_add {
                     // MULTI: AddAccount navigates to the login screen so the user
                     // can enter credentials for a second account.  When that
-                    // connection succeeds the Connected handler will register it.
+                    // connection succeeds the Connected handler will register it
+                    // via the MultiEngineManager.
+                    self.is_adding_account = true;
                     if let Screen::AccountSwitcher(_, prev) =
                         std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()))
                     {
@@ -1133,6 +1145,18 @@ impl App {
                         // sidebar indicator bar is populated on first connect.
                         let account_id = AccountId::new(bound_jid.clone());
                         self.account_state_mgr.add_account(account_id.clone());
+
+                        // DC-21: if this connection was triggered by AddAccount,
+                        // register the new account in the multi-engine manager
+                        // so future commands can be routed to it.
+                        if self.is_adding_account {
+                            self.is_adding_account = false;
+                            let cfg =
+                                config::AccountConfig::new(bound_jid.clone());
+                            self.multi_engine
+                                .start_account(cfg, self.multi_event_tx.clone());
+                            self.multi_engine.switch_active(account_id.clone());
+                        }
                         let mut chat_screen = ChatScreen::new(bound_jid.clone());
                         // Pass the active account info into the chat screen so
                         // view_with_drafts() can render the indicator bar.
@@ -1158,11 +1182,23 @@ impl App {
                                 .collect();
                             Message::XmppEvent(XmppEvent::RosterReceived(xmpp_contacts))
                         });
+                        // Also pre-populate known conversations from DB cache.
+                        let pool2 = self.db.clone();
+                        let conv_prefill = Task::future(async move {
+                            let jids: Vec<String> =
+                                crate::store::conversation_repo::get_all(&pool2)
+                                    .await
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .map(|c| c.jid)
+                                    .collect();
+                            Message::ConversationsPrefill(jids)
+                        });
                         let toast = self.update(Message::ShowToast(
                             format!("Connected as {}", bound_jid),
                             ToastKind::Success,
                         ));
-                        return Task::batch([roster_prefill, toast]);
+                        return Task::batch([roster_prefill, conv_prefill, toast]);
                     }
                     XmppEvent::RegistrationFormReceived { server: _, form: _ } => {
                         // For now, just show a toast. In a full impl, we'd show the Data Form.
@@ -1946,6 +1982,26 @@ impl App {
         // M4: periodic voice tick — fires every second to update the elapsed timer
         let voice_tick_sub = iced::time::every(std::time::Duration::from_secs(1))
             .map(|_| Message::Chat(chat::Message::VoiceTick));
-        Subscription::batch([xmpp_sub, kb_sub, drop_sub, idle_sub, voice_tick_sub])
+        // DC-21: multi-engine event subscription — polls the shared receiver
+        // for events from additional account engines and routes them as XmppEvent.
+        let multi_rx = self.multi_event_rx.clone();
+        let multi_sub = Subscription::run_with_id("multi-engine-events", {
+            iced::stream::channel(32, move |mut output| async move {
+                // Take the receiver out of the shared slot (once).
+                let mut rx = {
+                    let mut guard = multi_rx.lock().unwrap();
+                    guard.take()
+                };
+                if let Some(ref mut rx) = rx {
+                    while let Some((_account_id, event)) = rx.recv().await {
+                        let _ = output
+                            .try_send(Message::XmppEvent(event));
+                    }
+                }
+                // Keep the future alive so the subscription isn't dropped.
+                std::future::pending::<()>().await;
+            })
+        });
+        Subscription::batch([xmpp_sub, kb_sub, drop_sub, idle_sub, voice_tick_sub, multi_sub])
     }
 }

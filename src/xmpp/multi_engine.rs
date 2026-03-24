@@ -18,7 +18,6 @@ use super::{engine::run_engine, AccountId, XmppCommand, XmppEvent};
 // Per-engine handle
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
 struct EngineHandle {
     /// Command sender into this engine's loop.
     cmd_tx: mpsc::Sender<XmppCommand>,
@@ -29,7 +28,6 @@ struct EngineHandle {
 // ---------------------------------------------------------------------------
 
 /// Owns one XMPP engine per account and routes commands / events accordingly.
-#[allow(dead_code)]
 pub struct MultiEngineManager {
     /// Live engine handles, keyed by account JID.
     engines: HashMap<AccountId, EngineHandle>,
@@ -37,7 +35,6 @@ pub struct MultiEngineManager {
     active_account: AccountId,
 }
 
-#[allow(dead_code)]
 impl MultiEngineManager {
     /// Create a manager with no engines.  `initial_active` is the account that
     /// will be considered active until `switch_active` is called.
