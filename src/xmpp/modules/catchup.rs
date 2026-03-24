@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // Task P4.3 — MAM catchup state machine
 //
 // Tracks per-conversation MAM catchup progress.  No I/O, no async — purely
@@ -129,25 +128,11 @@ impl CatchupManager {
         }
     }
 
-    /// Returns `true` when there are no conversations in the `Fetching` state.
-    pub fn is_idle(&self) -> bool {
-        self.states
-            .values()
-            .all(|s| !matches!(s, CatchupState::Fetching { .. }))
-    }
-
     /// Reset all state — call on disconnect so stale query_ids are not matched
     /// against server stanzas that arrive during a new session.
     pub fn reset(&mut self) {
         self.states.clear();
         self.query_to_jid.clear();
-    }
-
-    /// Return the current state for a conversation, or `Idle` if unknown.
-    pub fn state_for(&self, conversation_jid: &str) -> &CatchupState {
-        self.states
-            .get(conversation_jid)
-            .unwrap_or(&CatchupState::Idle)
     }
 }
 
@@ -213,45 +198,22 @@ mod tests {
         assert!(result.is_none());
     }
 
-    // 5. on_fin moves the conversation to Complete.
+    // 5. on_fin removes the query from the reverse index so on_result returns None.
     #[test]
     fn on_fin_marks_complete() {
         let mut mgr = CatchupManager::new();
         let (query_id, _) = mgr.start("dave@example.com", Some("last-id"));
 
-        // While fetching, state is Fetching.
-        assert!(matches!(
-            mgr.state_for("dave@example.com"),
-            CatchupState::Fetching { .. }
-        ));
+        // While fetching, on_result returns the JID.
+        assert!(mgr.on_result(&query_id, "dave@example.com").is_some());
 
         mgr.on_fin(&query_id);
 
-        assert_eq!(mgr.state_for("dave@example.com"), &CatchupState::Complete);
+        // After fin, on_result no longer recognises this query.
+        assert!(mgr.on_result(&query_id, "dave@example.com").is_none());
     }
 
-    // 6. is_idle() returns true when all conversations are Complete (none Fetching).
-    #[test]
-    fn is_idle_when_all_complete() {
-        let mut mgr = CatchupManager::new();
-
-        // Start two conversations.
-        let (qid_a, _) = mgr.start("eve@example.com", None);
-        let (qid_b, _) = mgr.start("frank@example.com", None);
-
-        // Both fetching — not idle.
-        assert!(!mgr.is_idle());
-
-        mgr.on_fin(&qid_a);
-        // One still fetching — not idle.
-        assert!(!mgr.is_idle());
-
-        mgr.on_fin(&qid_b);
-        // All complete — idle.
-        assert!(mgr.is_idle());
-    }
-
-    // 7. reset() clears all state and reverse index.
+    // 6. reset() clears all state and reverse index.
     #[test]
     fn reset_clears_all_states() {
         let mut mgr = CatchupManager::new();
@@ -259,24 +221,14 @@ mod tests {
 
         // Verify there's active state.
         assert!(mgr.on_result(&query_id, "grace@example.com").is_some());
-        assert!(!mgr.is_idle());
 
         mgr.reset();
 
-        // After reset: no state, idle, on_result returns None.
-        assert!(mgr.is_idle());
+        // After reset, on_result returns None for the stale query.
         assert!(mgr.on_result(&query_id, "grace@example.com").is_none());
-        assert_eq!(mgr.state_for("grace@example.com"), &CatchupState::Idle);
     }
 
-    // 8. is_idle() returns true for a fresh manager (no conversations registered).
-    #[test]
-    fn is_idle_on_new_manager() {
-        let mgr = CatchupManager::new();
-        assert!(mgr.is_idle());
-    }
-
-    // 9. on_fin with an unknown query_id is a no-op (no panic, no state change).
+    // 7. on_fin with an unknown query_id is a no-op (no panic, no state change).
     #[test]
     fn on_fin_with_unknown_query_id_is_noop() {
         let mut mgr = CatchupManager::new();
@@ -284,12 +236,8 @@ mod tests {
 
         mgr.on_fin("not-a-real-query-id");
 
-        // Original query should still be Fetching.
-        assert!(matches!(
-            mgr.state_for("henry@example.com"),
-            CatchupState::Fetching { .. }
-        ));
-        assert!(!mgr.is_idle());
+        // Original query should still be active.
+        assert!(mgr.on_result(&query_id, "henry@example.com").is_some());
 
         // Clean up so the test is self-contained.
         mgr.on_fin(&query_id);

@@ -952,6 +952,8 @@ async fn handle_client_event(
             );
             // C1: reset stream management counters for the next session
             sm.reset();
+            // P4.3: discard stale catchup query IDs so they are not matched in the new session
+            catchup_mgr.reset();
             let _ = event_tx
                 .send(XmppEvent::Reconnecting {
                     attempt: *reconnect_attempt,
