@@ -19,7 +19,7 @@ run-release:
 
 # Run the full test suite (single-threaded — required for SQLite tests)
 test:
-	cargo test --bin xmpp-start -- --test-threads=1
+	cargo test -q --bin xmpp-start -- --test-threads=1
 
 # Run integration tests only (no Docker needed)
 test-integration:
@@ -27,11 +27,11 @@ test-integration:
 
 # Run e2e tests — starts a real XMPP server in Docker, tears it down after
 test-e2e:
-	cargo test --test e2e -- --ignored --test-threads=1
+	cargo test -q --test e2e -- --ignored --test-threads=1
 
 # Lint with clippy (warnings are errors)
 lint:
-	cargo clippy --bin xmpp-start -- -D warnings
+	cargo clippy -q --bin xmpp-start --message-format=short -- -D warnings
 
 # Auto-format all source files
 fmt:
@@ -39,7 +39,7 @@ fmt:
 
 # Check formatting without modifying files (used in CI)
 fmt-check:
-	cargo fmt --check
+	cargo fmt --check --all
 
 # Remove build artifacts
 clean:

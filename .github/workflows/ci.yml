@@ -9,6 +9,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  quality:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get install -y libdbus-1-dev pkg-config libssl-dev
+      - run: make fmt-check
+      - run: make lint
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -22,26 +35,21 @@ jobs:
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get install -y libdbus-1-dev pkg-config libssl-dev
-      - run: cargo test --bin xmpp-start -- --test-threads=1
+      - run: make test
 
-  clippy:
-    name: Clippy
+  e2e:
+    name: E2E Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get install -y libdbus-1-dev pkg-config libssl-dev
-      - run: cargo clippy --bin xmpp-start -- -D warnings -A dead_code
-
-  fmt:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --check
+      - name: Set up Docker
+        run: docker compose up -d
+      - name: Wait for server
+        run: sleep 5
+      - name: Run e2e tests
+        run: make test-e2e
+      - name: Cleanup
+        if: always()
+        run: docker compose down
