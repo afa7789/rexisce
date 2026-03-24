@@ -1161,6 +1161,19 @@ async fn handle_iq(
             return;
         }
     }
+    // DC-8: respond to entity-time get requests (XEP-0202)
+    if el.attr("type") == Some("get") {
+        let has_time = el
+            .children()
+            .any(|c| c.name() == "time" && c.ns() == "urn:xmpp:time");
+        if has_time {
+            let iq_id = el.attr("id").unwrap_or("").to_string();
+            let requester = el.attr("from").unwrap_or("").to_string();
+            outbox.push_back(EntityTimeManager::build_time_response(&iq_id, &requester));
+            tracing::debug!("entity_time: responded to time get from {requester}");
+            return;
+        }
+    }
     // C3: detect MAM <fin> stanza
     if el.attr("type") == Some("result") {
         let has_fin = el.children().any(|c| c.name() == "fin" && c.ns() == NS_MAM);

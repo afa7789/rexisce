@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // Task P6.4 — XEP-0202 Entity Time
 // XEP reference: https://xmpp.org/extensions/xep-0202.html
 //
@@ -7,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use chrono::Utc;
 use tokio_xmpp::minidom::Element;
 use tokio_xmpp::minidom::Node;
 use uuid::Uuid;
@@ -97,6 +97,33 @@ impl EntityTimeManager {
     /// Look up the cached `EntityTime` for a JID.
     pub fn get(&self, jid: &str) -> Option<&EntityTime> {
         self.cache.get(jid)
+    }
+
+    /// Build a `<iq type='result'>` response for an incoming entity-time `get`.
+    ///
+    /// Responds with UTC time and a `+00:00` timezone offset.
+    /// `iq_id` is the `id` attribute of the incoming request; `to_jid` is the
+    /// JID to address the result to (i.e. the requester).
+    pub fn build_time_response(iq_id: &str, to_jid: &str) -> Element {
+        let now = Utc::now();
+        let utc_str = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+        let mut tzo_el = Element::builder("tzo", NS_TIME).build();
+        tzo_el.append_text_node("+00:00");
+
+        let mut utc_el = Element::builder("utc", NS_TIME).build();
+        utc_el.append_text_node(utc_str);
+
+        let mut time_el = Element::builder("time", NS_TIME).build();
+        time_el.append_child(tzo_el);
+        time_el.append_child(utc_el);
+
+        Element::builder("iq", NS_CLIENT)
+            .attr("type", "result")
+            .attr("id", iq_id)
+            .attr("to", to_jid)
+            .append(Node::Element(time_el))
+            .build()
     }
 }
 
