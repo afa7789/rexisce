@@ -5,9 +5,9 @@ use iced::{
     Alignment, Element, Length, Task,
 };
 
-use crate::config::{self, Settings, Theme};
 use super::account_details::AccountInfo;
 use super::blocklist::{BlocklistCommand, BlocklistPanel};
+use crate::config::{self, Settings, Theme};
 
 // ---------------------------------------------------------------------------
 // SettingsScreen — not Clone because it owns XmppCommands
@@ -31,6 +31,9 @@ pub struct SettingsScreen {
     proxy_host_input: String,
     proxy_port_input: String,
     manual_srv_input: String,
+    // DC-17: interactive avatar crop state (raw bytes + mime + crop params)
+    crop_state: Option<crate::store::avatar_crop::CropState>,
+    crop_raw: Option<(Vec<u8>, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +57,11 @@ pub enum Message {
     OpenAvatarPicker,
     AvatarFilePicked(Option<std::path::PathBuf>),
     AvatarSelected(Vec<u8>, String),
+    // DC-17: interactive crop adjustments — pan/zoom/radius then re-crop
+    AvatarCropPan(f32, f32),
+    AvatarCropZoom(f32),
+    AvatarCropRadius(f32),
+    AvatarCropApply,
     // K6: contact sorting preference
     SortContactsSelected(String),
     // K6: chat preferences panel
@@ -102,6 +110,8 @@ impl SettingsScreen {
             proxy_host_input,
             proxy_port_input,
             manual_srv_input,
+            crop_state: None,
+            crop_raw: None,
             settings,
         }
     }
@@ -239,17 +249,9 @@ impl SettingsScreen {
                                 img.width(),
                                 img.height(),
                             );
-                            match crate::store::avatar_crop::crop_to_avatar(&bytes, &state, 256) {
-                                Ok(cropped) => {
-                                    return Task::done(Message::AvatarSelected(
-                                        cropped,
-                                        mime.to_string(),
-                                    ));
-                                }
-                                Err(e) => {
-                                    tracing::warn!("Avatar crop failed: {e}");
-                                }
-                            }
+                            self.crop_state = Some(state);
+                            self.crop_raw = Some((bytes, mime.to_string()));
+                            return Task::done(Message::AvatarCropApply);
                         } else {
                             tracing::warn!("Failed to decode avatar image");
                         }
@@ -261,6 +263,43 @@ impl SettingsScreen {
                 Task::none()
             }
             Message::AvatarFilePicked(None) => Task::none(),
+            // DC-17: interactive crop — adjust state then re-apply.
+            Message::AvatarCropPan(dx, dy) => {
+                if let Some(ref mut state) = self.crop_state {
+                    state.pan(dx, dy);
+                }
+                Task::done(Message::AvatarCropApply)
+            }
+            Message::AvatarCropZoom(zoom) => {
+                if let Some(ref mut state) = self.crop_state {
+                    state.set_zoom(zoom);
+                }
+                Task::done(Message::AvatarCropApply)
+            }
+            Message::AvatarCropRadius(radius) => {
+                if let Some(ref mut state) = self.crop_state {
+                    state.set_radius(radius);
+                }
+                Task::done(Message::AvatarCropApply)
+            }
+            Message::AvatarCropApply => {
+                if let (Some(ref state), Some((ref bytes, ref mime))) =
+                    (&self.crop_state, &self.crop_raw)
+                {
+                    match crate::store::avatar_crop::crop_to_avatar(bytes, state, 256) {
+                        Ok(cropped) => {
+                            return Task::done(Message::AvatarSelected(
+                                cropped,
+                                mime.clone(),
+                            ));
+                        }
+                        Err(e) => {
+                            tracing::warn!("Avatar crop failed: {e}");
+                        }
+                    }
+                }
+                Task::none()
+            }
             Message::AvatarSelected(data, _mime_type) => {
                 self.settings.avatar_data = Some(data);
                 let _ = config::save(&self.settings);
@@ -343,11 +382,7 @@ impl SettingsScreen {
 
             // M5: network settings
             Message::ProxyTypeSelected(kind) => {
-                self.settings.proxy_type = if kind == "none" {
-                    None
-                } else {
-                    Some(kind)
-                };
+                self.settings.proxy_type = if kind == "none" { None } else { Some(kind) };
                 let _ = config::save(&self.settings);
                 Task::none()
             }
@@ -511,7 +546,9 @@ impl SettingsScreen {
         // K6: Chat Preferences section
         let chat_prefs_title = text("Chat Preferences").size(15);
         let join_leave_row = row![
-            text("Show join/leave in rooms").size(14).width(Length::Fill),
+            text("Show join/leave in rooms")
+                .size(14)
+                .width(Length::Fill),
             toggler(self.settings.show_join_leave).on_toggle(Message::ShowJoinLeaveToggled),
         ]
         .spacing(8)
@@ -572,7 +609,9 @@ impl SettingsScreen {
         let edit_profile_btn = button("Edit Profile")
             .on_press(Message::OpenVCardEditor)
             .padding([6, 14]);
-        let about_btn = button("About").on_press(Message::OpenAbout).padding([6, 14]);
+        let about_btn = button("About")
+            .on_press(Message::OpenAbout)
+            .padding([6, 14]);
         let logout_btn = button("Logout").on_press(Message::Logout).padding([6, 14]);
         let bottom_row = row![
             back_btn,
@@ -624,7 +663,11 @@ impl SettingsScreen {
         let bare_jid = info.bound_jid.split('/').next().unwrap_or("");
         let server = bare_jid.split('@').nth(1).unwrap_or("");
         let resource = info.bound_jid.split('/').nth(1).unwrap_or("");
-        let status_str = if info.connected { "Connected" } else { "Offline" };
+        let status_str = if info.connected {
+            "Connected"
+        } else {
+            "Offline"
+        };
 
         let details = column![
             header,
@@ -763,36 +806,31 @@ impl SettingsScreen {
         .into();
 
         // Proxy host + port: only shown when a proxy type is selected
-        let proxy_detail: Option<Element<Message>> =
-            if self.settings.proxy_type.is_some() {
-                let host_row: Element<Message> = row![
-                    text("Proxy host:").size(14).width(Length::Fixed(120.0)),
-                    text_input("hostname or IP", &self.proxy_host_input)
-                        .on_input(Message::ProxyHostChanged)
-                        .width(Length::Fill)
-                        .padding([4, 8]),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center)
-                .into();
-                let port_row: Element<Message> = row![
-                    text("Proxy port:").size(14).width(Length::Fixed(120.0)),
-                    text_input("1080", &self.proxy_port_input)
-                        .on_input(Message::ProxyPortChanged)
-                        .width(Length::Fixed(80.0))
-                        .padding([4, 8]),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center)
-                .into();
-                Some(
-                    column![host_row, port_row]
-                        .spacing(8)
-                        .into(),
-                )
-            } else {
-                None
-            };
+        let proxy_detail: Option<Element<Message>> = if self.settings.proxy_type.is_some() {
+            let host_row: Element<Message> = row![
+                text("Proxy host:").size(14).width(Length::Fixed(120.0)),
+                text_input("hostname or IP", &self.proxy_host_input)
+                    .on_input(Message::ProxyHostChanged)
+                    .width(Length::Fill)
+                    .padding([4, 8]),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into();
+            let port_row: Element<Message> = row![
+                text("Proxy port:").size(14).width(Length::Fixed(120.0)),
+                text_input("1080", &self.proxy_port_input)
+                    .on_input(Message::ProxyPortChanged)
+                    .width(Length::Fixed(80.0))
+                    .padding([4, 8]),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into();
+            Some(column![host_row, port_row].spacing(8).into())
+        } else {
+            None
+        };
 
         let srv_row: Element<Message> = row![
             text("Manual SRV:").size(14).width(Length::Fixed(120.0)),
@@ -906,8 +944,9 @@ mod tests {
     #[test]
     fn settings_screen_manual_srv_roundtrip() {
         let mut screen = SettingsScreen::new(Settings::default());
-        let _ =
-            screen.update(Message::ManualSrvChanged("_xmpp-client._tcp.example.com".into()));
+        let _ = screen.update(Message::ManualSrvChanged(
+            "_xmpp-client._tcp.example.com".into(),
+        ));
         assert_eq!(
             screen.settings.manual_srv,
             Some("_xmpp-client._tcp.example.com".into())

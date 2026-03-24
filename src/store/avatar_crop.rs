@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use std::io::Cursor;
 
 use image::{imageops::FilterType, DynamicImage, ImageFormat};
