@@ -17,6 +17,7 @@ pub mod blocklist;
 pub mod chat;
 pub mod conversation;
 pub mod data_forms;
+pub mod link_preview;
 mod login;
 pub mod muc_panel;
 pub mod settings;
@@ -179,7 +180,13 @@ impl App {
     }
 
     pub fn iced_theme(&self) -> iced::Theme {
-        match self.settings.theme {
+        // M1: if use_system_theme is set, detect OS dark/light mode
+        let effective = if self.settings.use_system_theme {
+            config::detect_system_theme()
+        } else {
+            self.settings.theme.clone()
+        };
+        match effective {
             Theme::Dark => iced::Theme::Dark,
             Theme::Light => iced::Theme::Light,
         }
@@ -1330,6 +1337,12 @@ impl App {
                 }
                 if key == Key::Character("v".into()) {
                     return Some(Message::PasteFromClipboard);
+                }
+                if key == Key::Character("b".into()) {
+                    return Some(Message::Chat(chat::Message::ComposerBold));
+                }
+                if key == Key::Character("i".into()) {
+                    return Some(Message::Chat(chat::Message::ComposerItalic));
                 }
             }
             if key == Key::Named(iced::keyboard::key::Named::Escape) {

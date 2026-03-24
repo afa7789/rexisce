@@ -82,6 +82,9 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# M1: OS dark/light mode detection
+dark-light = "2"
+
 [dev-dependencies]
 tokio-test = "0.4"
 futures = "0.3"

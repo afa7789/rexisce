@@ -201,6 +201,15 @@ pub fn load_password(jid: &str) -> Option<String> {
         .ok()
 }
 
+/// M1: Detect the OS dark/light mode preference.
+/// Returns `Theme::Dark` if the OS is in dark mode or detection fails.
+pub fn detect_system_theme() -> Theme {
+    match dark_light::detect() {
+        Ok(dark_light::Mode::Light) => Theme::Light,
+        _ => Theme::Dark, // dark or unknown → dark
+    }
+}
+
 /// Delete the stored password (e.g. on logout).
 #[allow(dead_code)]
 pub fn delete_password(jid: &str) {
