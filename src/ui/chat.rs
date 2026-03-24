@@ -695,6 +695,37 @@ impl ChatScreen {
                     return Task::none();
                 }
 
+                // R1: intercept RetractReaction — update local state + send empty reaction set
+                if let super::conversation::Message::RetractReaction(ref msg_id, ref emoji) = cmsg
+                {
+                    // Remove emoji locally and collect remaining own reactions
+                    let remaining: Vec<String> = if let Some(convo) =
+                        self.conversations.get_mut(&jid)
+                    {
+                        let own = &self.own_jid;
+                        if let Some(by_jid) = convo.reactions.get_mut(msg_id) {
+                            if let Some(emojis) = by_jid.get_mut(own) {
+                                emojis.retain(|e| e != emoji);
+                                emojis.clone()
+                            } else {
+                                vec![]
+                            }
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        vec![]
+                    };
+                    // Send the new (reduced) emoji set to the server
+                    self.pending_commands
+                        .push(crate::xmpp::XmppCommand::SendReaction {
+                            to: jid.clone(),
+                            msg_id: msg_id.clone(),
+                            emojis: remaining,
+                        });
+                    return Task::none();
+                }
+
                 // E2: intercept RetractMessage to send retraction to engine and apply tombstone
                 if let super::conversation::Message::RetractMessage(ref msg_id) = cmsg {
                     let mid = msg_id.clone();

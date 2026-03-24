@@ -243,7 +243,9 @@ pub enum Message {
     SearchQueryChanged(String),   // G9: search input changed
     EmojiPickerToggled,           // M3: toggle emoji picker
     EmojiSelected(String),        // M3: insert emoji into composer
-    SendReaction(String, String), // E3: (msg_id, emoji)
+    SendReaction(String, String),    // E3: (msg_id, emoji)
+    ToggleReaction(String, String),  // R1: (msg_id, emoji) — toggle own reaction
+    RetractReaction(String, String), // R1: (msg_id, emoji) — retract own reaction
     LinkPreviewReady(String, LinkPreview), // E5: (msg_id, preview)
     StartEdit(String, String),    // E1: (msg_id, current_body) — populate composer for edit
     CancelEdit,                   // E1: cancel edit mode
@@ -470,6 +472,21 @@ impl ConversationView {
                 Task::none()
             }
             Message::SendReaction(_, _) => Task::none(), // bubbled to ChatScreen
+            // R1: toggle reaction — retract if already sent, send otherwise
+            Message::ToggleReaction(msg_id, emoji) => {
+                let already = self
+                    .reactions
+                    .get(&msg_id)
+                    .and_then(|by_jid| by_jid.get(&self.own_jid))
+                    .map(|emojis| emojis.contains(&emoji))
+                    .unwrap_or(false);
+                if already {
+                    return Task::done(Message::RetractReaction(msg_id, emoji));
+                } else {
+                    return Task::done(Message::SendReaction(msg_id, emoji));
+                }
+            }
+            Message::RetractReaction(_, _) => Task::none(), // R1: bubbled to ChatScreen
             Message::LinkPreviewReady(msg_id, preview) => {
                 self.previews.insert(msg_id, preview);
                 Task::none()
@@ -957,37 +974,40 @@ impl ConversationView {
                 "Reply",
                 tooltip::Position::Top,
             );
-            // M6: quick-react buttons (👍 ❤️ 😂) - only visible on hover
+            // R1/M6: quick-react bar (5 emoji) — only visible on hover; toggles own reactions
             let is_hovered = self.hovered_message.as_ref() == Some(&m.id);
             let react_row: Element<Message> = if is_hovered {
-                let react_msg_id = m.id.clone();
-                let heart_msg_id = m.id.clone();
-                let laugh_msg_id = m.id.clone();
-                row![
-                    tooltip(
-                        button(text("👍").size(10))
-                            .on_press(Message::SendReaction(react_msg_id, "👍".to_string()))
+                const QUICK_EMOJIS: [(&str, &str); 5] = [
+                    ("👍", "Thumbs up"),
+                    ("❤️", "Heart"),
+                    ("😂", "Laugh"),
+                    ("😮", "Wow"),
+                    ("😢", "Sad"),
+                ];
+                let own_rxns: Vec<String> = self
+                    .reactions
+                    .get(&m.id)
+                    .and_then(|by_jid| by_jid.get(&self.own_jid))
+                    .cloned()
+                    .unwrap_or_default();
+                let mut quick_row: iced::widget::Row<Message> = row![].spacing(4);
+                for (emoji, label) in QUICK_EMOJIS {
+                    let already = own_rxns.contains(&emoji.to_string());
+                    let tip = if already {
+                        format!("{} (click to remove)", label)
+                    } else {
+                        label.to_string()
+                    };
+                    let mid = m.id.clone();
+                    quick_row = quick_row.push(tooltip(
+                        button(text(emoji).size(10))
+                            .on_press(Message::ToggleReaction(mid, emoji.to_string()))
                             .padding([2, 4]),
-                        "React",
+                        text(tip).size(12),
                         tooltip::Position::Top,
-                    ),
-                    tooltip(
-                        button(text("❤️").size(10))
-                            .on_press(Message::SendReaction(heart_msg_id, "❤️".to_string()))
-                            .padding([2, 4]),
-                        "React with heart",
-                        tooltip::Position::Top,
-                    ),
-                    tooltip(
-                        button(text("😂").size(10))
-                            .on_press(Message::SendReaction(laugh_msg_id, "😂".to_string()))
-                            .padding([2, 4]),
-                        "React with laugh",
-                        tooltip::Position::Top,
-                    ),
-                ]
-                .spacing(4)
-                .into()
+                    ));
+                }
+                quick_row.into()
             } else {
                 row![].spacing(4).into()
             };
@@ -1165,23 +1185,33 @@ impl ConversationView {
             // M6: render reaction buttons below message when hovered
             rows.push(react_row);
 
-            // E3: render reaction pills below the message bubble
+            // E3/R1: render reaction pills below the message bubble
+            // R1: pills show who reacted (tooltip) and toggle own reaction on click
             if let Some(by_jid) = self.reactions.get(&m.id) {
-                // Group emojis across all JIDs and count
-                let mut counts: std::collections::BTreeMap<&str, usize> =
+                // Group: emoji → list of reactor display names
+                let mut reactor_lists: std::collections::BTreeMap<&str, Vec<&str>> =
                     std::collections::BTreeMap::new();
-                for emojis in by_jid.values() {
+                for (jid, emojis) in by_jid {
+                    let display = jid.split('/').next().unwrap_or(jid.as_str());
                     for e in emojis {
-                        *counts.entry(e.as_str()).or_insert(0) += 1;
+                        reactor_lists.entry(e.as_str()).or_default().push(display);
                     }
                 }
-                if !counts.is_empty() {
+                if !reactor_lists.is_empty() {
                     let mut pill_row: iced::widget::Row<Message> =
                         row![].spacing(4).padding([0, 8]);
-                    for (emoji, count) in &counts {
+                    for (emoji, reactors) in &reactor_lists {
                         let emoji_str = emoji.to_string();
-                        let label = format!("{} {}", emoji_str, count);
-                        pill_row = pill_row.push(container(text(label).size(12)).padding([2, 6]));
+                        let label = format!("{} {}", emoji_str, reactors.len());
+                        let tip = reactors.join(", ");
+                        let mid = m.id.clone();
+                        pill_row = pill_row.push(tooltip(
+                            button(text(label).size(12))
+                                .on_press(Message::ToggleReaction(mid, emoji_str))
+                                .padding([2, 6]),
+                            text(tip).size(12),
+                            tooltip::Position::Top,
+                        ));
                     }
                     let pill_align = if m.own {
                         Alignment::End
