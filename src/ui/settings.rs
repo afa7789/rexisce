@@ -52,6 +52,10 @@ pub enum Message {
     AvatarSelected(Vec<u8>, String),
     // K6: contact sorting preference
     SortContactsSelected(String),
+    // K6: chat preferences panel
+    ShowJoinLeaveToggled(bool),
+    ShowTypingIndicatorsToggled(bool),
+    CompactLayoutToggled(bool),
     // M3: blocklist panel messages
     Blocklist(super::blocklist::Message),
     // M6: data & storage
@@ -246,6 +250,22 @@ impl SettingsScreen {
                 let _ = config::save(&self.settings);
                 Task::none()
             }
+            // K6: chat preferences
+            Message::ShowJoinLeaveToggled(v) => {
+                self.settings.show_join_leave = v;
+                let _ = config::save(&self.settings);
+                Task::none()
+            }
+            Message::ShowTypingIndicatorsToggled(v) => {
+                self.settings.show_typing_indicators = v;
+                let _ = config::save(&self.settings);
+                Task::none()
+            }
+            Message::CompactLayoutToggled(v) => {
+                self.settings.compact_layout = v;
+                let _ = config::save(&self.settings);
+                Task::none()
+            }
 
             // M3: blocklist
             Message::Blocklist(bl_msg) => {
@@ -423,6 +443,54 @@ impl SettingsScreen {
         .spacing(8)
         .align_y(Alignment::Center);
 
+        // K6: Chat Preferences section
+        let chat_prefs_title = text("Chat Preferences").size(15);
+        let join_leave_row = row![
+            text("Show join/leave in rooms").size(14).width(Length::Fill),
+            toggler(self.settings.show_join_leave).on_toggle(Message::ShowJoinLeaveToggled),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        let typing_indicators_row = row![
+            text("Show typing indicators").size(14).width(Length::Fill),
+            toggler(self.settings.show_typing_indicators)
+                .on_toggle(Message::ShowTypingIndicatorsToggled),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        let compact_layout_row = row![
+            text("Compact message layout").size(14).width(Length::Fill),
+            toggler(self.settings.compact_layout).on_toggle(Message::CompactLayoutToggled),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        let contact_sort_label = if self.settings.contact_sort == "alphabetical" {
+            "Alphabetical"
+        } else {
+            "Recent activity"
+        };
+        let sort_row: Element<Message> = row![
+            text("Contact sort:").size(14).width(Length::Fill),
+            button("Alphabetical")
+                .on_press(Message::SortContactsSelected("alphabetical".into()))
+                .padding([4, 8]),
+            button("Recent")
+                .on_press(Message::SortContactsSelected("recent".into()))
+                .padding([4, 8]),
+            text(contact_sort_label).size(13),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into();
+        let chat_prefs_section = column![
+            chat_prefs_title,
+            join_leave_row,
+            typing_indicators_row,
+            compact_layout_row,
+            sort_row,
+        ]
+        .spacing(8);
+
         // M3: Blocked Users section
         let blocklist_section = self.blocklist.view().map(Message::Blocklist);
 
@@ -458,6 +526,7 @@ impl SettingsScreen {
             read_markers_row,
             mam_mode_row,
             avatar_row,
+            chat_prefs_section,
             blocklist_section,
             account_section,
             data_section,

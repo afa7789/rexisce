@@ -215,6 +215,9 @@ fn settings_json_round_trip() {
         contact_sort: "status".into(),
         avatar_data: None,
         mam_fetch_limit: 50,
+        show_join_leave: true,
+        show_typing_indicators: true,
+        compact_layout: false,
     };
 
     let json = serde_json::to_string(&original).unwrap();

@@ -65,6 +65,15 @@ pub struct Settings {
     /// M6: number of messages to fetch per MAM page (default 50).
     #[serde(default = "default_mam_fetch_limit")]
     pub mam_fetch_limit: u32,
+    /// K6: show join/leave presence messages in MUC rooms (default true).
+    #[serde(default = "default_true")]
+    pub show_join_leave: bool,
+    /// K6: show typing indicator when a contact is composing (default true).
+    #[serde(default = "default_true")]
+    pub show_typing_indicators: bool,
+    /// K6: use compact message layout (less padding, default false).
+    #[serde(default)]
+    pub compact_layout: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
@@ -115,6 +124,9 @@ impl Default for Settings {
             avatar_data: None,
             contact_sort: "alphabetical".to_string(),
             mam_fetch_limit: 50,
+            show_join_leave: true,
+            show_typing_indicators: true,
+            compact_layout: false,
         }
     }
 }
@@ -232,6 +244,9 @@ mod tests {
             avatar_data: None,
             contact_sort: "alphabetical".to_string(),
             mam_fetch_limit: 100,
+            show_join_leave: false,
+            show_typing_indicators: false,
+            compact_layout: true,
         };
         let json = serde_json::to_string(&s).unwrap();
         let s2: Settings = serde_json::from_str(&json).unwrap();
