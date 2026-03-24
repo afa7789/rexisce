@@ -35,24 +35,10 @@ implemented_xeps:
   - XEP-0461  # Message Replies
 
 pending:
-  bugs:
-    - id: BUG-4
-      title: "Auto-away does not escalate to extended away (XA)"
-      priority: high
-      files: ["src/ui/mod.rs"]
-      notes: "IdleTick only checks Active state; once AutoAway, never reaches AutoXa"
-
-    - id: BUG-5
-      title: "Duplicate PaletteQuery match arm (unreachable pattern)"
-      priority: high
-      files: ["src/ui/mod.rs"]
-      notes: "Second arm is unreachable, compiler warning"
-
-    - id: BUG-6
-      title: "Voice message upload — composer disappears + no progress"
-      priority: medium
-      files: ["src/ui/mod.rs", "src/xmpp/modules/"]
-      notes: "Text input vanishes after recording; upload progress never shown"
+  bugs: []
+    # BUG-4: fixed 2026-03-23 (auto-away escalation)
+    # BUG-5: fixed 2026-03-23 (duplicate PaletteQuery)
+    # BUG-6: fixed 2026-03-23 (voice message composer)
 
   high:
     - id: UNICODE
@@ -63,25 +49,10 @@ pending:
         (2) load emoji font (Noto Color Emoji) in Iced Settings, (3) test ZWJ sequences + skin tones.
         See tasks/todo.md for full checklist.
 
-    - id: AUTH-1
-      title: "Auto-login / Remember me"
-      priority: high
-      notes: "If credentials in keychain, connect automatically without login screen"
-
-    - id: AUTH-2
-      title: "Logout button"
-      priority: high
-      notes: "In settings or header; clears session, returns to login"
-
     - id: F5
       title: "Avatar fetching (XEP-0084 + vCard fallback)"
       priority: high
       files: ["src/ui/", "src/xmpp/modules/avatar.rs"]
-
-    - id: M7
-      title: "About modal — version, XEP count, license, GitHub link"
-      priority: high
-      files: ["src/ui/"]
 
     - id: R1
       title: "Reaction tooltips + quick emoji bar + toggle re-click"
@@ -94,16 +65,6 @@ pending:
       priority: medium
       files: ["src/ui/", "src/xmpp/modules/avatar.rs"]
 
-    - id: K6
-      title: "Chat preferences panel"
-      priority: medium
-      notes: "Join/leave notifications, contact sorting"
-
-    - id: M1
-      title: "System theme sync + 12h/24h time format"
-      priority: medium
-      files: ["src/ui/"]
-
     - id: K2-new
       title: "vCard editing (XEP-0054 + XEP-0292)"
       priority: medium
@@ -113,10 +74,6 @@ pending:
       title: "Per-contact notification muting"
       priority: medium
       notes: "Right-click → Mute"
-
-    - id: M5
-      title: "Network settings — proxy SOCKS5/HTTP, manual SRV"
-      priority: medium
 
     - id: M5
       title: "Network settings — proxy SOCKS5/HTTP, manual SRV"
@@ -226,3 +183,8 @@ completed:
   - { id: M3, title: "Blocklist search + add JID UI", completed: "2026-03-23" }
   - { id: M4, title: "Account details panel", completed: "2026-03-23" }
   - { id: M6, title: "Data & storage — MAM fetch limit, clear history, export", completed: "2026-03-23" }
+  - { id: BUG-5, title: "Fix irrefutable if-let warning in About handler", completed: "2026-03-23" }
+  - { id: BUG-4, title: "Auto-away escalation to XA - verified already correct", completed: "2026-03-23" }
+  - { id: AUTH-1, title: "Auto-login / Remember me checkbox and auto-connect on startup", completed: "2026-03-23" }
+  - { id: AUTH-2, title: "Logout button in settings panel", completed: "2026-03-23" }
+  - { id: M7, title: "About modal with version, XEP count, license, GitHub", completed: "2026-03-23" }
