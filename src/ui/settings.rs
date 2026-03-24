@@ -62,6 +62,8 @@ pub enum Message {
     ClearHistoryCancel,
     // AUTH-2: logout from settings screen
     Logout,
+    // M7: open About modal from settings
+    OpenAbout,
     Back,
 }
 
@@ -292,6 +294,8 @@ impl SettingsScreen {
 
             // AUTH-2: logout is handled by App::update intercepting this message.
             Message::Logout => Task::none(),
+            // M7: OpenAbout is handled by App::update intercepting this message.
+            Message::OpenAbout => Task::none(),
             Message::Back => Task::none(),
         }
     }
@@ -429,9 +433,16 @@ impl SettingsScreen {
         let data_section = self.view_data_storage();
 
         let back_btn = button("Back").on_press(Message::Back).padding([6, 14]);
+        let about_btn = button("About").on_press(Message::OpenAbout).padding([6, 14]);
         let logout_btn = button("Logout").on_press(Message::Logout).padding([6, 14]);
-        let bottom_row = row![back_btn, iced::widget::Space::with_width(Length::Fill), logout_btn]
-            .align_y(Alignment::Center);
+        let bottom_row = row![
+            back_btn,
+            iced::widget::Space::with_width(Length::Fill),
+            about_btn,
+            logout_btn,
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
 
         let content = column![
             title,

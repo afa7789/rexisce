@@ -126,7 +126,7 @@ enum Screen {
     Benchmark(BenchmarkScreen),
     Chat(Box<ChatScreen>),
     Settings(Box<settings::SettingsScreen>, Box<Screen>),
-    About(Box<about::AboutScreen>),
+    About(Box<about::AboutScreen>, Box<Screen>),
 }
 
 impl App {
@@ -361,24 +361,22 @@ impl App {
             }
 
             Message::GoToAbout => {
-                self.screen = Screen::About(Box::new(about::AboutScreen::new()));
+                let prev = std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()));
+                self.screen = Screen::About(Box::new(about::AboutScreen::new()), Box::new(prev));
                 Task::none()
             }
 
             Message::About(msg) => {
                 let is_back = matches!(msg, about::Message::Back);
-                if let Screen::About(ref mut about) = self.screen {
+                if let Screen::About(ref mut about, _) = self.screen {
                     about.update(msg);
                 }
                 if is_back {
-                    // Go back to login (or wherever we came from)
-                    if !matches!(self.screen, Screen::Chat(_)) {
-                        self.screen = Screen::Login(LoginScreen::with_saved(
-                            self.settings.last_jid.clone(),
-                            config::load_password(&self.settings.last_jid).unwrap_or_default(),
-                            self.settings.last_server.clone(),
-                            self.settings.remember_me,
-                        ));
+                    // Restore the previous screen.
+                    if let Screen::About(_, prev) =
+                        std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()))
+                    {
+                        self.screen = *prev;
                     }
                 }
                 Task::none()
@@ -405,6 +403,10 @@ impl App {
                 // AUTH-2: intercept Logout from settings panel before delegating.
                 if matches!(smsg, settings::Message::Logout) {
                     return self.update(Message::Logout);
+                }
+                // M7: intercept OpenAbout from settings panel before delegating.
+                if matches!(smsg, settings::Message::OpenAbout) {
+                    return self.update(Message::GoToAbout);
                 }
                 let go_back = matches!(smsg, settings::Message::Back);
                 // M6: detect clear-history confirmation before delegating
@@ -1079,7 +1081,7 @@ impl App {
             Screen::Benchmark(bench) => bench.view().map(Message::Benchmark),
             Screen::Chat(chat) => chat.view(self.settings.time_format).map(Message::Chat),
             Screen::Settings(ss, _) => ss.view().map(Message::Settings),
-            Screen::About(about) => about.view().map(Message::About),
+            Screen::About(about, _) => about.view().map(Message::About),
         };
 
         // F1: build the XML toggle button (always visible, bottom-left corner)

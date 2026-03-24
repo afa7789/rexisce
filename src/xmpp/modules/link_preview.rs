@@ -7,6 +7,31 @@ pub struct LinkPreview {
     pub description: Option<String>,
     pub image_url: Option<String>,
     pub site_name: Option<String>,
+    /// R2: OGP og:image:width in pixels, if present.
+    pub image_width: Option<u32>,
+    /// R2: OGP og:image:height in pixels, if present.
+    pub image_height: Option<u32>,
+}
+
+impl LinkPreview {
+    /// R2: Compute the display width and height for the preview image, capped at `max_width`.
+    /// Returns `(display_width, display_height)` maintaining the original aspect ratio.
+    /// If no dimensions are known, returns `(max_width, None)`.
+    pub fn display_dimensions(&self, max_width: u32) -> (u32, Option<u32>) {
+        match (self.image_width, self.image_height) {
+            (Some(w), Some(h)) if w > 0 && h > 0 => {
+                if w <= max_width {
+                    (w, Some(h))
+                } else {
+                    let scale = max_width as f32 / w as f32;
+                    let display_h = (h as f32 * scale).round() as u32;
+                    (max_width, Some(display_h))
+                }
+            }
+            (Some(w), None) => (w.min(max_width), None),
+            _ => (max_width, None),
+        }
+    }
 }
 
 /// Parse Open Graph and standard `<meta>` / `<title>` tags from raw HTML.
@@ -32,6 +57,10 @@ pub fn parse_preview(url: &str, html: &str) -> LinkPreview {
     let mut tw_image: Option<String> = None;
 
     let mut og_site_name: Option<String> = None;
+
+    // R2: OGP image dimensions
+    let mut og_image_width: Option<u32> = None;
+    let mut og_image_height: Option<u32> = None;
 
     // Normalise to lowercase for attribute matching but keep original for value extraction.
     for line in html.lines() {
@@ -103,6 +132,26 @@ pub fn parse_preview(url: &str, html: &str) -> LinkPreview {
                     og_site_name.get_or_insert(v);
                 }
             }
+            // R2: og:image:width
+            if lower.contains(r#"property="og:image:width""#)
+                || lower.contains("property='og:image:width'")
+            {
+                if let Some(v) = extract_content(line) {
+                    if let Ok(w) = v.trim().parse::<u32>() {
+                        og_image_width.get_or_insert(w);
+                    }
+                }
+            }
+            // R2: og:image:height
+            if lower.contains(r#"property="og:image:height""#)
+                || lower.contains("property='og:image:height'")
+            {
+                if let Some(v) = extract_content(line) {
+                    if let Ok(h) = v.trim().parse::<u32>() {
+                        og_image_height.get_or_insert(h);
+                    }
+                }
+            }
         }
 
         // ---- <title> tag --------------------------------------------------
@@ -119,6 +168,8 @@ pub fn parse_preview(url: &str, html: &str) -> LinkPreview {
         description: og_description.or(tw_description).or(meta_description),
         image_url: og_image.or(tw_image),
         site_name: og_site_name,
+        image_width: og_image_width,
+        image_height: og_image_height,
     }
 }
 
@@ -252,5 +303,62 @@ mod tests {
             preview.image_url,
             Some("https://example.com/tw.jpg".to_string())
         );
+    }
+
+    // R2: OGP image dimension tests
+
+    #[test]
+    fn parse_og_image_dimensions() {
+        let h = html(&[
+            r#"<meta property="og:image" content="https://example.com/img.png" />"#,
+            r#"<meta property="og:image:width" content="1200" />"#,
+            r#"<meta property="og:image:height" content="630" />"#,
+        ]);
+        let preview = parse_preview(TEST_URL, &h);
+        assert_eq!(preview.image_width, Some(1200));
+        assert_eq!(preview.image_height, Some(630));
+    }
+
+    #[test]
+    fn og_image_dimensions_missing_when_not_present() {
+        let h = html(&[r#"<meta property="og:image" content="https://example.com/img.png" />"#]);
+        let preview = parse_preview(TEST_URL, &h);
+        assert_eq!(preview.image_width, None);
+        assert_eq!(preview.image_height, None);
+    }
+
+    #[test]
+    fn display_dimensions_scales_down_large_image() {
+        let preview = LinkPreview {
+            image_width: Some(1200),
+            image_height: Some(630),
+            ..Default::default()
+        };
+        let (w, h) = preview.display_dimensions(300);
+        assert_eq!(w, 300);
+        // 630 * (300/1200) = 157.5 → 158
+        assert_eq!(h, Some(158));
+    }
+
+    #[test]
+    fn display_dimensions_keeps_small_image() {
+        let preview = LinkPreview {
+            image_width: Some(200),
+            image_height: Some(100),
+            ..Default::default()
+        };
+        let (w, h) = preview.display_dimensions(300);
+        assert_eq!(w, 200);
+        assert_eq!(h, Some(100));
+    }
+
+    #[test]
+    fn display_dimensions_fallback_when_unknown() {
+        let preview = LinkPreview {
+            ..Default::default()
+        };
+        let (w, h) = preview.display_dimensions(300);
+        assert_eq!(w, 300);
+        assert_eq!(h, None);
     }
 }
