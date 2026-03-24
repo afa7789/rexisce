@@ -110,8 +110,7 @@ pub async fn run_engine(
 /// S6: privacy toggles — controls which optional XMPP features we announce/use.
 /// Stored as a global so the engine callbacks can read it without threading parameters.
 static PRIVACY_FLAGS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0b000);
-/// Bit flags for PRIVACY_FLAGS: bit 0=receipts, bit 1=typing, bit 2=read_markers (1=enabled)
-
+// Bit flags for PRIVACY_FLAGS: bit 0=receipts, bit 1=typing, bit 2=read_markers (1=enabled)
 async fn run_session(
     config: ConnectConfig,
     event_tx: &mpsc::Sender<XmppEvent>,
@@ -301,7 +300,7 @@ async fn run_session(
                         hasher.update(&data);
                         let sha1 = format!("{:x}", hasher.finalize());
                         // Default to user's own JID for pubsub service (discover via disco in production)
-                        let pubsub_jid = config.jid.split('@').nth(1).map(|d| format!("pubsub.{}", d)).unwrap_or_else(|| "pubsub.example.com".to_string());
+                        let pubsub_jid = config.jid.split('@').nth(1).map_or_else(|| "pubsub.example.com".to_string(), |d| format!("pubsub.{}", d));
                         // First publish metadata
                         let meta_iq = avatar_mgr.build_avatar_metadata_publish(&pubsub_jid, &sha1, data.len(), &mime_type);
                         outbox.push_back(meta_iq);
@@ -363,7 +362,7 @@ async fn run_session(
                     Some(XmppCommand::FetchRoomList) => {
                         // K2: Browse public rooms — send disco#items to MUC service
                         // Default MUC service: conference.<domain>
-                        let muc_service = config.jid.split('@').nth(1).map(|d| format!("conference.{}", d)).unwrap_or_else(|| "conference.example.com".to_string());
+                        let muc_service = config.jid.split('@').nth(1).map_or_else(|| "conference.example.com".to_string(), |d| format!("conference.{}", d));
                         let (_, iq) = disco_mgr.build_items_request(&muc_service);
                         outbox.push_back(iq);
                         tracing::info!("k2: fetching room list from {}", muc_service);
@@ -523,7 +522,8 @@ async fn run_session(
                     | Some(XmppCommand::RequestBob { .. })
                     | Some(XmppCommand::OmemoEnable)
                     | Some(XmppCommand::OmemoEncryptMessage { .. })
-                    | Some(XmppCommand::OmemoTrustDevice { .. }) => {
+                    | Some(XmppCommand::OmemoTrustDevice { .. })
+                    | Some(XmppCommand::SendSticker { .. }) => {
                         // Handled in dedicated session loops or not yet wired.
                     }
                 }
@@ -560,7 +560,7 @@ async fn handle_client_event(
     muc_mgr: &mut MucManager,
     muc_config_mgr: &mut MucConfigManager,
     bookmark_mgr: &mut BookmarkManager,
-    push_mgr: &mut PushManager,
+    _push_mgr: &mut PushManager,
     vcard_edit_mgr: &mut VCardEditManager,
     adhoc_mgr: &mut AdhocManager,
 ) {
@@ -1174,7 +1174,7 @@ async fn handle_message(
             let reason = x_el
                 .children()
                 .find(|c| c.name() == "reason")
-                .map(|r| r.text());
+                .map(tokio_xmpp::minidom::Element::text);
             let _ = event_tx
                 .send(XmppEvent::RoomInvitationReceived {
                     room_jid: room_jid.to_string(),
@@ -1202,7 +1202,7 @@ async fn handle_message(
             let reason = invite_el
                 .children()
                 .find(|c| c.name() == "reason")
-                .map(|r| r.text());
+                .map(tokio_xmpp::minidom::Element::text);
             let _ = event_tx
                 .send(XmppEvent::RoomInvitationReceived {
                     room_jid: bare_room,
@@ -1226,7 +1226,7 @@ async fn handle_message(
                 let emojis: Vec<String> = reactions_el
                     .children()
                     .filter(|c| c.name() == "reaction" && c.ns() == NS_REACTIONS)
-                    .map(|c| c.text())
+                    .map(tokio_xmpp::minidom::Element::text)
                     .collect();
                 let _ = event_tx
                     .send(XmppEvent::ReactionReceived {
@@ -1424,6 +1424,7 @@ fn make_presence_with_caps(disco_mgr: &DiscoManager, status_message: Option<&str
     raw
 }
 
+#[allow(dead_code)]
 fn make_presence() -> Element {
     Presence::new(PresenceType::None).into()
 }
@@ -1655,8 +1656,7 @@ async fn run_registration_session(
                             // Registration failed.
                             let reason = el.get_child("error", "jabber:client")
                                 .or_else(|| el.get_child("error", "urn:ietf:params:xml:ns:xmpp-stanzas"))
-                                .map(|e: &Element| e.name())
-                                .unwrap_or("unknown error");
+                                .map_or("unknown error", |e: &Element| e.name());
                             let _ = event_tx.send(XmppEvent::RegistrationFailure(reason.to_string())).await;
                             return;
                         }

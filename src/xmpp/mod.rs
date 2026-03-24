@@ -238,6 +238,10 @@ pub enum XmppEvent {
     OmemoKeyExchangeNeeded {
         jid: String,
     },
+
+    // L1: Sticker packs (XEP-0449)
+    /// A sticker pack was received from PubSub.
+    StickerPackReceived(modules::stickers::StickerPack),
 }
 
 /// Commands sent from the UI to the XMPP engine.
@@ -424,4 +428,12 @@ pub enum XmppCommand {
 
     /// Mark `device_id` for `jid` as trusted by the user.
     OmemoTrustDevice { jid: String, device_id: u32 },
+
+    // L1: Sticker packs (XEP-0449)
+    /// Send a sticker to `to` from the given pack.
+    SendSticker {
+        to: String,
+        pack_id: String,
+        sticker: modules::stickers::Sticker,
+    },
 }

@@ -23,6 +23,7 @@ mod login;
 pub mod muc_panel;
 pub mod settings;
 pub mod sidebar;
+pub mod spam_report;
 pub mod styling;
 pub mod toast;
 pub mod vcard_editor;
@@ -43,6 +44,8 @@ const PALETTE_COMMANDS: &[&str] = &[
     "Ad-hoc Commands",
     "Toggle Console",
     "Add Contact",
+    "Switch Account",
+    "Report Spam",
     "Disconnect",
 ];
 
@@ -77,6 +80,8 @@ pub struct App {
     mam_default_mode: Option<String>,
     // AUTH-1: pending auto-connect config — consumed when XmppReady fires
     auto_connect_cfg: Option<crate::xmpp::ConnectConfig>,
+    // L5: spam report modal — Some when open
+    spam_report_modal: Option<spam_report::SpamReportModal>,
 }
 
 /// S1: tracks which auto-away stage has been sent to the engine.
@@ -129,6 +134,12 @@ pub enum Message {
     // L4: ad-hoc commands screen
     GoToAdhoc,
     Adhoc(adhoc::Message),
+    // L5: spam report modal
+    OpenSpamReport(String), // jid to pre-fill
+    SpamReport(spam_report::Message),
+    // MULTI: account switcher screen
+    GoToAccountSwitcher,
+    AccountSwitcher(account_switcher::Message),
 }
 
 enum Screen {
@@ -139,6 +150,7 @@ enum Screen {
     About(Box<about::AboutScreen>, Box<Screen>),
     VCardEditor(Box<vcard_editor::VCardEditorScreen>, Box<Screen>),
     Adhoc(Box<adhoc::AdhocScreen>, Box<Screen>),
+    AccountSwitcher(Box<account_switcher::AccountSwitcherScreen>, Box<Screen>),
 }
 
 impl App {
@@ -185,6 +197,7 @@ impl App {
                 idle_state: IdleState::Active,
                 mam_default_mode: mam_mode,
                 auto_connect_cfg,
+                spam_report_modal: None,
             },
             Task::none(),
         )
@@ -244,6 +257,8 @@ impl App {
                         "Open About" => return self.update(Message::GoToAbout),
                         "Edit Profile" => return self.update(Message::GoToVCardEditor),
                         "Ad-hoc Commands" => return self.update(Message::GoToAdhoc),
+                        "Switch Account" => return self.update(Message::GoToAccountSwitcher),
+                        "Report Spam" => return self.update(Message::OpenSpamReport(String::new())),
                         "Disconnect" => {
                             if let Some(ref tx) = self.xmpp_tx {
                                 let tx = tx.clone();
@@ -382,7 +397,7 @@ impl App {
 
             Message::GoToAbout => {
                 let prev = std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()));
-                self.screen = Screen::About(Box::new(about::AboutScreen::new()), Box::new(prev));
+                self.screen = Screen::About(Box::default(), Box::new(prev));
                 Task::none()
             }
 
@@ -448,7 +463,7 @@ impl App {
             // L4: navigate to ad-hoc commands screen
             Message::GoToAdhoc => {
                 let prev = std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()));
-                self.screen = Screen::Adhoc(Box::new(adhoc::AdhocScreen::new()), Box::new(prev));
+                self.screen = Screen::Adhoc(Box::default(), Box::new(prev));
                 Task::none()
             }
 
@@ -528,6 +543,77 @@ impl App {
                 }
                 if is_close {
                     if let Screen::Adhoc(_, prev) =
+                        std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()))
+                    {
+                        self.screen = *prev;
+                    }
+                }
+                Task::none()
+            }
+
+            // L5: spam report modal
+            Message::OpenSpamReport(jid) => {
+                self.spam_report_modal = Some(spam_report::SpamReportModal::new(jid));
+                Task::none()
+            }
+
+            Message::SpamReport(msg) => {
+                let is_cancel = matches!(msg, spam_report::Message::Cancel);
+                let mut cmd_to_send: Option<(String, Option<String>)> = None;
+                if let Some(ref mut modal) = self.spam_report_modal {
+                    if let Some(spam_cmd) = modal.update(msg) {
+                        cmd_to_send = Some((spam_cmd.jid, spam_cmd.reason));
+                    }
+                }
+                if is_cancel {
+                    self.spam_report_modal = None;
+                }
+                if let Some((jid, reason)) = cmd_to_send {
+                    self.spam_report_modal = None;
+                    if let Some(ref tx) = self.xmpp_tx {
+                        let tx = tx.clone();
+                        tokio::spawn(async move {
+                            let _ = tx.send(XmppCommand::ReportSpam { jid, reason }).await;
+                        });
+                    }
+                    return self.update(Message::ShowToast(
+                        "Spam report sent.".into(),
+                        ToastKind::Info,
+                    ));
+                }
+                Task::none()
+            }
+
+            // MULTI: account switcher screen
+            Message::GoToAccountSwitcher => {
+                let prev = std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()));
+                self.screen = Screen::AccountSwitcher(
+                    Box::new(account_switcher::AccountSwitcherScreen::new()),
+                    Box::new(prev),
+                );
+                Task::none()
+            }
+
+            Message::AccountSwitcher(msg) => {
+                let is_close = matches!(msg, account_switcher::Message::Close);
+                let switch_to = if let account_switcher::Message::SwitchTo(ref id) = msg {
+                    Some(id.clone())
+                } else {
+                    None
+                };
+                if let Screen::AccountSwitcher(ref mut sw, _) = self.screen {
+                    sw.update(msg);
+                }
+                if let Some(id) = switch_to {
+                    if let Some(ref tx) = self.xmpp_tx {
+                        let tx = tx.clone();
+                        tokio::spawn(async move {
+                            let _ = tx.send(XmppCommand::SwitchAccount(id)).await;
+                        });
+                    }
+                }
+                if is_close {
+                    if let Screen::AccountSwitcher(_, prev) =
                         std::mem::replace(&mut self.screen, Screen::Login(LoginScreen::new()))
                     {
                         self.screen = *prev;
@@ -1261,7 +1347,8 @@ impl App {
                     | XmppEvent::BobReceived(_)
                     | XmppEvent::OmemoDeviceListReceived { .. }
                     | XmppEvent::OmemoMessageDecrypted { .. }
-                    | XmppEvent::OmemoKeyExchangeNeeded { .. } => {}
+                    | XmppEvent::OmemoKeyExchangeNeeded { .. }
+                    | XmppEvent::StickerPackReceived(_) => {}
                 }
                 Task::none()
             }
@@ -1282,6 +1369,7 @@ impl App {
             Screen::About(about, _) => about.view().map(Message::About),
             Screen::VCardEditor(ve, _) => ve.view().map(Message::VCardEditor),
             Screen::Adhoc(adhoc, _) => adhoc.view().map(Message::Adhoc),
+            Screen::AccountSwitcher(sw, _) => sw.view().map(Message::AccountSwitcher),
         };
 
         // F1: build the XML toggle button (always visible, bottom-left corner)
@@ -1298,6 +1386,35 @@ impl App {
 
         // Build layers: screen + optional palette + optional console panel + button + optional toasts
         let mut layers: Vec<Element<Message>> = vec![screen_view];
+
+        // L5: spam report modal overlay
+        if let Some(ref modal) = self.spam_report_modal {
+            let backdrop = container(Space::new(Length::Fill, Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|_theme: &iced::Theme| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        0.0, 0.0, 0.0, 0.5,
+                    ))),
+                    ..Default::default()
+                });
+            let modal_view = modal.view().map(Message::SpamReport);
+            let modal_overlay = container(
+                column![
+                    Space::new(Length::Fill, Length::Fixed(100.0)),
+                    row![
+                        Space::new(Length::Fill, Length::Shrink),
+                        modal_view,
+                        Space::new(Length::Fill, Length::Shrink),
+                    ],
+                ]
+                .spacing(0),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill);
+            layers.push(backdrop.into());
+            layers.push(modal_overlay.into());
+        }
 
         // F4: reconnect banner — shown at top of screen when reconnecting
         if self.reconnect_attempt > 0 {

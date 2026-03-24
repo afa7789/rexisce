@@ -67,6 +67,7 @@ pub mod xmpp_uri; // Task P6.3 — XEP-0147 xmpp: URI parser
 pub mod bob; // Q2: XEP-0231 Bits of Binary
 pub mod geoloc; // L3: XEP-0080 User Location
 pub mod spam_report; // L5: XEP-0377 Spam Reporting
+pub mod stickers; // L1: XEP-0449 Sticker Packs (placeholder)
 
 // MEMO: OMEMO E2E encryption (XEP-0384)
 pub mod omemo;
