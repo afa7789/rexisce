@@ -380,14 +380,27 @@ impl App {
 
             Message::Settings(smsg) => {
                 let go_back = matches!(smsg, settings::Message::Back);
+                let mut avatar_task = Task::none();
+                if let settings::Message::AvatarSelected(ref data, ref mime_type) = smsg {
+                    if let Some(ref tx) = self.xmpp_tx {
+                        let tx = tx.clone();
+                        let d = data.clone();
+                        let m = mime_type.clone();
+                        avatar_task = Task::future(async move {
+                            let _ = tx.send(XmppCommand::SetAvatar { data: d, mime_type: m }).await;
+                            Message::ShowToast("Uploading avatar…".into(), ToastKind::Info)
+                        });
+                    }
+                }
+                let mut update_task = Task::none();
                 if let Screen::Settings(ref mut ss, _) = self.screen {
-                    let _ = ss.update(smsg);
+                    update_task = ss.update(smsg).map(Message::Settings);
                     self.settings = ss.settings().clone();
                 }
                 if go_back {
-                    return self.update(Message::GoBack);
+                    return Task::batch([avatar_task, update_task, self.update(Message::GoBack)]);
                 }
-                Task::none()
+                Task::batch([avatar_task, update_task])
             }
 
             Message::ToggleTheme => {

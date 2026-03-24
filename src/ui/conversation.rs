@@ -218,6 +218,10 @@ pub struct ConversationView {
     voice_state: VoiceState,
     /// M4: seconds elapsed since recording started (updated by VoiceTick)
     voice_elapsed_secs: u32,
+    /// L3: Message ID currently being moderated
+    pub pending_moderate_dialog: Option<String>,
+    /// L3: Reason text input for message moderation
+    pub moderate_reason_input: String,
 }
 
 #[derive(Debug, Clone)]
@@ -271,6 +275,11 @@ pub enum Message {
     CancelRecording,                            // cancel button — drop buffer
     VoiceEncodingDone(std::path::PathBuf, u64), // (temp_path, byte_size) — ready to upload
     VoiceTick,                                  // fired every 100 ms to update elapsed timer
+    // L3: message moderation dialog
+    OpenModerateDialog(String),
+    ModerateReasonChanged(String),
+    SubmitModerate,
+    DismissModerateDialog,
 }
 
 impl ConversationView {
@@ -303,6 +312,8 @@ impl ConversationView {
             mention_prefix: None,
             voice_state: VoiceState::Idle,
             voice_elapsed_secs: 0,
+            pending_moderate_dialog: None,
+            moderate_reason_input: String::new(),
         }
     }
 
@@ -476,6 +487,32 @@ impl ConversationView {
             }
             Message::RetractMessage(_) => Task::none(), // bubbled to ChatScreen
             Message::ModerateMessage(_, _) => Task::none(), // L3: bubbled to ChatScreen
+            Message::OpenModerateDialog(msg_id) => {
+                self.pending_moderate_dialog = Some(msg_id);
+                self.moderate_reason_input.clear();
+                Task::none()
+            }
+            Message::ModerateReasonChanged(reason) => {
+                self.moderate_reason_input = reason;
+                Task::none()
+            }
+            Message::SubmitModerate => {
+                if let Some(msg_id) = self.pending_moderate_dialog.take() {
+                    let reason = if self.moderate_reason_input.trim().is_empty() {
+                        None
+                    } else {
+                        Some(self.moderate_reason_input.trim().to_string())
+                    };
+                    self.moderate_reason_input.clear();
+                    return Task::done(Message::ModerateMessage(msg_id, reason));
+                }
+                Task::none()
+            }
+            Message::DismissModerateDialog => {
+                self.pending_moderate_dialog = None;
+                self.moderate_reason_input.clear();
+                Task::none()
+            }
             Message::RequestOlderHistory => Task::none(), // bubbled to ChatScreen
             Message::AttachmentLoaded(msg_id, handle) => {
                 self.attachments.insert(msg_id, handle);
@@ -982,7 +1019,7 @@ impl ConversationView {
                     let mod_msg_id = m.id.clone();
                     Some(tooltip(
                         button(text("\u{1F6E1}").size(10))
-                            .on_press(Message::ModerateMessage(mod_msg_id, None))
+                            .on_press(Message::OpenModerateDialog(mod_msg_id))
                             .padding([2, 4]),
                         "Moderate (remove) message",
                         tooltip::Position::Top,
@@ -1536,7 +1573,60 @@ impl ConversationView {
         if let Some(panel) = mention_panel {
             col = col.push(panel);
         }
-        col.push(composer_row).height(Length::Fill).into()
+        col = col.push(composer_row);
+
+        let body = container(col).height(Length::Fill).width(Length::Fill);
+
+        if self.pending_moderate_dialog.is_some() {
+            let dialog = container(
+                column![
+                    text("Moderate Message").size(16),
+                    text("Enter reason (optional):").size(14),
+                    text_input("e.g. Inappropriate behavior", &self.moderate_reason_input)
+                        .on_input(Message::ModerateReasonChanged)
+                        .on_submit(Message::SubmitModerate)
+                        .padding(8),
+                    row![
+                        button("Cancel").on_press(Message::DismissModerateDialog).padding([6, 12]),
+                        button(text("Moderate").color(Color::from_rgb(1.0, 0.4, 0.4)))
+                            .on_press(Message::SubmitModerate).padding([6, 12]),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                ]
+                .spacing(12)
+            )
+            .padding(20)
+            .style(|_theme: &iced::Theme| iced::widget::container::Style {
+                background: Some(iced::Background::Color(Color::from_rgb(0.15, 0.15, 0.15))),
+                border: iced::Border {
+                    color: Color::from_rgb(0.3, 0.3, 0.3),
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                shadow: iced::Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 10.0,
+                },
+                ..Default::default()
+            });
+
+            iced::widget::stack![
+                body,
+                container(dialog)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center(Length::Fill)
+                    .style(|_theme: &iced::Theme| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.7))),
+                        ..Default::default()
+                    })
+            ]
+            .into()
+        } else {
+            body.into()
+        }
     }
 }
 

@@ -288,8 +288,11 @@ async fn run_session(
                     }
                     Some(XmppCommand::SetAvatar { data, mime_type }) => {
                         // H2: Publish own avatar via XEP-0084 PubSub
-                        // Compute SHA-1 hash of the image data (use simple hex for now)
-                        let sha1 = format!("{:x}", data.iter().fold(0u64, |acc, &b| acc.wrapping_add(b as u64)));
+                        // Compute SHA-1 hash of the image data
+                        use sha1::{Digest, Sha1};
+                        let mut hasher = Sha1::new();
+                        hasher.update(&data);
+                        let sha1 = format!("{:x}", hasher.finalize());
                         // Default to user's own JID for pubsub service (discover via disco in production)
                         let pubsub_jid = config.jid.split('@').nth(1).map(|d| format!("pubsub.{}", d)).unwrap_or_else(|| "pubsub.example.com".to_string());
                         // First publish metadata

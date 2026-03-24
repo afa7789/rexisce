@@ -31,6 +31,8 @@ pub enum Message {
     SystemThemeToggled(bool),
     TimeFormatToggled(String),
     // H2: avatar upload
+    OpenAvatarPicker,
+    AvatarFilePicked(Option<std::path::PathBuf>),
     AvatarSelected(Vec<u8>, String),
     // K6: contact sorting preference
     SortContactsSelected(String),
@@ -127,6 +129,40 @@ impl SettingsScreen {
                 let _ = config::save(&self.settings);
                 Task::none()
             }
+            Message::OpenAvatarPicker => Task::future(async {
+                let path = rfd::AsyncFileDialog::new()
+                    .set_title("Select Avatar")
+                    .add_filter("Images", &["png", "jpg", "jpeg", "gif"])
+                    .pick_file()
+                    .await
+                    .map(|f| f.path().to_path_buf());
+                Message::AvatarFilePicked(path)
+            }),
+            Message::AvatarFilePicked(Some(path)) => {
+                let mime = if path.extension().and_then(|s| s.to_str()).map(|s| s.to_lowercase()).as_deref() == Some("png") {
+                    "image/png"
+                } else if path.extension().and_then(|s| s.to_str()).map(|s| s.to_lowercase()).as_deref() == Some("gif") {
+                    "image/gif"
+                } else {
+                    "image/jpeg"
+                };
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        if let Ok(img) = image::load_from_memory(&bytes) {
+                            let state = crate::store::avatar_crop::CropState::new(img.width(), img.height());
+                            match crate::store::avatar_crop::crop_to_avatar(&bytes, &state, 256) {
+                                Ok(cropped) => return Task::done(Message::AvatarSelected(cropped, mime.to_string())),
+                                Err(e) => { tracing::warn!("Avatar crop failed: {e}"); }
+                            }
+                        } else {
+                            tracing::warn!("Failed to decode avatar image");
+                        }
+                    }
+                    Err(e) => { tracing::warn!("Failed to read avatar file: {e}"); }
+                }
+                Task::none()
+            }
+            Message::AvatarFilePicked(None) => Task::none(),
             // H2: avatar upload - send to engine via config/command
             Message::AvatarSelected(data, mime_type) => {
                 // The settings screen returns this to App, which forwards to ChatScreen → XmppCommand
@@ -264,6 +300,15 @@ impl SettingsScreen {
         .align_y(Alignment::Center)
         .into();
 
+        let avatar_row = row![
+            text("Profile Avatar").size(14).width(Length::Fill),
+            button(text("Upload…").size(13))
+                .on_press(Message::OpenAvatarPicker)
+                .padding([4, 12]),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
         let back_btn = button("Back").on_press(Message::Back).padding([6, 14]);
 
         let content = column![
@@ -279,6 +324,7 @@ impl SettingsScreen {
             typing_row,
             read_markers_row,
             mam_mode_row,
+            avatar_row,
             back_btn
         ]
         .spacing(16)

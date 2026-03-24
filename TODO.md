@@ -10,7 +10,7 @@
 ## High Priority
 - [x] M6: Reaction hover bar (2026-03-22)
 - [ ] L2: @mention autocomplete in MUC
-- [ ] L3: Message moderation by moderators
+- [x] L3: Message moderation by moderators
 - [ ] M4: Audio recording (voice messages)
 - [ ] K3: Room invitations
 - [ ] K1: Room creation UI
@@ -18,7 +18,7 @@
 ## Medium Priority
 - [ ] K6: Chat preferences panel
 - [ ] R2: Enhanced link previews
-- [ ] H2: Own avatar upload
+- [x] H2: Own avatar upload
 - [ ] K2: Browse public rooms
 - [ ] J9: Account registration wizard
 - [ ] K7: Push notifications
