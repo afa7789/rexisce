@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// A single command exposed in the command palette.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Command {
