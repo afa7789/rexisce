@@ -4,7 +4,8 @@
 tasks:
   # ===== BATCH 1: Engine wiring (high priority, touches engine.rs) =====
   dc-5:
-    status: pending
+    status: completed
+    completed: "2026-03-24"
     priority: 1
     dependencies: []
     files: [src/xmpp/engine.rs, src/xmpp/modules/message_mutations.rs]
@@ -12,7 +13,8 @@ tasks:
     description: "Wire message_mutations.rs — use MutationManager for corrections/retractions/reactions parsing in engine"
 
   dc-9:
-    status: pending
+    status: completed
+    completed: "2026-03-24"
     priority: 1
     dependencies: []
     files: [src/xmpp/engine.rs, src/xmpp/modules/account.rs]
