@@ -1,7 +1,8 @@
-#![allow(dead_code)]
 // Task P1.1 — TCP connection + STARTTLS + Direct TLS
 // Task P1.2 — SASL authentication (delegated to tokio-xmpp)
 // Task P1.7 — DNS SRV + XEP-0156 discovery (delegated to tokio-xmpp ServerConfig::UseSrv)
+// DC-18   — Proxy config wired into connection flow
+// DC-19   — DNS/SRV override wired into connection flow
 //
 // Source reference:
 //   apps/fluux/src-tauri/src/xmpp_proxy/ (existing Rust proxy)
@@ -31,6 +32,27 @@ pub struct ConnectConfig {
     pub send_typing: bool,
     /// S6: whether to send read markers.
     pub send_read_markers: bool,
+    /// DC-18 / M5: proxy type ("socks5" or "http"), None = direct connection.
+    pub proxy_type: Option<String>,
+    /// DC-18 / M5: proxy hostname or IP address.
+    pub proxy_host: Option<String>,
+    /// DC-18 / M5: proxy port number.
+    pub proxy_port: Option<u16>,
+    /// DC-19 / M5: manual SRV override (e.g. "_xmpp-client._tcp.corp.example.com").
+    /// When set this SRV name is resolved instead of the standard RFC 6120 names.
+    pub manual_srv: Option<String>,
+}
+
+impl ConnectConfig {
+    /// Returns `(proxy_type, host, port)` when a fully-specified proxy is
+    /// configured (type + host + port all present), or `None` for direct
+    /// connections.  Used by `run_session` to drive `ProxyLifecycle`.
+    pub fn proxy_config(&self) -> Option<(&str, &str, u16)> {
+        match (&self.proxy_type, &self.proxy_host, self.proxy_port) {
+            (Some(t), Some(h), Some(p)) if !h.is_empty() => Some((t.as_str(), h.as_str(), p)),
+            _ => None,
+        }
+    }
 }
 
 /// Parsed server input from the login screen.

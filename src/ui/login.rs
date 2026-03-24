@@ -83,6 +83,10 @@ impl LoginScreen {
             send_receipts: settings.send_receipts,
             send_typing: settings.send_typing,
             send_read_markers: settings.send_read_markers,
+            proxy_type: settings.proxy_type,
+            proxy_host: settings.proxy_host,
+            proxy_port: settings.proxy_port,
+            manual_srv: settings.manual_srv,
         }
     }
 

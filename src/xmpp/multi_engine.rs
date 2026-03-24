@@ -99,6 +99,10 @@ impl MultiEngineManager {
             send_receipts: true,
             send_typing: true,
             send_read_markers: true,
+            proxy_type: config.proxy.as_ref().map(|_| "socks5".to_owned()),
+            proxy_host: config.proxy.as_ref().map(|p| p.host.clone()),
+            proxy_port: config.proxy.as_ref().map(|p| p.port),
+            manual_srv: None,
         };
         // Best-effort: if the channel is full the connect is deferred.
         let _ = cmd_tx.try_send(XmppCommand::Connect(connect_config));

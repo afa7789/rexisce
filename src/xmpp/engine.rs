@@ -26,7 +26,7 @@ use tokio_xmpp::{
 use tokio_xmpp::connect::ServerConnector;
 
 use super::{
-    connection::ConnectConfig,
+    connection::{dns, ConnectConfig, proxy::{ProxyLifecycle, TransportKind}},
     modules::{
         NS_FORWARD, NS_MAM, NS_MUC_OWNER, NS_MUC_USER, NS_REACTIONS, NS_X_CONFERENCE,
     },
@@ -56,9 +56,11 @@ use super::{
     modules::registration::RegistrationManager,
     modules::stream_mgmt::StreamMgmt,
     modules::vcard_edit::VCardEditManager,
+    modules::message_mutations::MutationManager,
     modules::adhoc::AdhocManager,
-    modules::account::AccountManager,
     modules::entity_time::EntityTimeManager,
+    modules::conversation_sync::ConversationSyncManager,
+    modules::ignore::IgnoreManager,
     modules::spam_report::build_spam_report,
     modules::stickers,
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
@@ -151,13 +153,42 @@ async fn run_session(
         }
     };
 
-    // Build the server connector.  If the user specified a manual host we use
-    // that; otherwise tokio-xmpp does DNS SRV resolution automatically (P1.7).
-    let server = if config.server.trim().is_empty() {
-        ServerConfig::UseSrv
-    } else {
+    // Build the server connector.
+    //   1. Explicit host in `server` field → use it directly.
+    //   2. `manual_srv` set → resolve that SRV record via dns::resolve_with_override.
+    //   3. Neither → let tokio-xmpp do standard RFC 6120 SRV discovery.
+    let server = if !config.server.trim().is_empty() {
         let (host, port) = parse_host_port(&config.server, 5222);
         ServerConfig::Manual { host, port }
+    } else if let Some(ref srv_name) = config.manual_srv {
+        match dns::resolve_with_override(
+            jid.domain().as_str(),
+            Some(srv_name.as_str()),
+        )
+        .await
+        {
+            Ok(ep) => {
+                tracing::info!(
+                    "engine: SRV override {} resolved to {}:{}",
+                    srv_name,
+                    ep.host,
+                    ep.port
+                );
+                ServerConfig::Manual {
+                    host: ep.host,
+                    port: ep.port,
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "engine: SRV override resolution failed ({}), falling back to UseSrv",
+                    e
+                );
+                ServerConfig::UseSrv
+            }
+        }
+    } else {
+        ServerConfig::UseSrv
     };
 
     let mut client = AsyncClient::new_with_config(AsyncConfig {
@@ -218,6 +249,13 @@ async fn run_session(
     let mut muc_admin_mgr = MucAdminManager::new();
     // DC-6: XEP-0045 MUC voice request manager
     let muc_voice_mgr = MucVoiceManager::new();
+    // DC-10: per-room ignore lists (PubSub private storage)
+    let mut ignore_mgr = IgnoreManager::new();
+    // DC-10: conversation sync (PubSub private storage, XEP-0223)
+    let conv_sync_mgr = ConversationSyncManager::new();
+
+    // DC-5: XEP-0308 corrections, XEP-0424 retractions, XEP-0444 reactions
+    let mutation_mgr = MutationManager::new();
 
     // MEMO: XEP-0384 OMEMO encryption manager — only active when a DB pool is available.
     let mut omemo_mgr: Option<OmemoManager> = db
@@ -268,7 +306,7 @@ async fn run_session(
                     }
                     Some(ev) => {
 
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &push_cleanup, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &config.jid).await;
+                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &push_cleanup, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &mut ignore_mgr, &conv_sync_mgr, &config.jid).await;
                     }
                 }
             }
@@ -627,6 +665,33 @@ async fn run_session(
                         let msg = stickers::build_sticker_message(&to, &pack_id, &sticker);
                         outbox.push_back(msg);
                     }
+                    // DC-10: Add user to per-room ignore list and persist to PubSub.
+                    Some(XmppCommand::IgnoreUser { room_jid, user_jid }) => {
+                        ignore_mgr.add(&room_jid, &user_jid);
+                        outbox.push_back(ignore_mgr.build_publish_iq(&room_jid));
+                        tracing::info!("ignore: ignoring {user_jid} in {room_jid}");
+                    }
+                    // DC-10: Remove user from per-room ignore list and persist to PubSub.
+                    Some(XmppCommand::UnignoreUser { room_jid, user_jid }) => {
+                        ignore_mgr.remove(&room_jid, &user_jid);
+                        outbox.push_back(ignore_mgr.build_publish_iq(&room_jid));
+                        tracing::info!("ignore: unignoring {user_jid} in {room_jid}");
+                    }
+                    // DC-10: Fetch ignore list for a room from PubSub.
+                    Some(XmppCommand::FetchIgnoreList { room_jid }) => {
+                        outbox.push_back(IgnoreManager::build_fetch_iq(&room_jid));
+                        tracing::debug!("ignore: fetching ignore list for {room_jid}");
+                    }
+                    // DC-10: Persist current conversation list to PubSub private storage.
+                    Some(XmppCommand::SyncConversations(conversations)) => {
+                        outbox.push_back(conv_sync_mgr.build_publish_iq(&conversations));
+                        tracing::debug!("conv_sync: persisting {} conversations", conversations.len());
+                    }
+                    // DC-10: Fetch conversation list from PubSub private storage.
+                    Some(XmppCommand::FetchConversations) => {
+                        outbox.push_back(conv_sync_mgr.build_fetch_iq());
+                        tracing::debug!("conv_sync: fetching conversations");
+                    }
                     // MEMO: Enable OMEMO — generate keys and publish device list + bundle.
                     Some(XmppCommand::OmemoEnable) => {
                         if let Some(ref mut mgr) = omemo_mgr {
@@ -731,6 +796,8 @@ async fn handle_client_event(
     vcard_edit_mgr: &mut VCardEditManager,
     adhoc_mgr: &mut AdhocManager,
     omemo_mgr: &mut Option<OmemoManager>,
+    ignore_mgr: &mut IgnoreManager,
+    conv_sync_mgr: &ConversationSyncManager,
     account_jid: &str,
 ) {
     match ev {
@@ -855,6 +922,8 @@ async fn handle_client_event(
                 vcard_edit_mgr,
                 adhoc_mgr,
                 omemo_mgr,
+                ignore_mgr,
+                conv_sync_mgr,
                 account_jid,
             )
             .await;
@@ -881,6 +950,8 @@ async fn dispatch_stanza(
     vcard_edit_mgr: &mut VCardEditManager,
     adhoc_mgr: &mut AdhocManager,
     omemo_mgr: &mut Option<OmemoManager>,
+    ignore_mgr: &mut IgnoreManager,
+    conv_sync_mgr: &ConversationSyncManager,
     account_jid: &str,
 ) {
     // F1: emit received stanza to debug console before routing
@@ -922,6 +993,10 @@ async fn dispatch_stanza(
                 bookmark_mgr,
                 vcard_edit_mgr,
                 adhoc_mgr,
+                ignore_mgr,
+                conv_sync_mgr,
+                omemo_mgr,
+                account_jid,
             )
             .await
         }
@@ -1062,9 +1137,24 @@ async fn dispatch_stanza(
             if let Some(from_jid) = DeviceManager::is_device_list_event(&el) {
                 let devices = DeviceManager::parse_device_list(&el);
                 // Persist device list update in the store.
-                if let Some(ref mgr) = omemo_mgr {
+                if let Some(ref mut mgr) = omemo_mgr {
                     if let Err(e) = mgr.store.sync_device_list(account_jid, &from_jid, &devices).await {
                         tracing::warn!("omemo: sync_device_list failed for {from_jid}: {e}");
+                    } else {
+                        // Auto-fetch bundles for devices that have no Olm session yet.
+                        for &device_id in &devices {
+                            let has_session = mgr.store
+                                .load_session(account_jid, &from_jid, device_id)
+                                .await
+                                .unwrap_or(None)
+                                .is_some();
+                            if !has_session {
+                                let (iq_id, iq) = mgr.device_mgr.build_bundle_fetch(&from_jid, device_id);
+                                mgr.track_bundle_fetch(iq_id, from_jid.clone(), device_id);
+                                outbox.push_back(iq);
+                                tracing::debug!("omemo: fetching bundle for {from_jid}/{device_id}");
+                            }
+                        }
                     }
                 }
                 let _ = event_tx.send(XmppEvent::OmemoDeviceListReceived {
@@ -1086,9 +1176,13 @@ async fn dispatch_stanza(
                                     from,
                                     body,
                                 }).await;
+                                // Check pre-key stock and replenish if below threshold.
+                                omemo_check_prekey_rotation(mgr, account_jid, outbox).await;
                             }
                             Ok(None) => {
                                 tracing::debug!("omemo: key-transport message (no payload), ignored");
+                                // A key-transport also consumes a pre-key -- check rotation.
+                                omemo_check_prekey_rotation(mgr, account_jid, outbox).await;
                             }
                             Err(e) => {
                                 tracing::warn!("omemo: decrypt failed from {from}: {e}");
@@ -1147,6 +1241,10 @@ async fn handle_iq(
     bookmark_mgr: &mut BookmarkManager,
     vcard_edit_mgr: &mut VCardEditManager,
     adhoc_mgr: &mut AdhocManager,
+    ignore_mgr: &mut IgnoreManager,
+    conv_sync_mgr: &ConversationSyncManager,
+    omemo_mgr: &mut Option<OmemoManager>,
+    account_jid: &str,
 ) {
     // C5: respond to disco#info get requests with our feature list
     if el.attr("type") == Some("get") {
@@ -1350,6 +1448,64 @@ async fn handle_iq(
             }
         }
     }
+    // MEMO: Detect OMEMO bundle fetch result and create an outbound Olm session.
+    if el.attr("type") == Some("result") {
+        if let Some(iq_id) = el.attr("id").map(str::to_string) {
+            if let Some(ref mut mgr) = omemo_mgr {
+                if let Some((peer_jid, device_id)) = mgr.take_bundle_fetch(&iq_id) {
+                    use super::modules::omemo::bundle::parse_bundle;
+                    use vodozemac::Curve25519PublicKey;
+                    if let Some(bundle) = parse_bundle(&el) {
+                        match mgr.store.load_own_identity(account_jid).await {
+                            Ok(Some(identity)) => {
+                                match OmemoSessionManager::unpickle_account(&identity.identity_key) {
+                                    Ok(own_account) => {
+                                        let ik_result = Curve25519PublicKey::from_slice(&bundle.identity_key);
+                                        let otk_result = bundle.pre_keys.first()
+                                            .and_then(|(_, k)| Curve25519PublicKey::from_slice(k).ok());
+                                        match (ik_result, otk_result) {
+                                            (Ok(their_ik), Some(their_otk)) => {
+                                                let session = OmemoSessionManager::create_outbound_session(
+                                                    &own_account,
+                                                    their_ik,
+                                                    their_otk,
+                                                );
+                                                match OmemoSessionManager::pickle_session(&session) {
+                                                    Ok(pickled) => {
+                                                        if let Err(e) = mgr.store
+                                                            .save_session(account_jid, &peer_jid, device_id, &pickled)
+                                                            .await
+                                                        {
+                                                            tracing::warn!("omemo: save_session failed for {peer_jid}/{device_id}: {e}");
+                                                        } else {
+                                                            use super::modules::omemo::store::TrustState;
+                                                            let _ = mgr.store
+                                                                .upsert_device(account_jid, &peer_jid, device_id, TrustState::Tofu, None, true)
+                                                                .await;
+                                                            tracing::info!("omemo: outbound session created for {peer_jid}/{device_id}");
+                                                        }
+                                                    }
+                                                    Err(e) => tracing::warn!("omemo: pickle_session failed for {peer_jid}/{device_id}: {e}"),
+                                                }
+                                            }
+                                            (Err(e), _) => tracing::warn!("omemo: bad identity key in bundle for {peer_jid}/{device_id}: {e}"),
+                                            (_, None) => tracing::warn!("omemo: no one-time keys in bundle for {peer_jid}/{device_id}"),
+                                        }
+                                    }
+                                    Err(e) => tracing::warn!("omemo: failed to unpickle own account: {e}"),
+                                }
+                            }
+                            Ok(None) => tracing::warn!("omemo: own identity not found when processing bundle"),
+                            Err(e) => tracing::warn!("omemo: load_own_identity failed: {e}"),
+                        }
+                    } else {
+                        tracing::warn!("omemo: failed to parse bundle IQ for {peer_jid}/{device_id}");
+                    }
+                    return;
+                }
+            }
+        }
+    }
     // Q2: detect Bits of Binary result (XEP-0231)
     if el.attr("type") == Some("result") {
         if let Some(bob_data) = bob::parse_bob_data(&el) {
@@ -1369,6 +1525,55 @@ async fn handle_iq(
                 tracing::info!("bookmarks: loaded {} bookmark(s)", bookmarks.len());
                 let _ = event_tx.send(XmppEvent::BookmarksReceived(bookmarks)).await;
             }
+            return;
+        }
+    }
+
+    // DC-10: detect ignore list result from PubSub (xmpp-start:ignore:{room_jid})
+    if el.attr("type") == Some("result") {
+        let ignore_node = el.children().find_map(|c| {
+            if c.name() == "pubsub" && c.ns() == "http://jabber.org/protocol/pubsub" {
+                c.children().find_map(|items| {
+                    if items.name() == "items" {
+                        items.attr("node").and_then(|n| {
+                            n.strip_prefix("xmpp-start:ignore:").map(str::to_string)
+                        })
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        });
+        if let Some(room_jid) = ignore_node {
+            ignore_mgr.parse_result(&room_jid, &el);
+            let ignored = ignore_mgr.list(&room_jid);
+            let _ = event_tx
+                .send(XmppEvent::IgnoreListReceived {
+                    room_jid,
+                    ignored,
+                })
+                .await;
+            return;
+        }
+    }
+
+    // DC-10: detect conversation list result from PubSub (xmpp-start:conversations)
+    if el.attr("type") == Some("result") {
+        let is_conv_sync = el.children().any(|c| {
+            c.name() == "pubsub"
+                && c.ns() == "http://jabber.org/protocol/pubsub"
+                && c.children().any(|items| {
+                    items.name() == "items"
+                        && items.attr("node") == Some("xmpp-start:conversations")
+                })
+        });
+        if is_conv_sync {
+            let conversations = conv_sync_mgr.parse_result(&el);
+            let _ = event_tx
+                .send(XmppEvent::ConversationsReceived(conversations))
+                .await;
             return;
         }
     }
@@ -1649,6 +1854,106 @@ async fn omemo_try_decrypt(
             Ok(Some(body))
         }
     }
+}
+
+
+// ---------------------------------------------------------------------------
+// MEMO: Pre-key rotation helper
+// ---------------------------------------------------------------------------
+
+/// Minimum number of unconsumed one-time pre-keys to maintain.
+const OMEMO_PREKEY_LOW_WATERMARK: u32 = 20;
+/// Number of pre-keys to generate when replenishing.
+const OMEMO_PREKEY_BATCH_SIZE: usize = 50;
+
+/// Check the current one-time pre-key stock. If below `OMEMO_PREKEY_LOW_WATERMARK`,
+/// generate a fresh batch and push a new bundle publish IQ into `outbox`.
+async fn omemo_check_prekey_rotation(
+    mgr: &mut OmemoManager,
+    account_jid: &str,
+    outbox: &mut VecDeque<Element>,
+) {
+    let count = match mgr.store.count_unconsumed_prekeys(account_jid).await {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::warn!("omemo: count_unconsumed_prekeys failed: {e}");
+            return;
+        }
+    };
+    if count >= OMEMO_PREKEY_LOW_WATERMARK {
+        return;
+    }
+
+    tracing::info!("omemo: pre-key stock low ({count}), replenishing");
+
+    let identity = match mgr.store.load_own_identity(account_jid).await {
+        Ok(Some(id)) => id,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::warn!("omemo: load_own_identity failed in prekey rotation: {e}");
+            return;
+        }
+    };
+
+    let mut account = match OmemoSessionManager::unpickle_account(&identity.identity_key) {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!("omemo: unpickle_account failed in prekey rotation: {e}");
+            return;
+        }
+    };
+
+    account.generate_one_time_keys(OMEMO_PREKEY_BATCH_SIZE);
+
+    // Derive new prekey IDs using a large offset to avoid collisions.
+    let new_otks: Vec<(u32, Vec<u8>)> = {
+        let offset = (identity.device_id as u64 * 1_000_000) as u32;
+        account
+            .one_time_keys()
+            .iter()
+            .enumerate()
+            .map(|(i, (_kid, pk))| (offset.wrapping_add(i as u32 + 1), pk.to_bytes().to_vec()))
+            .collect()
+    };
+
+    account.mark_keys_as_published();
+
+    // Persist updated account (keys marked published).
+    let pickled = match OmemoSessionManager::pickle_account(&account) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("omemo: pickle_account failed in prekey rotation: {e}");
+            return;
+        }
+    };
+    use crate::xmpp::modules::omemo::store::OwnIdentity;
+    let updated_identity = OwnIdentity {
+        account_jid: account_jid.to_owned(),
+        device_id: identity.device_id,
+        identity_key: pickled,
+        signed_prekey: identity.signed_prekey.clone(),
+        spk_id: identity.spk_id,
+    };
+    if let Err(e) = mgr.store.save_own_identity(&updated_identity).await {
+        tracing::warn!("omemo: save_own_identity failed in prekey rotation: {e}");
+        return;
+    }
+    if let Err(e) = mgr.store.insert_prekeys(account_jid, &new_otks).await {
+        tracing::warn!("omemo: insert_prekeys failed in prekey rotation: {e}");
+        return;
+    }
+
+    // Publish the updated bundle.
+    use super::modules::omemo::bundle::{build_bundle_publish, OmemoBundle};
+    let bundle = OmemoBundle {
+        identity_key: account.identity_keys().curve25519.to_bytes().to_vec(),
+        signed_pre_key: identity.signed_prekey.clone(),
+        signed_pre_key_id: identity.spk_id,
+        signed_pre_key_signature: account.sign(&identity.signed_prekey).to_bytes().to_vec(),
+        pre_keys: new_otks,
+    };
+    outbox.push_back(build_bundle_publish(identity.device_id, &bundle));
+    tracing::info!("omemo: published replenished bundle ({OMEMO_PREKEY_BATCH_SIZE} new keys)");
 }
 
 // ---------------------------------------------------------------------------
@@ -2124,11 +2429,34 @@ async fn run_registration_session(
         }
     };
 
-    let server = if config.server.trim().is_empty() {
-        ServerConfig::UseSrv
-    } else {
+    // DC-19: honour manual_srv override in the registration path too.
+    //   1. Explicit host in `server` field → use it directly.
+    //   2. `manual_srv` set → resolve that SRV record via dns::resolve_with_override.
+    //   3. Neither → let tokio-xmpp do standard RFC 6120 SRV discovery.
+    let server = if !config.server.trim().is_empty() {
         let (host, port) = parse_host_port(&config.server, 5222);
         ServerConfig::Manual { host, port }
+    } else if let Some(ref srv_name) = config.manual_srv {
+        match dns::resolve_with_override(
+            jid.domain().as_str(),
+            Some(srv_name.as_str()),
+        )
+        .await
+        {
+            Ok(ep) => ServerConfig::Manual {
+                host: ep.host,
+                port: ep.port,
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "engine: registration SRV override failed ({}), falling back to UseSrv",
+                    e
+                );
+                ServerConfig::UseSrv
+            }
+        }
+    } else {
+        ServerConfig::UseSrv
     };
 
     // Connect manually via ServerConfig. This bypasses AsyncClient's auto-auth.
@@ -2408,6 +2736,10 @@ mod tests {
             send_receipts: true,
             send_typing: true,
             send_read_markers: true,
+            proxy_type: None,
+            proxy_host: None,
+            proxy_port: None,
+            manual_srv: None,
         };
         assert_eq!(cfg.jid, "user@example.com");
         assert_eq!(cfg.server, "xmpp.example.com:5222");
