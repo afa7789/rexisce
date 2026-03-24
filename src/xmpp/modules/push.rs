@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // Task K7 — XEP-0357 Push Notifications
 // XEP reference: https://xmpp.org/extensions/xep-0357.html
 //

@@ -41,6 +41,8 @@ pub struct ConnectConfig {
     /// DC-19 / M5: manual SRV override (e.g. "_xmpp-client._tcp.corp.example.com").
     /// When set this SRV name is resolved instead of the standard RFC 6120 names.
     pub manual_srv: Option<String>,
+    /// K7: XEP-0357 push service JID.  None = push disabled.
+    pub push_service_jid: Option<String>,
 }
 
 impl ConnectConfig {

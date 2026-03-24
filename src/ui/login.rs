@@ -87,6 +87,7 @@ impl LoginScreen {
             proxy_host: settings.proxy_host,
             proxy_port: settings.proxy_port,
             manual_srv: settings.manual_srv,
+            push_service_jid: settings.push_service_jid,
         }
     }
 
@@ -152,8 +153,8 @@ impl LoginScreen {
             button("Register")
         };
 
-        let remember_me_row = checkbox("Remember me", self.remember_me)
-            .on_toggle(Message::RememberMeToggled);
+        let remember_me_row =
+            checkbox("Remember me", self.remember_me).on_toggle(Message::RememberMeToggled);
 
         let form = column![
             text("XMPP Messenger").size(28),
@@ -168,8 +169,11 @@ impl LoginScreen {
                 .on_input(Message::ServerChanged)
                 .padding(10),
             remember_me_row,
-            iced::widget::row![connect_btn.padding([10, 24]), register_btn.padding([10, 24])]
-                .spacing(10),
+            iced::widget::row![
+                connect_btn.padding([10, 24]),
+                register_btn.padding([10, 24])
+            ]
+            .spacing(10),
             status,
             button("Benchmark →")
                 .on_press(Message::GoToBenchmark)

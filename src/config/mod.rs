@@ -96,6 +96,9 @@ pub struct Settings {
     /// M5: always require TLS (default true).
     #[serde(default = "default_true")]
     pub force_tls: bool,
+    /// K7: XEP-0357 push service JID.  None = push disabled.
+    #[serde(default)]
+    pub push_service_jid: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
@@ -155,6 +158,7 @@ impl Default for Settings {
             proxy_port: None,
             manual_srv: None,
             force_tls: true,
+            push_service_jid: None,
         }
     }
 }
@@ -318,6 +322,7 @@ mod tests {
             proxy_port: Some(1080),
             manual_srv: Some("_xmpp-client._tcp.example.com".into()),
             force_tls: false,
+            push_service_jid: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         let s2: Settings = serde_json::from_str(&json).unwrap();
@@ -366,7 +371,10 @@ mod tests {
         assert_eq!(s2.proxy_type, Some("http".into()));
         assert_eq!(s2.proxy_host, Some("192.168.1.1".into()));
         assert_eq!(s2.proxy_port, Some(8080));
-        assert_eq!(s2.manual_srv, Some("_xmpp-client._tcp.corp.example.com".into()));
+        assert_eq!(
+            s2.manual_srv,
+            Some("_xmpp-client._tcp.corp.example.com".into())
+        );
         assert!(s2.force_tls);
     }
 

@@ -11,8 +11,8 @@ use tokio::sync::mpsc;
 
 use crate::config::AccountConfig;
 
-use super::{engine::run_engine, AccountId, XmppCommand, XmppEvent};
 use super::connection::ConnectConfig;
+use super::{engine::run_engine, AccountId, XmppCommand, XmppEvent};
 
 // ---------------------------------------------------------------------------
 // Per-engine handle
@@ -76,7 +76,11 @@ impl MultiEngineManager {
         // forward to the shared event_tx.
         tokio::spawn(async move {
             while let Some(event) = engine_event_rx.recv().await {
-                if event_tx.send((account_id_clone.clone(), event)).await.is_err() {
+                if event_tx
+                    .send((account_id_clone.clone(), event))
+                    .await
+                    .is_err()
+                {
                     // UI dropped the receiver — stop relaying.
                     break;
                 }
@@ -103,6 +107,7 @@ impl MultiEngineManager {
             proxy_host: config.proxy.as_ref().map(|p| p.host.clone()),
             proxy_port: config.proxy.as_ref().map(|p| p.port),
             manual_srv: None,
+            push_service_jid: None,
         };
         // Best-effort: if the channel is full the connect is deferred.
         let _ = cmd_tx.try_send(XmppCommand::Connect(connect_config));
