@@ -1379,7 +1379,7 @@ fn make_retraction_message(to: Jid, origin_id: &str) -> Element {
 }
 
 /// L3: Build a XEP-0425 message moderation stanza for a MUC room.
-fn make_moderation_message(room_jid: &str, target_id: &str, reason: Option<&str>) -> Element {
+pub fn make_moderation_message(room_jid: &str, target_id: &str, reason: Option<&str>) -> Element {
     let mut moderated = Element::builder("moderated", NS_MODERATION)
         .append(Element::builder("retract", "urn:xmpp:message-retract:1").build());
     if let Some(r) = reason {

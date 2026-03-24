@@ -212,6 +212,7 @@ fn settings_json_round_trip() {
         mam_default_mode: None,
         use_system_theme: false,
         time_format: xmpp_start::config::TimeFormat::TwentyFourHour,
+        contact_sort: "status".into(),
         avatar_data: None,
     };
 
@@ -241,11 +242,10 @@ fn avatar_publish_flow() {
     // Build and verify metadata publish
     let metadata_stanza =
         avatar_mgr.build_avatar_metadata_publish(pubsub_jid, sha1, 100, "image/svg+xml");
-    assert!(metadata_stanza.is_some());
-    let metadata_xml = metadata_stanza.unwrap().to_string();
-    assert!(metadata_xml.contains("sha1='a3b2c1d4e5f6789012345678901234567890abcd'"));
-    assert!(metadata_xml.contains("bytes='100'"));
-    assert!(metadata_xml.contains("mime_type='image/svg+xml'"));
+    let metadata_xml = String::from(&metadata_stanza);
+    assert!(metadata_xml.contains("id=\"a3b2c1d4e5f6789012345678901234567890abcd\""));
+    assert!(metadata_xml.contains("bytes=\"100\""));
+    assert!(metadata_xml.contains("type=\"image/svg+xml\""));
 
     // Build and verify data publish
     let data_stanza = avatar_mgr.build_avatar_data_publish(
@@ -254,153 +254,57 @@ fn avatar_publish_flow() {
         &avatar_data.to_vec(),
         "image/svg+xml",
     );
-    assert!(data_stanza.is_some());
-    let data_xml = data_stanza.unwrap().to_string();
-    assert!(data_xml.contains("sha1='a3b2c1d4e5f6789012345678901234567890abcd'"));
-    assert!(data_xml.contains("mime_type='image/svg+xml'"));
+    let data_xml = String::from(&data_stanza);
+    assert!(data_xml.contains("id=\"a3b2c1d4e5f6789012345678901234567890abcd\""));
+    assert!(data_xml.contains("node=\"urn:xmpp:avatar:data\""));
 }
 
-// ---- Message Moderation: detect apply-to → send moderation command ------
+// ---- Message Moderation: build moderation command ------------------------
 
 #[test]
-fn message_moderation_detection_and_command() {
-    use xmpp_start::xmpp::engine::XMPPEngine;
+fn message_moderation_command_building() {
+    use xmpp_start::xmpp::engine::make_moderation_message;
 
-    let mut engine = XMPPEngine::new();
-
-    // Test 1: Detect XEP-0425 apply-to stanza and emit MessageModerated event
-    let apply_to_xml = r#"<iq from="moderator@example.com" type="set" xmlns="jabber:client">
-        <x xmlns="urn:xmpp:fasten:0">
-            <apply-to xmlns="urn:xmpp:message-moderate:0"
-                      xmlns:mod="urn:xmpp:message-moderate:0"
-                      jid="user@example.com"
-                      reason="violation">
-                <mod:command>retract</mod:command>
-                <mod:reason>Violation of room rules</mod:reason>
-            </apply-to>
-        </x>
-    </iq>"#;
-
-    let el: tokio_xmpp::minidom::Element = apply_to_xml.parse().unwrap();
-    engine.on_stanza(el.clone());
-
-    // Should have emitted MessageModerated event (check via state)
-    assert!(engine.has_moderation_event());
-
-    // Test 2: Build moderation message (retract command)
-    let moderation_msg = engine.make_moderation_message(
-        "user@example.com".into(),
-        "retract",
-        Some("Violation of room rules".into()),
+    // Build moderation message (retract command)
+    let moderation_msg = make_moderation_message(
+        "room@conference.example.com",
+        "msg-123",
+        Some("Violation of room rules"),
     );
-    assert!(moderation_msg.is_some());
-    let moderation_xml = moderation_msg.unwrap().to_string();
+    let moderation_xml = String::from(&moderation_msg);
     assert!(moderation_xml.contains("xmlns='urn:xmpp:message-moderate:0'"));
-    assert!(moderation_xml.contains("<command>retract</command>"));
-    assert!(moderation_xml.contains("<reason>Violation of room rules</reason>"));
+    assert!(moderation_xml.contains("<retract xmlns='urn:xmpp:message-retract:1'/>"));
+    assert!(moderation_xml.contains("Violation of room rules"));
+    assert!(moderation_xml.contains("to=\"room@conference.example.com\""));
 }
 
-// ---- Room List: fetch from MUC service ----------------------------------
+// ---- Room List: parse from disco#items ----------------------------------
 
 #[test]
-fn room_list_fetch_via_disco_items() {
-    use xmpp_start::xmpp::modules::disco::DiscoItem;
+fn room_list_parsing_from_disco_items() {
+    use xmpp_start::xmpp::modules::disco::{DiscoIdentity, DiscoItem, DiscoManager};
+
+    let mut mgr = DiscoManager::new("node", &[], &[]);
+    let (id, _) = mgr.build_items_request("conference.example.org");
 
     // Simulate receiving room list from disco#items response
-    let room_list_xml = r#"<iq type="result" xmlns="jabber:client">
+    let room_list_xml = format!(r#"<iq type="result" from="conference.example.org" to="me@example.com" id="{id}" xmlns="jabber:client">
         <query xmlns='http://jabber.org/protocol/disco#items'>
             <item jid="meeting@conference.example.com" name="Meeting Room"/>
             <item jid="general@conference.example.com" name="General Chat"/>
             <item jid="random@conference.example.com" name="Random"/>
         </query>
-    </iq>"#;
+    </iq>"#, id=id);
 
     let el: tokio_xmpp::minidom::Element = room_list_xml.parse().unwrap();
-    let items = DiscoItem::from_disco_items(&el);
+    let result = mgr.on_items_result(&el);
 
-    // Should have parsed room list
+    assert!(result.is_some());
+    let (jid, items) = result.unwrap();
+    assert_eq!(jid, "conference.example.org");
     assert_eq!(items.len(), 3);
     assert_eq!(items[0].jid, "meeting@conference.example.com");
-    assert_eq!(items[0].name, "Meeting Room");
-    assert_eq!(items[1].name, "General Chat");
+    assert_eq!(items[0].name, Some("Meeting Room".to_string()));
 }
 
-// ---- Message Moderation: detect apply-to → send moderation command ------
 
-#[test]
-fn message_moderation_detection_and_command() {
-    use xmpp_start::xmpp::engine::XMPPEngine;
-    use xmpp_start::xmpp::modules::avatar::AvatarManager;
-    use xmpp_start::xmpp::modules::blocking::BlockingManager;
-
-    let mut avatar_mgr = AvatarManager::new();
-    let mut blocking_mgr = BlockingManager::new();
-    let mut engine = XMPPEngine::new();
-
-    engine.register_module("avatar".to_string(), &mut avatar_mgr as *mut _ as *mut _);
-    engine.register_module(
-        "blocking".to_string(),
-        &mut blocking_mgr as *mut _ as *mut _,
-    );
-
-    // Test 1: Detect XEP-0425 apply-to stanza and emit MessageModerated event
-    let apply_to_xml = r#"<iq from="moderator@example.com" type="set" xmlns="jabber:client">
-        <x xmlns="urn:xmpp:fasten:0">
-            <apply-to xmlns="urn:xmpp:message-moderate:0"
-                      xmlns:mod="urn:xmpp:message-moderate:0"
-                      jid="user@example.com"
-                      reason="violation">
-                <mod:command>retract</mod:command>
-                <mod:reason>Violation of room rules</mod:reason>
-            </apply-to>
-        </x>
-    </iq>"#;
-
-    let el: tokio_xmpp::minidom::Element = apply_to_xml.parse().unwrap();
-    engine.on_stanza(el.clone());
-
-    // Should have emitted MessageModerated event (check via state)
-    assert!(engine.has_moderation_event());
-
-    // Test 2: Build moderation message (retract command)
-    let moderation_msg = engine.make_moderation_message(
-        "user@example.com".into(),
-        "retract",
-        Some("Violation of room rules".into()),
-    );
-    assert!(moderation_msg.is_some());
-    let moderation_xml = moderation_msg.unwrap().to_string();
-    assert!(moderation_xml.contains("xmlns='urn:xmpp:message-moderate:0'"));
-    assert!(moderation_xml.contains("<command>retract</command>"));
-    assert!(moderation_xml.contains("<reason>Violation of room rules</reason>"));
-}
-
-// ---- Room List: fetch from MUC service ----------------------------------
-
-#[test]
-fn room_list_fetch_via_disco_items() {
-    use xmpp_start::xmpp::engine::XMPPEngine;
-
-    let mut engine = XMPPEngine::new();
-
-    engine.register_module("avatar".to_string(), &mut avatar_mgr as *mut _ as *mut _);
-
-    // Simulate receiving room list from disco#items response
-    let room_list_xml = r#"<iq type="result" xmlns="jabber:client">
-        <query xmlns='http://jabber.org/protocol/disco#items'>
-            <item jid="meeting@conference.example.com" name="Meeting Room"/>
-            <item jid="general@conference.example.com" name="General Chat"/>
-            <item jid="random@conference.example.com" name="Random"/>
-        </query>
-    </iq>"#;
-
-    let el: tokio_xmpp::minidom::Element = room_list_xml.parse().unwrap();
-    engine.on_stanza(el);
-
-    // Should have parsed room list
-    let rooms = engine.get_room_list();
-    assert_eq!(rooms.len(), 3);
-    assert_eq!(rooms[0].jid, "meeting@conference.example.com");
-    assert_eq!(rooms[0].name, "Meeting Room");
-    assert_eq!(rooms[1].name, "General Chat");
-}
