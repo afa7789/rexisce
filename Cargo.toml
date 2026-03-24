@@ -76,6 +76,9 @@ hound = "3"
 
 # OMEMO E2E encryption (XEP-0384) — Signal/Olm protocol, pure Rust
 vodozemac = "0.8"
+# AES-256-GCM for OMEMO payload encryption
+aes-gcm = "0.10"
+rand = "0.8"
 
 # Utilities
 uuid = { version = "1", features = ["v4"] }
