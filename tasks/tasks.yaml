@@ -41,40 +41,8 @@ pending:
     # BUG-6: fixed 2026-03-23 (voice message composer)
 
   high:
-    - id: UNICODE
-      title: "Unicode & Emoji Rendering Support"
-      priority: high
-      notes: >
-        Emojis and complex Unicode not rendering. Fix: (1) Shaping::Advanced on all Text widgets,
-        (2) load emoji font (Noto Color Emoji) in Iced Settings, (3) test ZWJ sequences + skin tones.
-        See tasks/todo.md for full checklist.
-
-    - id: F5
-      title: "Avatar fetching (XEP-0084 + vCard fallback)"
-      priority: high
-      files: ["src/ui/", "src/xmpp/modules/avatar.rs"]
-
-    - id: R1
-      title: "Reaction tooltips + quick emoji bar + toggle re-click"
-      priority: high
-      files: ["src/ui/conversation.rs"]
 
   medium:
-    - id: H2
-      title: "Own avatar upload (XEP-0084 PEP)"
-      priority: medium
-      files: ["src/ui/", "src/xmpp/modules/avatar.rs"]
-
-    - id: K2-new
-      title: "vCard editing (XEP-0054 + XEP-0292)"
-      priority: medium
-      notes: "Nickname, org, email, avatar editing"
-
-    - id: K3-new
-      title: "Per-contact notification muting"
-      priority: medium
-      notes: "Right-click → Mute"
-
     - id: M5
       title: "Network settings — proxy SOCKS5/HTTP, manual SRV"
       priority: medium
@@ -86,10 +54,6 @@ pending:
 
     - id: L3-new
       title: "Location sharing (XEP-0080)"
-      priority: low
-
-    - id: L4
-      title: "Ad-hoc commands UI (XEP-0050)"
       priority: low
 
     - id: L5
@@ -182,3 +146,12 @@ completed:
   - { id: BUG-6, title: "Voice message composer disappears + no progress", completed: "2026-03-23" }
   - { id: R2, title: "Enhanced link previews + OGP image dimensions", completed: "2026-03-23" }
   - { id: R3, title: "Composer markdown shortcuts Ctrl+B/I", completed: "2026-03-23" }
+  - { id: R1, title: "Reaction tooltips + quick emoji bar + toggle re-click", completed: "2026-03-23" }
+  - { id: K2, title: "vCard editing (XEP-0054)", completed: "2026-03-23" }
+  - { id: K3, title: "Per-contact notification muting", completed: "2026-03-23" }
+  - { id: L4, title: "Ad-hoc commands UI (XEP-0050)", completed: "2026-03-23" }
+  - { id: K6, title: "Chat preferences panel", completed: "2026-03-23" }
+  - { id: M1, title: "System theme sync + 12h/24h time format", completed: "2026-03-23" }
+  - { id: H2, title: "Own avatar upload (XEP-0084 PEP)", completed: "2026-03-23" }
+  - { id: UNICODE, title: "Unicode & Emoji Rendering Support", completed: "2026-03-23" }
+  - { id: F5, title: "Avatar fetching (XEP-0084 + vCard fallback)", completed: "2026-03-23" }

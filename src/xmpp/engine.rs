@@ -796,14 +796,19 @@ async fn dispatch_stanza(
                 return;
             }
             // J6: XEP-0084 PEP avatar metadata notification
-            // <message><event xmlns="...pubsub#event"><items node="urn:xmpp:avatar:metadata:2">
+            // <message><event xmlns="...pubsub#event"><items node="urn:xmpp:avatar:metadata">
+            // Note: some servers use the draft namespace "urn:xmpp:avatar:metadata:2", both handled.
             {
                 let is_avatar_meta = el.children().any(|c| {
                     c.name() == "event"
                         && c.ns() == "http://jabber.org/protocol/pubsub#event"
                         && c.children().any(|items| {
                             items.name() == "items"
-                                && items.attr("node") == Some("urn:xmpp:avatar:metadata:2")
+                                && matches!(
+                                    items.attr("node"),
+                                    Some("urn:xmpp:avatar:metadata")
+                                        | Some("urn:xmpp:avatar:metadata:2")
+                                )
                         })
                 });
                 if is_avatar_meta {

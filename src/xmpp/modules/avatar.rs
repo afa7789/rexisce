@@ -102,19 +102,24 @@ impl AvatarManager {
             .children()
             .find(|c| c.name() == "event" && c.ns() == NS_PUBSUB_EVENT)?;
 
-        // Find <items node="urn:xmpp:avatar:metadata">
-        let items = event
-            .children()
-            .find(|c| c.name() == "items" && c.attr("node") == Some(NS_AVATAR_META))?;
+        // Find <items node="urn:xmpp:avatar:metadata"> (or draft ":2" suffix).
+        let items = event.children().find(|c| {
+            c.name() == "items"
+                && matches!(
+                    c.attr("node"),
+                    Some("urn:xmpp:avatar:metadata") | Some("urn:xmpp:avatar:metadata:2")
+                )
+        })?;
 
         // First <item id="{sha1}">
         let item = items.children().find(|c| c.name() == "item")?;
         let sha1 = item.attr("id")?.to_string();
 
-        // <metadata xmlns="urn:xmpp:avatar:metadata"><info ... type="..."/>
-        let metadata = item
-            .children()
-            .find(|c| c.name() == "metadata" && c.ns() == NS_AVATAR_META)?;
+        // <metadata xmlns="urn:xmpp:avatar:metadata"> (or draft ":2" suffix)
+        let metadata = item.children().find(|c| {
+            c.name() == "metadata"
+                && (c.ns() == NS_AVATAR_META || c.ns() == "urn:xmpp:avatar:metadata:2")
+        })?;
 
         let info_el = metadata.children().find(|c| c.name() == "info")?;
         let mime_type = info_el.attr("type").unwrap_or("image/png").to_string();

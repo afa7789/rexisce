@@ -1016,6 +1016,16 @@ impl App {
                         if let Screen::Chat(ref mut chat) = self.screen {
                             chat.on_presence(jid, available);
                         }
+                        // F5: fetch avatar for newly-available contacts not yet cached
+                        if available && !self.avatar_cache.contains_key(jid.as_str()) {
+                            if let Some(ref tx) = self.xmpp_tx {
+                                let tx = tx.clone();
+                                let jid_owned = jid.clone();
+                                tokio::spawn(async move {
+                                    let _ = tx.send(XmppCommand::FetchAvatar(jid_owned)).await;
+                                });
+                            }
+                        }
                     }
                     XmppEvent::PeerTyping { ref jid, composing } => {
                         if let Screen::Chat(ref mut chat) = self.screen {
