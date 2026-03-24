@@ -97,6 +97,14 @@ pub enum Message {
     VoiceTick,
     // K2: public room list received from MUC service
     RoomListReceived(Vec<crate::xmpp::modules::disco::DiscoItem>),
+    // R3: markdown keyboard shortcuts — Ctrl+B (bold) / Ctrl+I (italic).
+    // To activate in mod.rs, add to the kb_sub handler:
+    //   if modifiers.control() {
+    //       if key == Key::Character("b".into()) { return Some(Message::Chat(chat::Message::ComposerBold)); }
+    //       if key == Key::Character("i".into()) { return Some(Message::Chat(chat::Message::ComposerItalic)); }
+    //   }
+    ComposerBold,
+    ComposerItalic,
 }
 
 impl ChatScreen {
@@ -891,6 +899,32 @@ impl ChatScreen {
                 }
                 Task::none()
             }
+
+            // R3: Ctrl+B — wrap composer text in bold markers (**text**)
+            Message::ComposerBold => {
+                if let Some(jid) = self.active_jid.clone() {
+                    if let Some(convo) = self.conversations.get_mut(&jid) {
+                        let new_text = apply_markdown_wrap(&convo.composer, "**");
+                        return convo
+                            .update(super::conversation::Message::ComposerChanged(new_text))
+                            .map(move |m| Message::Conversation(jid.clone(), m));
+                    }
+                }
+                Task::none()
+            }
+
+            // R3: Ctrl+I — wrap composer text in italic markers (*text*)
+            Message::ComposerItalic => {
+                if let Some(jid) = self.active_jid.clone() {
+                    if let Some(convo) = self.conversations.get_mut(&jid) {
+                        let new_text = apply_markdown_wrap(&convo.composer, "*");
+                        return convo
+                            .update(super::conversation::Message::ComposerChanged(new_text))
+                            .map(move |m| Message::Conversation(jid.clone(), m));
+                    }
+                }
+                Task::none()
+            }
         }
     }
 
@@ -1144,6 +1178,23 @@ impl ChatScreen {
     }
 }
 
+// R3: Wrap `text` in markdown `marker` characters.
+//
+// Behaviour:
+//   - Non-empty text: wrap entire string → `{marker}{text}{marker}`
+//   - Empty / whitespace-only: insert placeholder → `{marker}{marker}`
+//
+// Examples (marker = "**"):
+//   "hello" → "**hello**"
+//   ""      → "****"
+fn apply_markdown_wrap(text: &str, marker: &str) -> String {
+    if text.trim().is_empty() {
+        format!("{marker}{marker}")
+    } else {
+        format!("{marker}{text}{marker}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1202,5 +1253,64 @@ mod tests {
         let drained = s.drain_commands();
         assert_eq!(drained.len(), 1);
         assert!(s.pending_commands.is_empty());
+    }
+
+    // R3: markdown wrap helper tests
+
+    #[test]
+    fn apply_markdown_wrap_bold_wraps_text() {
+        assert_eq!(apply_markdown_wrap("hello", "**"), "**hello**");
+    }
+
+    #[test]
+    fn apply_markdown_wrap_italic_wraps_text() {
+        assert_eq!(apply_markdown_wrap("world", "*"), "*world*");
+    }
+
+    #[test]
+    fn apply_markdown_wrap_empty_text_produces_placeholder() {
+        assert_eq!(apply_markdown_wrap("", "**"), "****");
+    }
+
+    #[test]
+    fn apply_markdown_wrap_whitespace_only_treated_as_empty() {
+        assert_eq!(apply_markdown_wrap("   ", "**"), "****");
+    }
+
+    // R3: ComposerBold / ComposerItalic integration
+
+    #[test]
+    fn composer_bold_wraps_active_conversation() {
+        use crate::ui::sidebar;
+        let mut s = ChatScreen::new("me@example.com".into());
+        let _ = s.update(Message::Sidebar(sidebar::Message::SelectContact(
+            "alice@example.com".into(),
+        )));
+        if let Some(convo) = s.conversations.get_mut("alice@example.com") {
+            convo.composer = "hello".into();
+        }
+        let _ = s.update(Message::ComposerBold);
+        assert_eq!(s.draft_for("alice@example.com"), "**hello**");
+    }
+
+    #[test]
+    fn composer_italic_wraps_active_conversation() {
+        use crate::ui::sidebar;
+        let mut s = ChatScreen::new("me@example.com".into());
+        let _ = s.update(Message::Sidebar(sidebar::Message::SelectContact(
+            "alice@example.com".into(),
+        )));
+        if let Some(convo) = s.conversations.get_mut("alice@example.com") {
+            convo.composer = "hi".into();
+        }
+        let _ = s.update(Message::ComposerItalic);
+        assert_eq!(s.draft_for("alice@example.com"), "*hi*");
+    }
+
+    #[test]
+    fn composer_bold_no_active_conversation_is_noop() {
+        let mut s = ChatScreen::new("me@example.com".into());
+        // No active conversation set — should not panic
+        let _ = s.update(Message::ComposerBold);
     }
 }
