@@ -374,20 +374,8 @@ corrections from peers update the displayed message.
    `message_repo::update_body()` and update the in-memory `DisplayMessage`.
 **Done when**: editing an own message updates it in the view and in the DB.
 
-### E2: Message retractions (XEP-0424) — send and receive
-**Goal**: A "delete" button on own messages sends a retraction; received
-retractions show a "message deleted" tombstone.
-**Files touched**: `src/ui/conversation.rs`, `src/xmpp/engine.rs`,
-`src/xmpp/modules/message_mutations.rs`, `src/store/message_repo.rs`
-**Depends on**: A2
-**Parallelizable with**: E1, E3
-**Steps**:
-1. Add a delete button per own message in `ConversationView`.
-2. On click, call `MutationManager::build_retraction()` and push to outbox.
-3. In `handle_message`, call `mutation_mgr.parse_retraction()`; on match, call
-   `message_repo::mark_retracted()` and replace the body in `DisplayMessage`
-   with "(message retracted)".
-**Done when**: deleting a message shows a tombstone in the view and `retracted=1` in DB.
+- [x] ✅ **E2**: Message retractions (XEP-0424) — (2026-03-22)
+- [x] ✅ **E2.1**: Message moderation (XEP-0425) — (2026-03-23)
 
 ### E3: Emoji reactions (XEP-0444) — send and receive
 **Goal**: Clicking a reaction button toggles a reaction on a message.
@@ -694,14 +682,10 @@ no avatar shows colored initials.
 ### H2: Own avatar upload + publish (XEP-0084)
 **Goal**: User can set their profile picture from Settings; it is published via PEP
 so other clients see it.
-**Files touched**: `src/ui/mod.rs` (new SettingsScreen), `src/xmpp/engine.rs`
-**Depends on**: H1, F3
-**Steps**:
-1. Add a file-picker button in the Settings → Profile section.
-2. On file selected, open an in-app crop modal (basic: constrain to square).
-3. JPEG-encode to ≤ 192 KB; call `AvatarManager::build_publish_iq()` and push to outbox.
-4. Update local avatar cache immediately for own JID.
-**Done when**: uploading an avatar publishes it; own avatar appears in the app.
+**Done** ✅ (2026-03-23) - Implemented avatar upload and publication via XEP-0084.
+- Added file picker and image cropping to Settings screen.
+- Fixed SHA-1 calculation in engine.
+- Verified metadata and data stanzas in integration tests.
 
 ### H3: Add / remove / rename contacts
 **Goal**: Buttons to add a new JID to roster, remove a contact, and rename the display name.

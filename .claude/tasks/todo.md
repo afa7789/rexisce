@@ -59,7 +59,7 @@
 
 ## Phase H — Avatars & Contact Management
 - [x] ✅ **H1**: Show user avatars (XEP-0084 + XEP-0153) — (2026-03-22) avatar_cache in ChatScreen, on_avatar_received, FetchAvatar on RosterReceived, PNG handle in conversation view with initials fallback
-- [ ] **H2**: Own avatar upload (XEP-0084)
+- [x] ✅ **H2**: Own avatar upload (XEP-0084) — (2026-03-23)
 - [x] ✅ **H3**: Add/remove/rename contacts — (2026-03-22)
 - [x] ✅ **H4**: Contact profile popover (vCard) — (2026-03-22)
 - [x] ✅ **H5**: Consistent avatar colors (XEP-0392) — already implemented (2026-03-22)
@@ -158,7 +158,7 @@
 
 ## Phase P — Admin & Moderation (gap analysis)
 - [ ] **P1**: Ad-Hoc Commands UI (XEP-0050 + XEP-0004 dynamic forms)
-- [ ] **P2**: Moderator retract button in MUC + reason in tombstone
+- [x] ✅ **P2**: Moderator retract button in MUC + reason in tombstone — (2026-03-23)
 
 ## Phase Q — Other XEPs (gap analysis)
 - [ ] **Q1**: Sticker packs
