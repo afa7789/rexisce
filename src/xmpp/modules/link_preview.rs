@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Parsed Open Graph / HTML meta-tag preview for a URL.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LinkPreview {

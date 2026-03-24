@@ -21,7 +21,7 @@ use crate::ui::muc_panel::OccupantEntry;
 
 use chrono::{TimeZone, Utc};
 
-use crate::ui::link_preview::render_preview_card;
+use crate::ui::link_preview::{domain_label, render_preview_card};
 use crate::xmpp::modules::link_preview::LinkPreview;
 
 // G4: /me action message prefix (XEP-0245)
@@ -1267,6 +1267,7 @@ impl ConversationView {
 
             // E5: render link preview card below message
             if let Some(preview) = self.previews.get(&m.id) {
+                rows.push(domain_label(&preview.url));
                 let preview_card = render_preview_card(preview.clone(), m.own, None);
                 rows.push(preview_card);
             }
