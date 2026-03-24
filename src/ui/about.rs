@@ -36,7 +36,7 @@ impl AboutScreen {
         ]
         .spacing(8);
 
-        let xep_count = 26;
+        let xep_count = 27;
         let xeps_text = format!("{} XEPs implemented", xep_count);
         let xeps_row = row![
             text("XEPs:").size(14).width(Length::Fixed(100.0)),
