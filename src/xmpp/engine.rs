@@ -82,17 +82,6 @@ const NS_MODERATION: &str = "urn:xmpp:message-moderate:0";
 // J9: XEP-0077 registration namespace
 
 // ---------------------------------------------------------------------------
-// Connection state machine  (P1.9)
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-enum EngineState {
-    Idle,
-    Registering,
-    Running,
-}
-
-// ---------------------------------------------------------------------------
 // Public engine entry-point
 // ---------------------------------------------------------------------------
 
@@ -108,8 +97,6 @@ pub async fn run_engine(
     mut cmd_rx: mpsc::Receiver<XmppCommand>,
     db: Option<SqlitePool>,
 ) {
-    let mut _state = EngineState::Idle;
-
     loop {
         // Wait for a command.
         match cmd_rx.recv().await {
@@ -774,10 +761,27 @@ async fn run_session(
                                     outbox.push_back(stanza);
                                     tracing::info!("omemo: encrypted message queued for {to}");
                                 }
+                                Err(OmemoEncryptError::NoSessions { device_ids }) => {
+                                    // We know the device IDs — fetch bundles directly.
+                                    tracing::info!(
+                                        "omemo: fetching bundles for {} device(s) of {to}",
+                                        device_ids.len()
+                                    );
+                                    for device_id in &device_ids {
+                                        let (iq_id, iq) =
+                                            mgr.device_mgr.build_bundle_fetch(&to, *device_id);
+                                        mgr.track_bundle_fetch(iq_id, to.clone(), *device_id);
+                                        outbox.push_back(iq);
+                                    }
+                                    let _ = event_tx.send(XmppEvent::OmemoKeyExchangeNeeded {
+                                        jid: to.clone(),
+                                    }).await;
+                                }
                                 Err(OmemoEncryptError::NoTrustedDevices) => {
                                     tracing::warn!("omemo: no trusted devices for {to}, fetching device list");
-                                    // Trigger device list fetch so we can do key exchange next time.
-                                    let (_, iq) = mgr.device_mgr.build_device_list_fetch(&to);
+                                    // Fetch device list — track it so the result triggers bundle fetches.
+                                    let (iq_id, iq) = mgr.device_mgr.build_device_list_fetch(&to);
+                                    mgr.track_device_list_fetch(iq_id, to.clone());
                                     outbox.push_back(iq);
                                     let _ = event_tx.send(XmppEvent::OmemoKeyExchangeNeeded {
                                         jid: to.clone(),
@@ -911,26 +915,23 @@ async fn handle_client_event(
                 tracing::info!("push: enabling notifications via {svc} on connect");
             }
 
-            // MEMO: Auto-publish OMEMO bundle on reconnect if identity already exists.
+            // MEMO: Auto-publish OMEMO device list + bundle on reconnect if identity exists.
             if let Some(ref mut mgr) = omemo_mgr {
-                match mgr.store.load_own_identity(account_jid).await {
-                    Ok(Some(identity)) => {
-                        // Device ID is already set — republish device list + bundle.
-                        mgr.device_mgr.set_own_device_id(identity.device_id);
-                        let device_list_iq = mgr
-                            .device_mgr
-                            .build_device_list_publish(&[identity.device_id]);
-                        outbox.push_back(device_list_iq);
+                match mgr.republish_stanzas(account_jid).await {
+                    Ok(Some(stanzas)) => {
+                        let device_id = mgr.device_mgr.own_device_id();
+                        for stanza in stanzas {
+                            outbox.push_back(stanza);
+                        }
                         tracing::info!(
-                            "omemo: republished device list on reconnect (device_id={})",
-                            identity.device_id
+                            "omemo: republished device list + bundle on reconnect (device_id={device_id})"
                         );
                     }
                     Ok(None) => {
                         tracing::debug!("omemo: no identity found, OMEMO not yet enabled");
                     }
                     Err(e) => {
-                        tracing::warn!("omemo: failed to load identity on connect: {e}");
+                        tracing::warn!("omemo: failed to republish on connect: {e}");
                     }
                 }
             }
@@ -1531,6 +1532,54 @@ async fn handle_iq(
             }
         }
     }
+    // MEMO: Detect OMEMO device list IQ result (key-exchange path) and trigger
+    // bundle fetches for each device that has no Olm session yet.
+    if el.attr("type") == Some("result") {
+        if let Some(iq_id) = el.attr("id").map(str::to_string) {
+            if let Some(ref mut mgr) = omemo_mgr {
+                if let Some(peer_jid) = mgr.take_device_list_fetch(&iq_id) {
+                    let devices = DeviceManager::parse_device_list(&el);
+                    if !devices.is_empty() {
+                        if let Err(e) = mgr
+                            .store
+                            .sync_device_list(account_jid, &peer_jid, &devices)
+                            .await
+                        {
+                            tracing::warn!(
+                                "omemo: sync_device_list failed for {peer_jid}: {e}"
+                            );
+                        }
+                        for &device_id in &devices {
+                            let has_session = mgr
+                                .store
+                                .load_session(account_jid, &peer_jid, device_id)
+                                .await
+                                .unwrap_or(None)
+                                .is_some();
+                            if !has_session {
+                                let (bundle_iq_id, bundle_iq) =
+                                    mgr.device_mgr.build_bundle_fetch(&peer_jid, device_id);
+                                mgr.track_bundle_fetch(
+                                    bundle_iq_id,
+                                    peer_jid.clone(),
+                                    device_id,
+                                );
+                                outbox.push_back(bundle_iq);
+                                tracing::debug!(
+                                    "omemo: fetching bundle for {peer_jid}/{device_id} (key exchange)"
+                                );
+                            }
+                        }
+                    } else {
+                        tracing::warn!(
+                            "omemo: device list IQ result for {peer_jid} had no devices"
+                        );
+                    }
+                    return;
+                }
+            }
+        }
+    }
     // MEMO: Detect OMEMO bundle fetch result and create an outbound Olm session.
     if el.attr("type") == Some("result") {
         if let Some(iq_id) = el.attr("id").map(str::to_string) {
@@ -1741,8 +1790,13 @@ async fn handle_iq(
 /// Error variants for outbound OMEMO encryption.
 #[derive(Debug)]
 enum OmemoEncryptError {
-    /// No trusted devices found for the recipient — need key exchange first.
+    /// No trusted devices found for the recipient — need device list + key exchange.
     NoTrustedDevices,
+    /// Trusted devices exist but none have an Olm session yet — need bundle fetches.
+    NoSessions {
+        /// Device IDs that need bundle fetches before a session can be established.
+        device_ids: Vec<u32>,
+    },
     /// Any other failure.
     Other(anyhow::Error),
 }
@@ -1797,6 +1851,8 @@ async fn omemo_encrypt_and_send(
 
     // Build the key slots for each trusted device that has an established session.
     let mut key_slots: Vec<MessageKey> = Vec::new();
+    // Track trusted devices that have no session yet — need bundle fetches.
+    let mut missing_sessions: Vec<u32> = Vec::new();
 
     for device in &trusted {
         let stored_session = mgr
@@ -1808,12 +1864,13 @@ async fn omemo_encrypt_and_send(
         let ss = match stored_session {
             Some(s) => s,
             None => {
-                // No session yet for this device — skip; caller will fetch bundle.
+                // No session yet for this device — collect for bundle fetch.
                 tracing::debug!(
-                    "omemo: no session for {}/{}, skipping (need bundle fetch)",
+                    "omemo: no session for {}/{}, queuing bundle fetch",
                     to,
                     device.device_id
                 );
+                missing_sessions.push(device.device_id);
                 continue;
             }
         };
@@ -1844,6 +1901,13 @@ async fn omemo_encrypt_and_send(
     }
 
     if key_slots.is_empty() {
+        // Distinguish: trusted devices with no sessions (fetch bundles) vs
+        // genuinely no trusted devices (fetch device list first).
+        if !missing_sessions.is_empty() {
+            return Err(OmemoEncryptError::NoSessions {
+                device_ids: missing_sessions,
+            });
+        }
         return Err(OmemoEncryptError::NoTrustedDevices);
     }
 
@@ -2399,7 +2463,6 @@ fn make_presence_with_caps(disco_mgr: &DiscoManager, status_message: Option<&str
     raw
 }
 
-#[allow(dead_code)]
 fn make_presence() -> Element {
     Presence::new(PresenceType::None).into()
 }

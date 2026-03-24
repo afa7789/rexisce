@@ -190,6 +190,9 @@ pub struct OmemoManager {
     /// Maps pending bundle-fetch IQ ids to `(peer_jid, device_id)`.
     /// Populated by `track_bundle_fetch`, consumed by `take_bundle_fetch`.
     pending_bundle_fetches: HashMap<String, (String, u32)>,
+    /// Maps pending device-list-fetch IQ ids to `peer_jid`.
+    /// Populated by `track_device_list_fetch`, consumed by `take_device_list_fetch`.
+    pending_device_list_fetches: HashMap<String, String>,
 }
 
 impl OmemoManager {
@@ -199,6 +202,7 @@ impl OmemoManager {
             session_mgr: OmemoSessionManager::new(),
             store,
             pending_bundle_fetches: HashMap::new(),
+            pending_device_list_fetches: HashMap::new(),
         }
     }
 
@@ -211,6 +215,71 @@ impl OmemoManager {
     /// Consume a pending bundle-fetch entry by IQ id, returning `(peer_jid, device_id)`.
     pub fn take_bundle_fetch(&mut self, iq_id: &str) -> Option<(String, u32)> {
         self.pending_bundle_fetches.remove(iq_id)
+    }
+
+    /// Record a pending device-list-fetch IQ so we can correlate the response.
+    pub fn track_device_list_fetch(&mut self, iq_id: String, peer_jid: String) {
+        self.pending_device_list_fetches.insert(iq_id, peer_jid);
+    }
+
+    /// Consume a pending device-list-fetch entry by IQ id, returning `peer_jid`.
+    pub fn take_device_list_fetch(&mut self, iq_id: &str) -> Option<String> {
+        self.pending_device_list_fetches.remove(iq_id)
+    }
+
+    // -----------------------------------------------------------------------
+    // Republish -- auto-publish on reconnect
+    // -----------------------------------------------------------------------
+
+    /// Rebuild and return the two PEP publish IQs needed to re-announce this
+    /// device on reconnect: `[device_list_iq, bundle_iq]`.
+    ///
+    /// Reconstructs the bundle from the persisted `OwnIdentity` (unpickling
+    /// the Olm account for the public curve25519 key and re-signing) plus the
+    /// unconsumed one-time pre-keys from `OmemoStore`.
+    ///
+    /// Returns `Ok(None)` if no identity is stored (OMEMO not yet enabled).
+    pub async fn republish_stanzas(
+        &mut self,
+        account_jid: &str,
+    ) -> anyhow::Result<Option<Vec<Element>>> {
+        let identity = match self.store.load_own_identity(account_jid).await? {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+
+        self.device_mgr.set_own_device_id(identity.device_id);
+
+        // Unpickle the account to obtain the public curve25519 identity key.
+        let account = OmemoSessionManager::unpickle_account(&identity.identity_key)?;
+        let ik_pub = account.identity_keys().curve25519.to_bytes().to_vec();
+        // Reproduce the SPK signature: sign the identity key bytes.
+        let spk_sig = account.sign(&ik_pub).to_bytes().to_vec();
+
+        // Load unconsumed one-time pre-keys.
+        let stored_otks = self
+            .store
+            .load_unconsumed_prekeys(account_jid)
+            .await?;
+        let pre_keys: Vec<(u32, Vec<u8>)> = stored_otks
+            .into_iter()
+            .map(|pk| (pk.prekey_id, pk.key_data))
+            .collect();
+
+        let bundle = OmemoBundle {
+            identity_key: ik_pub,
+            signed_pre_key: identity.signed_prekey.clone(),
+            signed_pre_key_id: identity.spk_id,
+            signed_pre_key_signature: spk_sig,
+            pre_keys,
+        };
+
+        let device_list_iq = self
+            .device_mgr
+            .build_device_list_publish(&[identity.device_id]);
+        let bundle_iq = build_bundle_publish(identity.device_id, &bundle);
+
+        Ok(Some(vec![device_list_iq, bundle_iq]))
     }
 
     // -----------------------------------------------------------------------
