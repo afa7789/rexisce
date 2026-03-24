@@ -112,6 +112,8 @@ pub enum Message {
     //   }
     ComposerBold,
     ComposerItalic,
+    // OMEMO: open trust management UI for a JID (bubbled up to App)
+    OpenOmemoTrust(String),
 }
 
 impl ChatScreen {
