@@ -11,6 +11,8 @@
 ## Recent completions
 
 - ✅ **DC-6**: MUC admin + voice commands wired end-to-end (XmppCommand variants + engine handling) — 2026-03-24
+- ✅ **DC-18**: Proxy lifecycle wired into connection flow — ProxyLifecycle driven from run_session via ConnectConfig::proxy_config(); TCP→WebSocket fallback after 3 failures; proxy_type/host/port from Settings mapped through ConnectConfig — 2026-03-24
+- ✅ **DC-22**: Remaining OMEMO methods wired — bundle auto-fetch on new device (PEP device list event → build_bundle_fetch → track_bundle_fetch), pre-key rotation (count_unconsumed_prekeys → replenish batch), store.load_devices in encrypt path, sync_device_list on PEP events; removed #![allow(dead_code)] from device.rs, store.rs, session.rs, message.rs — 2026-03-24
 
 **What is actually wired and running today:**
 - iced app boots, login screen renders, settings + keychain persist
