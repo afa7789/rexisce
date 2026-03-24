@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::default_true;
+
 /// Optional proxy configuration for routing an account's connection.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProxyConfig {
@@ -31,10 +33,6 @@ pub struct AccountConfig {
     /// Accent colour used in the UI to distinguish accounts (e.g. "#4A90D9").
     #[serde(default)]
     pub color: Option<String>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 impl AccountConfig {
