@@ -772,6 +772,11 @@ impl ChatScreen {
                                     },
                                 );
                             }
+                            // BUG-6: reset the conversation's voice state machine so the
+                            // composer reappears after a voice note is queued for upload.
+                            // Without this call the conversation stays in VoiceState::Uploading
+                            // forever and the text input remains hidden.
+                            let _ = convo.update(super::conversation::Message::Send);
                             return Task::none();
                         }
 
