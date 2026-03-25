@@ -238,6 +238,11 @@ pub enum XmppEvent {
     AccountSwitched(AccountId),
 
     // MEMO: OMEMO E2E encryption events (XEP-0384)
+    /// OMEMO was successfully enabled for this account; carries our new device ID.
+    OmemoEnabled {
+        device_id: u32,
+    },
+
     /// A peer's OMEMO device list was received or updated via PEP.
     OmemoDeviceListReceived {
         jid: String,

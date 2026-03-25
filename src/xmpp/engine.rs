@@ -820,6 +820,10 @@ async fn run_session(
                                         outbox.push_back(stanza);
                                     }
                                     tracing::info!("omemo: enabled with device_id={device_id}");
+                                    // Notify the UI that OMEMO is now active.
+                                    let _ = event_tx
+                                        .send(XmppEvent::OmemoEnabled { device_id })
+                                        .await;
                                     // Emit own device list received so UI knows OMEMO is active.
                                     let _ = event_tx.send(XmppEvent::OmemoDeviceListReceived {
                                         jid: config.jid.clone(),

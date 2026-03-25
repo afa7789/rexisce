@@ -64,6 +64,8 @@ pub struct ChatScreen {
     active_account_id: Option<AccountId>,
     /// MULTI: aggregate unread count shown on the account indicator badge.
     account_unread: usize,
+    /// OMEMO Phase 2: whether OMEMO has been enabled globally (from App state)
+    pub omemo_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +139,7 @@ impl ChatScreen {
             public_rooms: Vec::new(),
             active_account_id: None,
             account_unread: 0,
+            omemo_enabled: false,
         }
     }
 
@@ -917,17 +920,43 @@ impl ChatScreen {
                                         super::conversation::Message::Send,
                                     )
                                 });
-                                self.pending_commands.push(XmppCommand::SendMessage {
-                                    to: jid_for_cmd,
-                                    body: body_clone,
-                                });
+                                // OMEMO Phase 2: encrypt if per-conversation toggle is on
+                                let use_omemo = self
+                                    .conversations
+                                    .get(&jid_for_cmd)
+                                    .is_some_and(|cv| cv.is_encryption_enabled);
+                                if use_omemo {
+                                    self.pending_commands
+                                        .push(XmppCommand::OmemoEncryptMessage {
+                                            to: jid_for_cmd,
+                                            body: body_clone,
+                                        });
+                                } else {
+                                    self.pending_commands.push(XmppCommand::SendMessage {
+                                        to: jid_for_cmd,
+                                        body: body_clone,
+                                    });
+                                }
                                 return preview_task;
                             }
 
-                            self.pending_commands.push(XmppCommand::SendMessage {
-                                to: jid.clone(),
-                                body,
-                            });
+                            // OMEMO Phase 2: encrypt if per-conversation toggle is on
+                            let use_omemo = self
+                                .conversations
+                                .get(&jid)
+                                .is_some_and(|cv| cv.is_encryption_enabled);
+                            if use_omemo {
+                                self.pending_commands
+                                    .push(XmppCommand::OmemoEncryptMessage {
+                                        to: jid.clone(),
+                                        body,
+                                    });
+                            } else {
+                                self.pending_commands.push(XmppCommand::SendMessage {
+                                    to: jid.clone(),
+                                    body,
+                                });
+                            }
                         }
                     }
                     return Task::none();
@@ -1148,7 +1177,13 @@ impl ChatScreen {
                                 .get(jid.as_str())
                                 .map_or("", String::as_str);
                             let conv_view = convo
-                                .view(&self.avatars, time_format, occupants, own_nick)
+                                .view(
+                                    &self.avatars,
+                                    time_format,
+                                    occupants,
+                                    own_nick,
+                                    self.omemo_enabled,
+                                )
                                 .map(move |m| Message::Conversation(jid2.clone(), m));
                             if is_typing {
                                 let indicator = container(

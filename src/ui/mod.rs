@@ -159,6 +159,13 @@ pub struct App {
     multi_event_rx: MultiEventRx,
     // DC-21: true while navigating to Login to add a second account
     is_adding_account: bool,
+    // MEMO: OMEMO activation state (persists across screen transitions)
+    omemo_enabled: bool,
+    omemo_device_id: Option<u32>,
+    // MEMO: trust dialog — Some when the OMEMO trust overlay is open
+    omemo_trust_modal: Option<omemo_trust::OmemoTrustScreen>,
+    // MEMO: cached per-peer device lists received via PEP (jid -> device ids)
+    omemo_peer_devices: HashMap<String, Vec<u32>>,
 }
 
 /// S1: tracks which auto-away stage has been sent to the engine.
@@ -218,6 +225,8 @@ pub enum Message {
     HandleXmppUri(String),
     // A3: seed conversations from DB cache at connect time
     ConversationsPrefill(Vec<String>),
+    // MEMO: OMEMO trust dialog messages
+    OmemoTrust(omemo_trust::Message),
 }
 
 enum Screen {
@@ -286,6 +295,10 @@ impl App {
                 multi_event_tx,
                 multi_event_rx: multi_event_rx_shared,
                 is_adding_account: false,
+                omemo_enabled: false,
+                omemo_device_id: None,
+                omemo_trust_modal: None,
+                omemo_peer_devices: HashMap::new(),
             },
             Task::none(),
         )
@@ -496,6 +509,10 @@ impl App {
                         server_features: String::new(),
                         auth_method: String::new(),
                     });
+                }
+                // MEMO: propagate current OMEMO activation state into the settings screen.
+                if let Some(device_id) = self.omemo_device_id {
+                    settings_screen.set_omemo_active(device_id);
                 }
                 self.screen = Screen::Settings(Box::new(settings_screen), Box::new(prev));
                 Task::none()
@@ -862,6 +879,16 @@ impl App {
                 if matches!(smsg, settings::Message::OpenVCardEditor) {
                     return self.update(Message::GoToVCardEditor);
                 }
+                // MEMO: intercept EnableOmemo and send the command to the engine.
+                if matches!(smsg, settings::Message::EnableOmemo) {
+                    if let Some(ref tx) = self.xmpp_tx {
+                        let tx = tx.clone();
+                        tokio::spawn(async move {
+                            let _ = tx.send(XmppCommand::OmemoEnable).await;
+                        });
+                    }
+                    return Task::none();
+                }
                 let go_back = matches!(smsg, settings::Message::Back);
                 // M6: detect clear-history confirmation before delegating
                 let is_clear_history = matches!(smsg, settings::Message::ClearHistoryConfirm);
@@ -1027,8 +1054,24 @@ impl App {
                 }
                 // OMEMO: open trust dialog when user clicks a lock badge
                 if let chat::Message::OpenOmemoTrust(ref peer_jid) = msg {
-                    let _peer = peer_jid.clone();
-                    tracing::info!("OMEMO: opening trust dialog for {_peer}");
+                    let jid = peer_jid.clone();
+                    tracing::info!("OMEMO: opening trust dialog for {jid}");
+                    let device_ids = self
+                        .omemo_peer_devices
+                        .get(&jid)
+                        .cloned()
+                        .unwrap_or_default();
+                    let devices: Vec<omemo_trust::DeviceEntry> = device_ids
+                        .into_iter()
+                        .map(|id| omemo_trust::DeviceEntry {
+                            device_id: id,
+                            identity_key: vec![],
+                            trust: crate::xmpp::modules::omemo::store::TrustState::Undecided,
+                            label: None,
+                            active: true,
+                        })
+                        .collect();
+                    self.omemo_trust_modal = Some(omemo_trust::OmemoTrustScreen::new(jid, devices));
                     return Task::none();
                 }
                 // O2: intercept SetPresence to track own presence for DND notification suppression
@@ -1151,6 +1194,38 @@ impl App {
                 } else {
                     Task::none()
                 }
+            }
+
+            // MEMO: OMEMO trust dialog messages
+            Message::OmemoTrust(msg) => {
+                let is_close = matches!(msg, omemo_trust::Message::Close);
+                // Extract trust/untrust info before moving msg into update().
+                let trust_cmd: Option<XmppCommand> = match &msg {
+                    omemo_trust::Message::TrustDevice(id) => {
+                        self.omemo_trust_modal
+                            .as_ref()
+                            .map(|m| XmppCommand::OmemoTrustDevice {
+                                jid: m.contact_jid.clone(),
+                                device_id: *id,
+                            })
+                    }
+                    omemo_trust::Message::UntrustDevice(_) | omemo_trust::Message::Close => None,
+                };
+                if let Some(ref mut modal) = self.omemo_trust_modal {
+                    modal.update(&msg);
+                }
+                if is_close {
+                    self.omemo_trust_modal = None;
+                }
+                if let Some(cmd) = trust_cmd {
+                    if let Some(ref tx) = self.xmpp_tx {
+                        let tx = tx.clone();
+                        tokio::spawn(async move {
+                            let _ = tx.send(cmd).await;
+                        });
+                    }
+                }
+                Task::none()
             }
 
             Message::XmppReady(tx) => {
@@ -1696,10 +1771,51 @@ impl App {
                             let _ = crate::store::message_repo::update_body(&pool, &oid, &nb).await;
                         });
                     }
+                    // MEMO: OMEMO successfully enabled — store state and notify UI.
+                    XmppEvent::OmemoEnabled { device_id } => {
+                        self.omemo_enabled = true;
+                        self.omemo_device_id = Some(device_id);
+                        // Push state into the settings screen if it is currently open.
+                        if let Screen::Settings(ref mut ss, _) = self.screen {
+                            ss.set_omemo_active(device_id);
+                        }
+                        // OMEMO Phase 2: propagate global flag to the chat screen so the
+                        // per-conversation lock toggle becomes visible.
+                        if let Screen::Chat(ref mut chat) = self.screen {
+                            chat.omemo_enabled = true;
+                        }
+                        return self.update(Message::ShowToast(
+                            format!("OMEMO enabled (device {device_id})"),
+                            ToastKind::Info,
+                        ));
+                    }
+                    // MEMO: cache peer device list so the trust dialog can populate itself.
+                    XmppEvent::OmemoDeviceListReceived { jid, devices } => {
+                        tracing::debug!(
+                            "OMEMO: device list for {jid}: {} device(s)",
+                            devices.len()
+                        );
+                        self.omemo_peer_devices.insert(jid.clone(), devices.clone());
+                        // If the trust dialog for this JID is open, refresh its device list.
+                        if let Some(ref mut modal) = self.omemo_trust_modal {
+                            if modal.contact_jid == jid {
+                                let entries: Vec<omemo_trust::DeviceEntry> = devices
+                                    .into_iter()
+                                    .map(|id| omemo_trust::DeviceEntry {
+                                        device_id: id,
+                                        identity_key: vec![],
+                                        trust: crate::xmpp::modules::omemo::store::TrustState::Undecided,
+                                        label: None,
+                                        active: true,
+                                    })
+                                    .collect();
+                                modal.devices = entries;
+                            }
+                        }
+                    }
                     // MEMO / other agents: unhandled events from additional modules.
                     XmppEvent::LocationReceived { .. }
                     | XmppEvent::BobReceived(_)
-                    | XmppEvent::OmemoDeviceListReceived { .. }
                     | XmppEvent::OmemoMessageDecrypted { .. }
                     | XmppEvent::OmemoKeyExchangeNeeded { .. }
                     | XmppEvent::StickerPackReceived(_)
@@ -1745,6 +1861,51 @@ impl App {
 
         // Build layers: screen + optional palette + optional console panel + button + optional toasts
         let mut layers: Vec<Element<Message>> = vec![screen_view];
+
+        // MEMO: OMEMO trust modal overlay
+        if let Some(ref trust_screen) = self.omemo_trust_modal {
+            let backdrop = container(Space::new(Length::Fill, Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|_theme: &iced::Theme| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        0.0, 0.0, 0.0, 0.5,
+                    ))),
+                    ..Default::default()
+                });
+            let trust_view = trust_screen.view().map(Message::OmemoTrust);
+            let modal_box = container(trust_view)
+                .width(Length::Fixed(480.0))
+                .height(Length::Fixed(480.0))
+                .style(|theme: &iced::Theme| {
+                    let palette = theme.extended_palette();
+                    iced::widget::container::Style {
+                        background: Some(iced::Background::Color(palette.background.base.color)),
+                        border: iced::Border {
+                            color: palette.primary.base.color,
+                            width: 1.0,
+                            radius: 8.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                });
+            let modal_overlay = container(
+                column![
+                    Space::new(Length::Fill, Length::Fixed(80.0)),
+                    row![
+                        Space::new(Length::Fill, Length::Shrink),
+                        modal_box,
+                        Space::new(Length::Fill, Length::Shrink),
+                    ]
+                    .width(Length::Fill),
+                ]
+                .width(Length::Fill),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill);
+            layers.push(backdrop.into());
+            layers.push(modal_overlay.into());
+        }
 
         // L5: spam report modal overlay
         if let Some(ref modal) = self.spam_report_modal {

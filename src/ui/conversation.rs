@@ -244,6 +244,8 @@ pub struct ConversationView {
     pub pending_moderate_dialog: Option<String>,
     /// L3: Reason text input for message moderation
     pub moderate_reason_input: String,
+    /// OMEMO Phase 2: per-conversation encryption toggle
+    pub is_encryption_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -306,6 +308,8 @@ pub enum Message {
     DismissModerateDialog,
     /// OMEMO: open the trust/fingerprint dialog for the sender of a message
     OpenOmemoTrust(String), // peer_jid
+    /// OMEMO Phase 2: toggle per-conversation encryption on/off
+    ToggleEncryption,
 }
 
 impl ConversationView {
@@ -339,6 +343,7 @@ impl ConversationView {
             voice_elapsed_secs: 0,
             pending_moderate_dialog: None,
             moderate_reason_input: String::new(),
+            is_encryption_enabled: false,
         }
     }
 
@@ -541,6 +546,10 @@ impl ConversationView {
                 Task::none()
             }
             Message::OpenOmemoTrust(_) => Task::none(), // bubbled to ChatScreen
+            Message::ToggleEncryption => {
+                self.is_encryption_enabled = !self.is_encryption_enabled;
+                Task::none()
+            }
             Message::AttachmentLoaded(msg_id, handle) => {
                 self.attachments.insert(msg_id, handle);
                 Task::none()
@@ -892,6 +901,7 @@ impl ConversationView {
         time_format: crate::config::TimeFormat,
         occupants: &[OccupantEntry],
         own_nick: &str,
+        omemo_globally_enabled: bool,
     ) -> Element<'_, Message> {
         // ---- Message list (G5: grouping + date separators) ----
         let mut rows: Vec<Element<Message>> = Vec::new();
@@ -1615,18 +1625,38 @@ impl ConversationView {
             .align_y(Alignment::Center)
             .into()
         } else {
-            row![
+            let mut header_row = row![
                 text(format!("Chat with {}", self.peer_jid))
                     .size(14)
                     .width(Length::Fill),
                 block_btn,
                 mute_btn,
-                search_btn,
-                close_btn,
             ]
             .spacing(4)
-            .align_y(Alignment::Center)
-            .into()
+            .align_y(Alignment::Center);
+            // OMEMO Phase 2: show per-conversation lock button only when OMEMO is globally enabled
+            if omemo_globally_enabled {
+                let lock_icon = if self.is_encryption_enabled {
+                    "🔒"
+                } else {
+                    "🔓"
+                };
+                let lock_tip = if self.is_encryption_enabled {
+                    "Encryption enabled — click to disable"
+                } else {
+                    "Encryption disabled — click to enable"
+                };
+                let lock_btn = tooltip(
+                    button(text(lock_icon).size(14).shaping(Shaping::Advanced))
+                        .on_press(Message::ToggleEncryption)
+                        .padding([4, 8]),
+                    lock_tip,
+                    tooltip::Position::Bottom,
+                );
+                header_row = header_row.push(lock_btn);
+            }
+            header_row = header_row.push(search_btn).push(close_btn);
+            header_row.into()
         };
         let header = container(header_content)
             .padding([8, 12])

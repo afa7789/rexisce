@@ -7,9 +7,7 @@
 //   - trust_color: color for each TrustState
 //   - format_fingerprint: hex fingerprint with spaces every 8 chars
 //
-// This module is complete but not yet wired into the main Screen enum;
-// items will be used when OMEMO (XEP-0384) is fully integrated.
-#![allow(dead_code)]
+// This module is wired into App as a modal overlay triggered by OpenOmemoTrust.
 
 use iced::{
     widget::{button, column, container, row, scrollable, text, Space},
@@ -34,10 +32,12 @@ pub struct DeviceEntry {
     /// Optional human-readable label (e.g. "Desktop", "Phone").
     pub label: Option<String>,
     /// Whether the device is currently active on the server device list.
+    #[allow(dead_code)]
     pub active: bool,
 }
 
 /// Data needed to display the own device info panel.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct OwnDeviceData {
     pub device_id: u32,
@@ -133,11 +133,13 @@ impl OmemoTrustScreen {
 // ---------------------------------------------------------------------------
 
 /// Panel shown in settings with own identity key and session count.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct OwnDeviceInfo {
     pub data: OwnDeviceData,
 }
 
+#[allow(dead_code)]
 impl OwnDeviceInfo {
     pub fn new(data: OwnDeviceData) -> Self {
         Self { data }

@@ -34,6 +34,9 @@ pub struct SettingsScreen {
     // DC-17: interactive avatar crop state (raw bytes + mime + crop params)
     crop_state: Option<crate::store::avatar_crop::CropState>,
     crop_raw: Option<(Vec<u8>, String)>,
+    // MEMO: OMEMO status
+    omemo_enabled: bool,
+    omemo_device_id: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +93,8 @@ pub enum Message {
     ProxyPortChanged(String),
     ManualSrvChanged(String),
     ForceTlsToggled(bool),
+    // MEMO: enable OMEMO encryption
+    EnableOmemo,
 }
 
 impl SettingsScreen {
@@ -113,6 +118,8 @@ impl SettingsScreen {
             manual_srv_input,
             crop_state: None,
             crop_raw: None,
+            omemo_enabled: false,
+            omemo_device_id: None,
             settings,
         }
     }
@@ -120,6 +127,12 @@ impl SettingsScreen {
     /// Update the account info shown in the Account Details section.
     pub fn set_account_info(&mut self, info: AccountInfo) {
         self.account_info = info;
+    }
+
+    /// Called by App when OMEMO becomes active so the settings panel can show the device ID.
+    pub fn set_omemo_active(&mut self, device_id: u32) {
+        self.omemo_enabled = true;
+        self.omemo_device_id = Some(device_id);
     }
 
     pub fn settings(&self) -> &Settings {
@@ -410,6 +423,8 @@ impl SettingsScreen {
                 let _ = config::save(&self.settings);
                 Task::none()
             }
+            // MEMO: EnableOmemo is intercepted by App::update before reaching here.
+            Message::EnableOmemo => Task::none(),
         }
     }
 
@@ -611,6 +626,9 @@ impl SettingsScreen {
         // M5: Network section
         let network_section = self.view_network();
 
+        // MEMO: OMEMO encryption section
+        let omemo_section = self.view_omemo();
+
         let edit_profile_btn = button("Edit Profile")
             .on_press(Message::OpenVCardEditor)
             .padding([6, 14]);
@@ -641,6 +659,7 @@ impl SettingsScreen {
             chat_prefs_section,
             blocklist_section,
             account_section,
+            omemo_section,
             network_section,
             data_section,
             bottom_row,
@@ -782,6 +801,38 @@ impl SettingsScreen {
         column![header, limit_row, clear_section, export_row]
             .spacing(8)
             .into()
+    }
+
+    // MEMO: OMEMO encryption sub-view.
+    fn view_omemo(&self) -> Element<'_, Message> {
+        let header = text("OMEMO Encryption").size(16);
+        let body: Element<Message> = if self.omemo_enabled {
+            let id_str = self.omemo_device_id.map_or_else(
+                || "Device ID: —".to_string(),
+                |id| format!("Device ID: {id}"),
+            );
+            column![
+                row![
+                    text("Status").size(14).width(Length::Fixed(140.0)),
+                    text("Enabled").size(14).width(Length::Fill),
+                ]
+                .spacing(8),
+                row![text(id_str).size(13).width(Length::Fill),].spacing(8),
+            ]
+            .spacing(6)
+            .into()
+        } else {
+            row![
+                text("End-to-end encryption").size(14).width(Length::Fill),
+                button(text("Enable OMEMO").size(13))
+                    .on_press(Message::EnableOmemo)
+                    .padding([4, 12]),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
+        };
+        column![header, body].spacing(8).into()
     }
 
     // M5: Network settings sub-view.
