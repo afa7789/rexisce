@@ -202,5 +202,4 @@ mod tests {
         assert_eq!(screen.scroll_offset.y, 1234.5);
         assert_eq!(screen.scroll_offset.x, 0.0);
     }
-
 }

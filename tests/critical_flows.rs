@@ -209,6 +209,401 @@ fn avatar_publish_flow() {
     assert!(data_xml.contains("node=\"urn:xmpp:avatar:data\""));
 }
 
+// ---- Message lifecycle: build → parse → verify fields ------------------
+
+/// Build a plain chat message stanza and verify every field round-trips
+/// through the minidom XML representation.
+#[test]
+fn message_lifecycle_build_and_parse() {
+    use tokio_xmpp::minidom::Element;
+
+    // Build a minimal chat message exactly as the engine does.
+    let to = "bob@example.com";
+    let body_text = "Hello, Bob!";
+    let msg_id = "test-msg-id-001";
+
+    let body_el = Element::builder("body", "jabber:client")
+        .append(body_text)
+        .build();
+
+    let msg_el = Element::builder("message", "jabber:client")
+        .attr("to", to)
+        .attr("type", "chat")
+        .attr("id", msg_id)
+        .append(body_el)
+        .build();
+
+    // Verify the stanza's top-level attributes.
+    assert_eq!(msg_el.name(), "message");
+    assert_eq!(msg_el.attr("to"), Some(to));
+    assert_eq!(msg_el.attr("type"), Some("chat"));
+    assert_eq!(msg_el.attr("id"), Some(msg_id));
+
+    // Parse the stanza back out via the minidom child API.
+    let parsed_body = msg_el
+        .get_child("body", "jabber:client")
+        .expect("message must contain a <body>");
+    assert_eq!(parsed_body.text(), body_text);
+}
+
+/// A message without a <body> should parse correctly, returning no body text.
+#[test]
+fn message_lifecycle_no_body_is_tolerated() {
+    use tokio_xmpp::minidom::Element;
+
+    let msg_el = Element::builder("message", "jabber:client")
+        .attr("to", "alice@example.com")
+        .attr("type", "chat")
+        .build();
+
+    // No body child — get_child returns None.
+    assert!(msg_el.get_child("body", "jabber:client").is_none());
+}
+
+/// Roundtrip: build, serialise to string, re-parse, verify fields survive.
+#[test]
+fn message_lifecycle_xml_roundtrip() {
+    use tokio_xmpp::minidom::Element;
+
+    let original: Element =
+        r#"<message to="charlie@example.com" type="chat" id="rt-001" xmlns="jabber:client">
+               <body>roundtrip body</body>
+           </message>"#
+            .parse()
+            .expect("should parse as valid XML");
+
+    // Serialise back to a string and re-parse.
+    let xml_string = String::from(&original);
+    let reparsed: Element = xml_string.parse().expect("re-parse should succeed");
+
+    assert_eq!(reparsed.attr("to"), Some("charlie@example.com"));
+    assert_eq!(reparsed.attr("type"), Some("chat"));
+    assert_eq!(reparsed.attr("id"), Some("rt-001"));
+    let body = reparsed
+        .get_child("body", "jabber:client")
+        .expect("body must survive roundtrip");
+    assert_eq!(body.text(), "roundtrip body");
+}
+
+// ---- Reconnect flow: disconnect → reconnect event sequence --------------
+
+/// Simulates the reconnect flow by driving the presence machine and stream
+/// management state across a disconnect/reconnect boundary and verifying
+/// that all relevant state is reset/preserved correctly.
+///
+/// Reconnect sequence verified here (no live server required):
+///   1. Session starts → PresenceMachine goes Available.
+///   2. Idle → Away transition recorded.
+///   3. Disconnect: StreamMgmt.reset() called, CatchupManager reset.
+///   4. Reconnect: PresenceMachine.on_connected() called.
+///   5. Auto-idle state is preserved across reconnect (per spec comment).
+///   6. StreamMgmt counters are back to zero for the new session.
+#[test]
+fn reconnect_flow_state_reset_and_preservation() {
+    use tokio_xmpp::minidom::Element;
+    use xmpp_start::xmpp::modules::presence_machine::{PresenceMachine, PresenceStatus};
+    use xmpp_start::xmpp::modules::stream_mgmt::StreamMgmt;
+
+    let mut pm = PresenceMachine::new();
+    let mut sm = StreamMgmt::new();
+
+    // --- First session ---
+
+    pm.on_connected();
+    assert_eq!(pm.effective_status(), PresenceStatus::Available);
+
+    // Send some stanzas to build up the unacked queue.
+    let dummy: Element = "<message xmlns='jabber:client'/>".parse().unwrap();
+    sm.on_stanza_sent(dummy.clone());
+    sm.on_stanza_sent(dummy.clone());
+    sm.on_stanza_received();
+    assert_eq!(sm.pending_count(), 2);
+    assert_eq!(sm.h(), 1);
+
+    // Auto-away kicks in before disconnect.
+    pm.on_idle_detected();
+    assert_eq!(pm.effective_status(), PresenceStatus::Away);
+
+    // --- Disconnect ---
+
+    pm.on_disconnected();
+    sm.reset();
+
+    // After reset, all StreamMgmt counters are zero.
+    assert_eq!(sm.pending_count(), 0);
+    assert_eq!(sm.h(), 0);
+
+    // Presence machine reflects Offline after disconnection.
+    assert_eq!(pm.effective_status(), PresenceStatus::Offline);
+
+    // --- Reconnect ---
+
+    pm.on_connected();
+
+    // Per spec: on_connected does NOT reset auto_state — auto-away is preserved.
+    // The user was idle before disconnect, so after reconnect they are still Away.
+    assert_eq!(pm.effective_status(), PresenceStatus::Away);
+
+    // StreamMgmt is clean for the new session.
+    assert_eq!(sm.pending_count(), 0);
+    sm.on_stanza_sent(dummy);
+    assert_eq!(sm.pending_count(), 1);
+}
+
+/// Reconnect resets the stream-management counters so new session acks start at 0.
+#[test]
+fn reconnect_stream_mgmt_resets_to_zero() {
+    use tokio_xmpp::minidom::Element;
+    use xmpp_start::xmpp::modules::stream_mgmt::StreamMgmt;
+
+    let mut sm = StreamMgmt::new();
+    let dummy: Element = "<message xmlns='jabber:client'/>".parse().unwrap();
+
+    // First session: send 10, ack 5.
+    for _ in 0..10 {
+        sm.on_stanza_sent(dummy.clone());
+    }
+    sm.on_ack_received(5);
+    sm.on_stanza_received();
+    sm.on_stanza_received();
+
+    assert_eq!(sm.pending_count(), 5);
+    assert_eq!(sm.h(), 2);
+
+    // Disconnect: engine calls reset().
+    sm.reset();
+
+    assert_eq!(sm.pending_count(), 0);
+    assert_eq!(sm.h(), 0);
+
+    // New session acks start from h=0.
+    sm.on_stanza_received();
+    let ack = sm.flush_ack().expect("ack should be pending");
+    assert_eq!(ack.attr("h"), Some("1"));
+}
+
+// ---- MAM sync: build query → parse response → verify messages ----------
+
+/// Build a MAM query with a filter + RSM cursor, verify the IQ XML
+/// contains all expected children in the correct namespaces.
+#[test]
+fn mam_sync_query_build_with_filter_and_cursor() {
+    use xmpp_start::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
+
+    let mut mgr = MamManager::new();
+    let query = MamQuery {
+        query_id: "sync-qid-1".to_string(),
+        filter: MamFilter {
+            with: Some("alice@example.com".to_string()),
+            start: Some("2024-01-01T00:00:00Z".to_string()),
+            end: None,
+        },
+        rsm: RsmQuery {
+            max: 100,
+            after: Some("last-seen-stanza-id".to_string()),
+            before: None,
+        },
+    };
+
+    let iq = mgr.build_query_iq(query);
+    let iq_xml = String::from(&iq);
+
+    // Top-level IQ
+    assert_eq!(iq.name(), "iq");
+    assert_eq!(iq.attr("type"), Some("set"));
+
+    // Query must reference our query_id
+    assert!(iq_xml.contains("queryid=\"sync-qid-1\"") || iq_xml.contains("queryid='sync-qid-1'"));
+
+    // Data form filter
+    assert!(iq_xml.contains("alice@example.com"));
+    assert!(iq_xml.contains("2024-01-01T00:00:00Z"));
+
+    // RSM cursor
+    assert!(iq_xml.contains("last-seen-stanza-id"));
+    assert!(iq_xml.contains("100"));
+
+    // Query is pending after build.
+    assert!(mgr.is_pending("sync-qid-1"));
+}
+
+/// Parse a multi-message MAM response and verify each extracted message.
+#[test]
+fn mam_sync_parse_multi_message_response() {
+    use tokio_xmpp::minidom::Element;
+    use xmpp_start::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
+
+    const NS_MAM: &str = "urn:xmpp:mam:2";
+    const NS_FORWARD: &str = "urn:xmpp:forward:0";
+    const NS_DELAY: &str = "urn:ietf:params:xml:ns:xmpp-delay";
+    const NS_CLIENT: &str = "jabber:client";
+
+    let mut mgr = MamManager::new();
+    mgr.build_query_iq(MamQuery {
+        query_id: "sync-qid-2".to_string(),
+        filter: MamFilter {
+            with: None,
+            start: None,
+            end: None,
+        },
+        rsm: RsmQuery {
+            max: 50,
+            after: None,
+            before: None,
+        },
+    });
+
+    // Helper to build a MAM result wrapper.
+    let make_mam_msg = |archive_id: &str, stamp: &str, from: &str, body: &str| -> Element {
+        let body_el = Element::builder("body", NS_CLIENT).append(body).build();
+        let inner = Element::builder("message", NS_CLIENT)
+            .attr("from", from)
+            .append(body_el)
+            .build();
+        let delay = Element::builder("delay", NS_DELAY)
+            .attr("stamp", stamp)
+            .build();
+        let forwarded = Element::builder("forwarded", NS_FORWARD)
+            .append(delay)
+            .append(inner)
+            .build();
+        let result_el = Element::builder("result", NS_MAM)
+            .attr("queryid", "sync-qid-2")
+            .attr("id", archive_id)
+            .append(forwarded)
+            .build();
+        Element::builder("message", NS_CLIENT)
+            .append(result_el)
+            .build()
+    };
+
+    let stanza1 = make_mam_msg(
+        "arc-001",
+        "2024-03-01T09:00:00Z",
+        "alice@example.com",
+        "Hey!",
+    );
+    let stanza2 = make_mam_msg(
+        "arc-002",
+        "2024-03-01T09:01:00Z",
+        "bob@example.com",
+        "Hi there",
+    );
+    let stanza3 = make_mam_msg(
+        "arc-003",
+        "2024-03-01T09:02:00Z",
+        "alice@example.com",
+        "How are you?",
+    );
+
+    let m1 = mgr.on_mam_message(&stanza1).expect("should parse msg 1");
+    let m2 = mgr.on_mam_message(&stanza2).expect("should parse msg 2");
+    let m3 = mgr.on_mam_message(&stanza3).expect("should parse msg 3");
+
+    // Verify each parsed message.
+    assert_eq!(m1.archive_id, "arc-001");
+    assert_eq!(m1.forwarded_from, "alice@example.com");
+    assert_eq!(m1.body, "Hey!");
+    assert_eq!(m1.timestamp, "2024-03-01T09:00:00Z");
+    assert_eq!(m1.query_id, "sync-qid-2");
+
+    assert_eq!(m2.archive_id, "arc-002");
+    assert_eq!(m2.body, "Hi there");
+
+    assert_eq!(m3.archive_id, "arc-003");
+    assert_eq!(m3.body, "How are you?");
+}
+
+/// Full MAM sync lifecycle: build query → receive messages → receive <fin>
+/// → verify accumulated result contains all messages with correct RSM metadata.
+#[test]
+fn mam_sync_full_lifecycle_with_fin() {
+    use tokio_xmpp::minidom::Element;
+    use xmpp_start::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
+
+    const NS_MAM: &str = "urn:xmpp:mam:2";
+    const NS_FORWARD: &str = "urn:xmpp:forward:0";
+    const NS_DELAY: &str = "urn:ietf:params:xml:ns:xmpp-delay";
+    const NS_CLIENT: &str = "jabber:client";
+    const NS_RSM: &str = "http://jabber.org/protocol/rsm";
+
+    let mut mgr = MamManager::new();
+    mgr.build_query_iq(MamQuery {
+        query_id: "sync-full-1".to_string(),
+        filter: MamFilter {
+            with: Some("peer@example.com".to_string()),
+            start: None,
+            end: None,
+        },
+        rsm: RsmQuery {
+            max: 50,
+            after: None,
+            before: None,
+        },
+    });
+
+    // Deliver three archived messages.
+    let make_msg = |id: &str, body: &str| -> Element {
+        let body_el = Element::builder("body", NS_CLIENT).append(body).build();
+        let inner = Element::builder("message", NS_CLIENT)
+            .attr("from", "peer@example.com")
+            .append(body_el)
+            .build();
+        let delay = Element::builder("delay", NS_DELAY)
+            .attr("stamp", "2024-06-01T12:00:00Z")
+            .build();
+        let forwarded = Element::builder("forwarded", NS_FORWARD)
+            .append(delay)
+            .append(inner)
+            .build();
+        let result_el = Element::builder("result", NS_MAM)
+            .attr("queryid", "sync-full-1")
+            .attr("id", id)
+            .append(forwarded)
+            .build();
+        Element::builder("message", NS_CLIENT)
+            .append(result_el)
+            .build()
+    };
+
+    mgr.on_mam_message(&make_msg("uid-a", "first"));
+    mgr.on_mam_message(&make_msg("uid-b", "second"));
+    mgr.on_mam_message(&make_msg("uid-c", "third"));
+
+    // Server sends <fin complete='true'> with RSM metadata.
+    let rsm_set = Element::builder("set", NS_RSM)
+        .append(Element::builder("first", NS_RSM).append("uid-a").build())
+        .append(Element::builder("last", NS_RSM).append("uid-c").build())
+        .append(Element::builder("count", NS_RSM).append("3").build())
+        .build();
+
+    let fin = Element::builder("fin", NS_MAM)
+        .attr("queryid", "sync-full-1")
+        .attr("complete", "true")
+        .append(rsm_set)
+        .build();
+
+    let fin_iq = Element::builder("iq", NS_CLIENT)
+        .attr("type", "result")
+        .append(fin)
+        .build();
+
+    let (query_id, result) = mgr.on_fin_iq(&fin_iq).expect("fin should return a result");
+
+    assert_eq!(query_id, "sync-full-1");
+    assert_eq!(result.messages.len(), 3);
+    assert_eq!(result.messages[0].body, "first");
+    assert_eq!(result.messages[1].body, "second");
+    assert_eq!(result.messages[2].body, "third");
+    assert!(result.complete);
+    assert_eq!(result.rsm.first, Some("uid-a".to_string()));
+    assert_eq!(result.rsm.last, Some("uid-c".to_string()));
+    assert_eq!(result.rsm.count, Some(3));
+
+    // Query is no longer pending after fin.
+    assert!(!mgr.is_pending("sync-full-1"));
+}
+
 // ---- Message Moderation: build moderation command ------------------------
 
 #[test]

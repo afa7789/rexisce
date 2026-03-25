@@ -98,7 +98,6 @@ pub async fn find_by_conversation_for_account(
     Ok(rows.iter().map(row_to_message).collect())
 }
 
-
 #[allow(dead_code)]
 pub async fn find_by_origin_id(pool: &SqlitePool, origin_id: &str) -> Result<Option<Message>> {
     let row = sqlx::query(

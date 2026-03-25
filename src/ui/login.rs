@@ -19,12 +19,10 @@ pub struct LoginScreen {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 enum LoginState {
     Idle,
     Connecting,
     Registering,
-    Connected(String), // bound JID
     Error(String),
 }
 
@@ -91,12 +89,6 @@ impl LoginScreen {
         }
     }
 
-    /// Called by App when XmppEvent::Connected arrives.
-    #[allow(dead_code)]
-    pub fn on_connected(&mut self, bound_jid: String) {
-        self.state = LoginState::Connected(bound_jid);
-    }
-
     /// Called by App when XmppEvent::Disconnected arrives.
     pub fn on_error(&mut self, reason: String) {
         self.state = LoginState::Error(reason);
@@ -136,7 +128,6 @@ impl LoginScreen {
             LoginState::Idle => text(""),
             LoginState::Connecting => text("Connecting…"),
             LoginState::Registering => text("Registering account…"),
-            LoginState::Connected(jid) => text(format!("Connected as {jid}")),
             LoginState::Error(e) => text(format!("Error: {e}")),
         };
 

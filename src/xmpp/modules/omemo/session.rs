@@ -453,4 +453,34 @@ mod tests {
         assert_ne!(p1.nonce, p2.nonce);
         assert_ne!(p1.ciphertext, p2.ciphertext);
     }
+
+    #[test]
+    fn encrypt_payload_nonces_are_unique_across_many_calls() {
+        // AES-GCM nonce reuse under the same key breaks confidentiality and
+        // authentication.  Each call to encrypt_payload must produce a fresh
+        // random nonce.  We sample 100 calls and assert all nonces are distinct.
+        use std::collections::HashSet;
+
+        const SAMPLE_SIZE: usize = 100;
+        let mut nonces: HashSet<Vec<u8>> = HashSet::with_capacity(SAMPLE_SIZE);
+
+        for i in 0..SAMPLE_SIZE {
+            let plaintext = format!("test message {i}");
+            let payload = OmemoSessionManager::encrypt_payload(&plaintext)
+                .expect("encrypt_payload should not fail");
+
+            assert_eq!(
+                payload.nonce.len(),
+                AES_NONCE_LEN,
+                "nonce at call {i} has wrong length"
+            );
+
+            let is_new = nonces.insert(payload.nonce.clone());
+            assert!(
+                is_new,
+                "nonce collision detected at call {i}: nonce {:?} was already produced",
+                payload.nonce
+            );
+        }
+    }
 }

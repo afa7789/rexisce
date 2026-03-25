@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 use futures::{SinkExt, StreamExt};
 use sqlx::SqlitePool;
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 use tokio_xmpp::connect::ServerConnector;
 use tokio_xmpp::{
     jid::Jid,
@@ -18,7 +19,6 @@ use tokio_xmpp::{
     parsers::{
         iq::Iq,
         message::{Body, Message as XmppMessage, MessageType},
-        presence::{Presence, Type as PresenceType},
         roster::Roster,
     },
     starttls::ServerConfig,
@@ -31,7 +31,12 @@ use super::{
         proxy::{ProxyLifecycle, TransportKind},
         ConnectConfig,
     },
-    modules::account::{AccountIqKind, AccountManager},
+    handlers::{
+        handle_iq, handle_message, handle_presence, has_omemo_encrypted,
+        omemo_check_prekey_rotation, omemo_encrypt_and_send, omemo_try_decrypt, OmemoEncryptError,
+        NS_CHAT_MARKERS, NS_RECEIPTS,
+    },
+    modules::account::AccountManager,
     modules::adhoc::AdhocManager,
     modules::avatar::AvatarManager,
     modules::blocking::BlockingManager,
@@ -39,7 +44,6 @@ use super::{
     modules::bookmarks::BookmarkManager,
     modules::catchup::CatchupManager,
     modules::conversation_sync::ConversationSyncManager,
-    modules::sync::SyncOrchestrator,
     modules::disco::{DiscoIdentity, DiscoManager},
     modules::entity_time::EntityTimeManager,
     modules::file_upload::FileUploadManager,
@@ -51,33 +55,91 @@ use super::{
     modules::muc_admin::{AffiliationAction, MucAdminManager},
     modules::muc_config::MucConfigManager,
     modules::muc_voice::MucVoiceManager,
-    modules::omemo::{
-        bundle::OmemoManager,
-        device::DeviceManager,
-        message::{
-            build_encrypted_message, parse_encrypted_message, EncryptedMessage, MessageHeader,
-            MessageKey,
-        },
-        session::OmemoSessionManager,
-        store::{OmemoStore, TrustState},
-    },
+    modules::omemo::{bundle::OmemoManager, device::DeviceManager, store::OmemoStore, TrustState},
     modules::presence_machine::PresenceMachine,
     modules::push::PushManager,
     modules::registration::RegistrationManager,
     modules::spam_report::build_spam_report,
     modules::stickers,
     modules::stream_mgmt::StreamMgmt,
+    modules::sync::SyncOrchestrator,
     modules::vcard_edit::VCardEditManager,
-    modules::{NS_FASTEN, NS_FORWARD, NS_GEOLOC, NS_MAM, NS_MUC_OWNER, NS_MUC_USER, NS_PUBSUB_EVENT, NS_X_CONFERENCE},
-    IncomingMessage, RosterContact, XmppCommand, XmppEvent,
+    modules::{NS_FASTEN, NS_FORWARD, NS_GEOLOC, NS_MAM, NS_MUC_USER, NS_PUBSUB_EVENT},
+    IncomingMessage, XmppCommand, XmppEvent,
 };
 
 const NS_CARBONS: &str = "urn:xmpp:carbons:2";
-const NS_RECEIPTS: &str = "urn:xmpp:receipts";
-const NS_CHAT_MARKERS: &str = "urn:xmpp:chat-markers:0";
 // L3: XEP-0425 message moderation namespaces
 const NS_MODERATION: &str = "urn:xmpp:message-moderate:0";
 // J9: XEP-0077 registration namespace
+
+// ---------------------------------------------------------------------------
+// Outbound stanza rate limiter (token bucket)
+// ---------------------------------------------------------------------------
+
+/// Token-bucket rate limiter for outbound XMPP stanzas.
+///
+/// Allows up to `capacity` stanzas to be sent in a burst, then refills at
+/// `rate` tokens per second.  When the bucket is empty, `try_consume` returns
+/// `false` and the caller should stop draining the outbox until the next loop
+/// iteration (which gives the bucket time to refill).
+///
+/// Additionally, `warn_if_high_depth` logs a warning when the outbox backlog
+/// exceeds `MAX_OUTBOX_DEPTH`, which is a sign of persistent flooding.
+struct StanzaRateLimiter {
+    /// Maximum token count (burst size).
+    capacity: f64,
+    /// Available tokens.
+    tokens: f64,
+    /// Refill rate in tokens per second.
+    rate: f64,
+    /// Last time the bucket was refilled.
+    last_refill: Instant,
+}
+
+/// Warn (once per crossing) when the outbox grows beyond this depth.
+const MAX_OUTBOX_DEPTH: usize = 50;
+
+impl StanzaRateLimiter {
+    /// Create a new limiter allowing `capacity` burst stanzas refilling at
+    /// `rate` stanzas/second.
+    fn new(capacity: f64, rate: f64) -> Self {
+        Self {
+            capacity,
+            tokens: capacity,
+            rate,
+            last_refill: Instant::now(),
+        }
+    }
+
+    /// Attempt to consume one token.  Returns `true` if the stanza may be
+    /// sent, `false` if the bucket is exhausted.
+    fn try_consume(&mut self) -> bool {
+        // Refill proportional to elapsed time.
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
+        self.tokens = (self.tokens + elapsed * self.rate).min(self.capacity);
+        self.last_refill = now;
+
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Log a warning when the outbox depth exceeds `MAX_OUTBOX_DEPTH`.
+    fn warn_if_high_depth(&self, depth: usize) {
+        if depth > MAX_OUTBOX_DEPTH {
+            tracing::warn!(
+                "outbox: backlog depth {} exceeds limit {} — possible stanza flood",
+                depth,
+                MAX_OUTBOX_DEPTH
+            );
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Public engine entry-point
@@ -123,10 +185,7 @@ pub async fn run_engine(
 // Session loop
 // ---------------------------------------------------------------------------
 
-/// S6: privacy toggles — controls which optional XMPP features we announce/use.
-/// Stored as a global so the engine callbacks can read it without threading parameters.
-static PRIVACY_FLAGS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0b000);
-// Bit flags for PRIVACY_FLAGS: bit 0=receipts, bit 1=typing, bit 2=read_markers (1=enabled)
+// S6: bit flags for privacy: bit 0=receipts, bit 1=typing, bit 2=read_markers (1=enabled)
 async fn run_session(
     config: ConnectConfig,
     event_tx: &mpsc::Sender<XmppEvent>,
@@ -220,6 +279,8 @@ async fn run_session(
 
     // Outbox for stanzas that need to be sent after a select! arm.
     let mut outbox: VecDeque<Element> = VecDeque::new();
+    // Rate limiter: burst of 10 stanzas, refilling at 10 stanzas/second.
+    let mut rate_limiter = StanzaRateLimiter::new(10.0, 10.0);
     let mut reconnect_attempt: u32 = 0;
 
     // C1: XEP-0198 stream management tracker
@@ -287,14 +348,27 @@ async fn run_session(
         .map(|pool| OmemoManager::new(OmemoStore::new(pool.clone())));
 
     // S6: privacy settings — control whether we send receipts, typing, read markers
-    let flags = (config.send_receipts as u8)
+    // bit 0=receipts, bit 1=typing, bit 2=read_markers (1=enabled, per-session local)
+    let flags: u8 = (config.send_receipts as u8)
         | ((config.send_typing as u8) << 1)
         | ((config.send_read_markers as u8) << 2);
-    PRIVACY_FLAGS.store(flags, std::sync::atomic::Ordering::SeqCst);
 
     loop {
         // Drain outbox before blocking on the next event.
+        // Warn when the backlog is large (possible flood).
+        rate_limiter.warn_if_high_depth(outbox.len());
         while let Some(stanza) = outbox.pop_front() {
+            // Backpressure: if the token bucket is exhausted, return the stanza
+            // to the front of the queue and stop draining until the next loop
+            // iteration, giving the bucket time to refill.
+            if !rate_limiter.try_consume() {
+                tracing::warn!(
+                    "outbox: rate limit reached — deferring {} queued stanza(s)",
+                    outbox.len() + 1
+                );
+                outbox.push_front(stanza);
+                break;
+            }
             // C1: record sent stanza and check for queue desync
             sm.on_stanza_sent(stanza.clone());
             if sm.has_queue_desync() {
@@ -329,8 +403,11 @@ async fn run_session(
                         break;
                     }
                     Some(ev) => {
-
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &mut ignore_mgr, &conv_sync_mgr, &mut account_mgr, &mut sync_orch, &config.jid, config.push_service_jid.as_deref()).await;
+                        let auth_failure = handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &mut ignore_mgr, &conv_sync_mgr, &mut account_mgr, &mut sync_orch, &config.jid, config.push_service_jid.as_deref(), flags).await;
+                        if auth_failure {
+                            tracing::info!("engine: breaking session loop due to auth failure");
+                            break;
+                        }
                     }
                 }
             }
@@ -343,7 +420,11 @@ async fn run_session(
                         break;
                     }
                     Some(XmppCommand::Connect(_)) => {
-                        // Already running; ignore.
+                        // BUG-7: a new Connect while already running means the user is
+                        // correcting credentials. Break so the outer loop can restart.
+                        tracing::info!("engine: new Connect received while running — restarting session");
+                        let _ = client.send_end().await;
+                        break;
                     }
                     Some(XmppCommand::SendMessage { to, body }) => {
                         if let Ok(to_jid) = to.parse::<Jid>() {
@@ -367,7 +448,7 @@ async fn run_session(
                     }
                     Some(XmppCommand::SendChatState { to, composing }) => {
                         // S6: respect user's privacy preference for typing indicators
-                        if PRIVACY_FLAGS.load(std::sync::atomic::Ordering::SeqCst) & 0b010 != 0 {
+                        if flags & 0b010 != 0 {
                             if let Ok(to_jid) = to.parse::<Jid>() {
                                 outbox.push_back(make_chat_state_message(to_jid, composing));
                             }
@@ -380,7 +461,11 @@ async fn run_session(
                     Some(XmppCommand::RequestUploadSlot { filename, size, mime }) => {
                         // E4: request upload slot from server's upload service
                         // Use a well-known upload service JID pattern; in production, discover via disco.
-                        let upload_jid = "upload.".to_string() + config.jid.split('@').nth(1).unwrap_or("example.com");
+                        let Some(domain) = config.jid.split('@').nth(1) else {
+                            tracing::warn!("file_upload: cannot determine server domain from JID; skipping upload");
+                            continue;
+                        };
+                        let upload_jid = format!("upload.{domain}");
                         let (_, iq) = file_upload_mgr.request_slot(&filename, size, &mime, &upload_jid);
                         outbox.push_back(iq);
                         tracing::info!("file_upload: requested slot for {filename}");
@@ -528,7 +613,7 @@ async fn run_session(
                     }
                     Some(XmppCommand::SendDisplayed { to, id }) => {
                         // S6: respect user's privacy preference for read markers
-                        if PRIVACY_FLAGS.load(std::sync::atomic::Ordering::SeqCst) & 0b100 != 0 {
+                        if flags & 0b100 != 0 {
                             outbox.push_back(make_displayed_message(&to, &id));
                             tracing::debug!("chat-markers: sent displayed for {id} to {to}");
                         }
@@ -851,7 +936,8 @@ async fn handle_client_event(
     sync_orch: &mut SyncOrchestrator,
     account_jid: &str,
     push_service_jid: Option<&str>,
-) {
+    privacy_flags: u8,
+) -> bool {
     match ev {
         tokio_xmpp::Event::Online { bound_jid, .. } => {
             *reconnect_attempt = 0;
@@ -939,17 +1025,33 @@ async fn handle_client_event(
         }
 
         tokio_xmpp::Event::Disconnected(err) => {
-            *reconnect_attempt += 1;
             presence_machine.on_disconnected();
             let unacked = sm.unacked_stanzas().len();
+            let err_str = err.to_string();
             tracing::warn!(
-                "engine: disconnected — {err} ({unacked} unacked stanzas, h={})",
+                "engine: disconnected — {err_str} ({unacked} unacked stanzas, h={})",
                 sm.h()
             );
             // C1: reset stream management counters for the next session
             sm.reset();
             // P4.3: discard stale catchup query IDs so they are not matched in the new session
             catchup_mgr.reset();
+
+            // BUG-7: detect auth failures — do not reconnect, surface the error instead
+            let err_lower = err_str.to_lowercase();
+            let is_auth_error = err_lower.contains("not-authorized")
+                || err_lower.contains("authentication")
+                || err_lower.contains("credentials")
+                || err_lower.contains("sasl");
+            if is_auth_error {
+                tracing::warn!("engine: auth failure detected, not reconnecting");
+                let _ = event_tx
+                    .send(XmppEvent::Disconnected { reason: err_str })
+                    .await;
+                return true;
+            }
+
+            *reconnect_attempt += 1;
             let _ = event_tx
                 .send(XmppEvent::Reconnecting {
                     attempt: *reconnect_attempt,
@@ -986,10 +1088,12 @@ async fn handle_client_event(
                 conv_sync_mgr,
                 account_mgr,
                 account_jid,
+                privacy_flags,
             )
             .await;
         }
     }
+    false
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1016,6 +1120,7 @@ async fn dispatch_stanza(
     conv_sync_mgr: &ConversationSyncManager,
     account_mgr: &mut AccountManager,
     account_jid: &str,
+    privacy_flags: u8,
 ) {
     // F1: emit received stanza to debug console before routing
     let xml_str = String::from(&el);
@@ -1147,7 +1252,7 @@ async fn dispatch_stanza(
             }
             // XEP-0280: carbon <received> — message received on another device
             if let Some(inner) = extract_carbon(&el, "received") {
-                handle_message(inner, event_tx, blocking_mgr, outbox).await;
+                handle_message(inner, event_tx, blocking_mgr, outbox, privacy_flags).await;
                 return;
             }
             // J6: XEP-0084 PEP avatar metadata notification
@@ -1191,7 +1296,10 @@ async fn dispatch_stanza(
                     let from = el.attr("from").unwrap_or("").to_string();
                     if let Some(location) = geoloc::parse_geoloc(&el) {
                         let _ = event_tx
-                            .send(XmppEvent::LocationReceived { _from: from, _location: location })
+                            .send(XmppEvent::LocationReceived {
+                                _from: from,
+                                _location: location,
+                            })
                             .await;
                     }
                     return;
@@ -1239,9 +1347,7 @@ async fn dispatch_stanza(
             }
             // MEMO: Check for OMEMO <encrypted> stanza (incoming encrypted message).
             {
-                use super::modules::omemo::NS_OMEMO;
-                let has_encrypted = el.get_child("encrypted", NS_OMEMO).is_some();
-                if has_encrypted {
+                if has_omemo_encrypted(&el) {
                     if let Some(ref mut mgr) = omemo_mgr {
                         let from = el.attr("from").unwrap_or("").to_string();
                         match omemo_try_decrypt(mgr, account_jid, &el).await {
@@ -1269,7 +1375,7 @@ async fn dispatch_stanza(
                     return;
                 }
             }
-            handle_message(el, event_tx, blocking_mgr, outbox).await;
+            handle_message(el, event_tx, blocking_mgr, outbox, privacy_flags).await;
         }
         "presence" => {
             // D3: update MUC occupant lists from room presence stanzas
@@ -1298,845 +1404,6 @@ async fn dispatch_stanza(
 }
 
 // ---------------------------------------------------------------------------
-// IQ handler — roster result (P1.4)
-// ---------------------------------------------------------------------------
-
-#[allow(clippy::too_many_arguments)]
-async fn handle_iq(
-    el: Element,
-    event_tx: &mpsc::Sender<XmppEvent>,
-    outbox: &mut VecDeque<Element>,
-    blocking_mgr: &mut BlockingManager,
-    mam_mgr: &mut MamManager,
-    catchup_mgr: &mut CatchupManager,
-    sync_orch: &mut SyncOrchestrator,
-    disco_mgr: &mut DiscoManager,
-    file_upload_mgr: &mut FileUploadManager,
-    avatar_mgr: &mut AvatarManager,
-    muc_config_mgr: &mut MucConfigManager,
-    bookmark_mgr: &mut BookmarkManager,
-    vcard_edit_mgr: &mut VCardEditManager,
-    adhoc_mgr: &mut AdhocManager,
-    ignore_mgr: &mut IgnoreManager,
-    conv_sync_mgr: &ConversationSyncManager,
-    omemo_mgr: &mut Option<OmemoManager>,
-    account_mgr: &mut AccountManager,
-    account_jid: &str,
-) {
-    // C5: respond to disco#info get requests with our feature list
-    if el.attr("type") == Some("get") {
-        let has_disco_info = el
-            .children()
-            .any(|c| c.name() == "query" && c.ns() == "http://jabber.org/protocol/disco#info");
-        if has_disco_info {
-            let iq_id = el.attr("id").unwrap_or("").to_string();
-            let requester = el.attr("from").unwrap_or("").to_string();
-            outbox.push_back(disco_mgr.build_info_response(&iq_id, &requester));
-            tracing::debug!("disco: responded to disco#info get from {requester}");
-            return;
-        }
-    }
-    // DC-8: respond to entity-time get requests (XEP-0202)
-    if el.attr("type") == Some("get") {
-        let has_time = el
-            .children()
-            .any(|c| c.name() == "time" && c.ns() == "urn:xmpp:time");
-        if has_time {
-            let iq_id = el.attr("id").unwrap_or("").to_string();
-            let requester = el.attr("from").unwrap_or("").to_string();
-            outbox.push_back(EntityTimeManager::build_time_response(&iq_id, &requester));
-            tracing::debug!("entity_time: responded to time get from {requester}");
-            return;
-        }
-    }
-    // C3: detect MAM <fin> stanza
-    if el.attr("type") == Some("result") {
-        let has_fin = el.children().any(|c| c.name() == "fin" && c.ns() == NS_MAM);
-        if has_fin {
-            if let Some((query_id, mam_result)) = mam_mgr.on_fin_iq(&el) {
-                let fetched = mam_result.messages.len();
-                // Use on_result to peek at conversation jid, then call on_fin
-                let conv_jid = catchup_mgr
-                    .on_result(&query_id, "__server__")
-                    .unwrap_or("__server__")
-                    .to_string();
-                catchup_mgr.on_fin(&query_id);
-                // P4.4: also notify the bulk sync orchestrator so it tracks completion
-                sync_orch.on_fin(&query_id);
-                let _ = event_tx
-                    .send(XmppEvent::CatchupFinished {
-                        conversation_jid: conv_jid,
-                        fetched,
-                    })
-                    .await;
-            }
-            return;
-        }
-    }
-    // E4: detect upload slot result
-    if let Some(slot) = file_upload_mgr.on_slot_result(&el) {
-        let _ = event_tx
-            .send(XmppEvent::UploadSlotReceived {
-                put_url: slot.put_url,
-                get_url: slot.get_url,
-                headers: slot.put_headers,
-            })
-            .await;
-        return;
-    }
-    // J6: detect XEP-0084 avatar data result (PubSub items node='urn:xmpp:avatar:data')
-    if el.attr("type") == Some("result") {
-        let is_avatar_data = el.children().any(|c| {
-            c.name() == "pubsub"
-                && c.ns() == "http://jabber.org/protocol/pubsub"
-                && c.children().any(|items| {
-                    items.name() == "items" && items.attr("node") == Some("urn:xmpp:avatar:data")
-                })
-        });
-        if is_avatar_data {
-            let from_jid = el.attr("from").unwrap_or("").to_string();
-            if let Some(avatar_info) = avatar_mgr.on_avatar_data_result(&from_jid, &el) {
-                if !avatar_info.data.is_empty() {
-                    let _ = event_tx
-                        .send(XmppEvent::AvatarUpdated {
-                            jid: avatar_info.jid,
-                            data: avatar_info.data,
-                        })
-                        .await;
-                }
-            }
-            return;
-        }
-    }
-    // K2: detect own-vCard get result (must check before avatar manager to avoid consuming it)
-    if let Some(fields) = vcard_edit_mgr.on_get_result(&el) {
-        let _ = event_tx.send(XmppEvent::OwnVCardReceived(fields)).await;
-        return;
-    }
-    // K2: detect own-vCard set result
-    if vcard_edit_mgr.on_set_result(&el) {
-        let _ = event_tx.send(XmppEvent::OwnVCardSaved).await;
-        return;
-    }
-    // H1: detect vCard result and extract PHOTO/BINVAL
-    if let Some(avatar_info) = avatar_mgr.on_vcard_result(&el) {
-        if !avatar_info.data.is_empty() {
-            let _ = event_tx
-                .send(XmppEvent::AvatarReceived {
-                    jid: avatar_info.jid,
-                    png_bytes: avatar_info.data,
-                })
-                .await;
-        }
-        return;
-    }
-    // L4: detect ad-hoc command result
-    if let Some(cmd_response) = adhoc_mgr.on_result(&el) {
-        let _ = event_tx
-            .send(XmppEvent::AdhocCommandResult(cmd_response))
-            .await;
-        return;
-    }
-    // C5: parse disco#info results into cache
-    if disco_mgr.on_info_result(&el).is_some() {
-        return;
-    }
-    // K2/L4: parse disco#items results (room list or adhoc command list)
-    if let Some((service_jid, items)) = disco_mgr.on_items_result(&el) {
-        let count = items.len();
-        // L4: if any item has a node resembling commands, treat as adhoc discovery result
-        let has_adhoc_nodes = items.iter().any(|i| i.node.is_some());
-        if has_adhoc_nodes {
-            let commands: Vec<(String, String)> = items
-                .into_iter()
-                .filter_map(|i| i.node.map(|node| (node, i.name.unwrap_or_default())))
-                .collect();
-            let _ = event_tx
-                .send(XmppEvent::AdhocCommandsDiscovered {
-                    from_jid: service_jid.clone(),
-                    commands,
-                })
-                .await;
-            tracing::info!("l4: received {} adhoc commands from {}", count, service_jid);
-        } else {
-            let _ = event_tx.send(XmppEvent::RoomListReceived(items)).await;
-            tracing::info!("k2: received {} rooms from {}", count, service_jid);
-        }
-        return;
-    }
-    // C4: blocklist result (initial fetch)
-    if el.attr("type") == Some("result") {
-        let has_blocklist = el
-            .children()
-            .any(|c| c.name() == "blocklist" && c.ns() == "urn:xmpp:blocking");
-        if has_blocklist {
-            blocking_mgr.on_blocklist_result(&el);
-            tracing::debug!(
-                "blocking: loaded {} blocked JIDs",
-                blocking_mgr.blocked_list().len()
-            );
-            return;
-        }
-    }
-
-    // J10: detect MAM prefs result
-    if el.attr("type") == Some("result") {
-        let prefs_default = el.children().find_map(|c| {
-            if c.name() == "prefs" && c.ns() == NS_MAM {
-                c.attr("default").map(str::to_string)
-            } else {
-                None
-            }
-        });
-        if let Some(default_mode) = prefs_default {
-            let _ = event_tx
-                .send(XmppEvent::MamPrefsReceived { default_mode })
-                .await;
-            return;
-        }
-    }
-    // K1: detect muc#owner config form result
-    if el.attr("type") == Some("result") {
-        let has_owner_query = el
-            .children()
-            .any(|c| c.name() == "query" && c.ns() == NS_MUC_OWNER);
-        if has_owner_query {
-            let room_jid = el.attr("from").unwrap_or("").to_string();
-            if let Some(query) = el
-                .children()
-                .find(|c| c.name() == "query" && c.ns() == NS_MUC_OWNER)
-            {
-                if let Some(config) = muc_config_mgr.parse_config_form(query) {
-                    let _ = event_tx
-                        .send(XmppEvent::RoomConfigFormReceived { room_jid, config })
-                        .await;
-                }
-            }
-            return;
-        }
-    }
-    // K1: detect muc config submit result
-    if el.attr("type") == Some("result") {
-        if let Some(id) = el.attr("id") {
-            if id.starts_with("muc-config-submit-") {
-                let room_jid = el.attr("from").unwrap_or("").to_string();
-                let _ = event_tx.send(XmppEvent::RoomConfigured { room_jid }).await;
-                return;
-            }
-        }
-    }
-    // MEMO: Detect OMEMO device list IQ result (key-exchange path) and trigger
-    // bundle fetches for each device that has no Olm session yet.
-    if el.attr("type") == Some("result") {
-        if let Some(iq_id) = el.attr("id").map(str::to_string) {
-            if let Some(ref mut mgr) = omemo_mgr {
-                if let Some(peer_jid) = mgr.take_device_list_fetch(&iq_id) {
-                    let devices = DeviceManager::parse_device_list(&el);
-                    if !devices.is_empty() {
-                        if let Err(e) = mgr
-                            .store
-                            .sync_device_list(account_jid, &peer_jid, &devices)
-                            .await
-                        {
-                            tracing::warn!(
-                                "omemo: sync_device_list failed for {peer_jid}: {e}"
-                            );
-                        }
-                        for &device_id in &devices {
-                            let has_session = mgr
-                                .store
-                                .load_session(account_jid, &peer_jid, device_id)
-                                .await
-                                .unwrap_or(None)
-                                .is_some();
-                            if !has_session {
-                                let (bundle_iq_id, bundle_iq) =
-                                    mgr.device_mgr.build_bundle_fetch(&peer_jid, device_id);
-                                mgr.track_bundle_fetch(
-                                    bundle_iq_id,
-                                    peer_jid.clone(),
-                                    device_id,
-                                );
-                                outbox.push_back(bundle_iq);
-                                tracing::debug!(
-                                    "omemo: fetching bundle for {peer_jid}/{device_id} (key exchange)"
-                                );
-                            }
-                        }
-                    } else {
-                        tracing::warn!(
-                            "omemo: device list IQ result for {peer_jid} had no devices"
-                        );
-                    }
-                    return;
-                }
-            }
-        }
-    }
-    // MEMO: Detect OMEMO bundle fetch result and create an outbound Olm session.
-    if el.attr("type") == Some("result") {
-        if let Some(iq_id) = el.attr("id").map(str::to_string) {
-            if let Some(ref mut mgr) = omemo_mgr {
-                if let Some((peer_jid, device_id)) = mgr.take_bundle_fetch(&iq_id) {
-                    use super::modules::omemo::bundle::parse_bundle;
-                    use vodozemac::Curve25519PublicKey;
-                    if let Some(bundle) = parse_bundle(&el) {
-                        match mgr.store.load_own_identity(account_jid).await {
-                            Ok(Some(identity)) => {
-                                match OmemoSessionManager::unpickle_account(&identity.identity_key)
-                                {
-                                    Ok(own_account) => {
-                                        let ik_result =
-                                            Curve25519PublicKey::from_slice(&bundle.identity_key);
-                                        let otk_result =
-                                            bundle.pre_keys.first().and_then(|(_, k)| {
-                                                Curve25519PublicKey::from_slice(k).ok()
-                                            });
-                                        match (ik_result, otk_result) {
-                                            (Ok(their_ik), Some(their_otk)) => {
-                                                let session = OmemoSessionManager::create_outbound_session(
-                                                    &own_account,
-                                                    their_ik,
-                                                    their_otk,
-                                                );
-                                                match OmemoSessionManager::pickle_session(&session) {
-                                                    Ok(pickled) => {
-                                                        if let Err(e) = mgr.store
-                                                            .save_session(account_jid, &peer_jid, device_id, &pickled)
-                                                            .await
-                                                        {
-                                                            tracing::warn!("omemo: save_session failed for {peer_jid}/{device_id}: {e}");
-                                                        } else {
-                                                            use super::modules::omemo::store::TrustState;
-                                                            let _ = mgr.store
-                                                                .upsert_device(account_jid, &peer_jid, device_id, TrustState::Tofu, None, true)
-                                                                .await;
-                                                            tracing::info!("omemo: outbound session created for {peer_jid}/{device_id}");
-                                                        }
-                                                    }
-                                                    Err(e) => tracing::warn!("omemo: pickle_session failed for {peer_jid}/{device_id}: {e}"),
-                                                }
-                                            }
-                                            (Err(e), _) => tracing::warn!("omemo: bad identity key in bundle for {peer_jid}/{device_id}: {e}"),
-                                            (_, None) => tracing::warn!("omemo: no one-time keys in bundle for {peer_jid}/{device_id}"),
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!("omemo: failed to unpickle own account: {e}")
-                                    }
-                                }
-                            }
-                            Ok(None) => tracing::warn!(
-                                "omemo: own identity not found when processing bundle"
-                            ),
-                            Err(e) => tracing::warn!("omemo: load_own_identity failed: {e}"),
-                        }
-                    } else {
-                        tracing::warn!(
-                            "omemo: failed to parse bundle IQ for {peer_jid}/{device_id}"
-                        );
-                    }
-                    return;
-                }
-            }
-        }
-    }
-    // Q2: detect Bits of Binary result (XEP-0231)
-    if el.attr("type") == Some("result") {
-        if let Some(bob_data) = bob::parse_bob_data(&el) {
-            let _ = event_tx.send(XmppEvent::BobReceived(bob_data)).await;
-            return;
-        }
-    }
-    // D4: detect bookmarks result (private XML storage, XEP-0048)
-    if el.attr("type") == Some("result") {
-        let has_private = el
-            .children()
-            .any(|c| c.name() == "query" && c.ns() == "jabber:iq:private");
-        if has_private {
-            let bookmarks = BookmarkManager::parse_bookmarks_from_iq(&el);
-            if !bookmarks.is_empty() || el.children().any(|_| true) {
-                bookmark_mgr.set_bookmarks(bookmarks.clone());
-                tracing::info!("bookmarks: loaded {} bookmark(s)", bookmarks.len());
-                let _ = event_tx.send(XmppEvent::BookmarksReceived(bookmarks)).await;
-            }
-            return;
-        }
-    }
-
-    // DC-10: detect ignore list result from PubSub (xmpp-start:ignore:{room_jid})
-    if el.attr("type") == Some("result") {
-        let ignore_node = el.children().find_map(|c| {
-            if c.name() == "pubsub" && c.ns() == "http://jabber.org/protocol/pubsub" {
-                c.children().find_map(|items| {
-                    if items.name() == "items" {
-                        items
-                            .attr("node")
-                            .and_then(|n| n.strip_prefix("xmpp-start:ignore:").map(str::to_string))
-                    } else {
-                        None
-                    }
-                })
-            } else {
-                None
-            }
-        });
-        if let Some(room_jid) = ignore_node {
-            ignore_mgr.parse_result(&room_jid, &el);
-            let ignored = ignore_mgr.list(&room_jid);
-            let _ = event_tx
-                .send(XmppEvent::IgnoreListReceived { room_jid, ignored })
-                .await;
-            return;
-        }
-    }
-
-    // DC-10: detect conversation list result from PubSub (xmpp-start:conversations)
-    if el.attr("type") == Some("result") {
-        let is_conv_sync = el.children().any(|c| {
-            c.name() == "pubsub"
-                && c.ns() == "http://jabber.org/protocol/pubsub"
-                && c.children().any(|items| {
-                    items.name() == "items"
-                        && items.attr("node") == Some("xmpp-start:conversations")
-                })
-        });
-        if is_conv_sync {
-            let conversations = conv_sync_mgr.parse_result(&el);
-            let _ = event_tx
-                .send(XmppEvent::ConversationsReceived(conversations))
-                .await;
-            return;
-        }
-    }
-
-    // C4: block/unblock push IQs from the server (type="set")
-    if el.attr("type") == Some("set") {
-        let first_child_name = el.children().next().map(Element::name);
-        match first_child_name {
-            Some("block") => {
-                blocking_mgr.on_block_push(&el);
-                tracing::debug!("blocking: block push received");
-                return;
-            }
-            Some("unblock") => {
-                blocking_mgr.on_unblock_push(&el);
-                tracing::debug!("blocking: unblock push received");
-                return;
-            }
-            _ => {}
-        }
-    }
-
-    // DC-9: XEP-0077 account management IQ results (change-password / delete-account)
-    if matches!(el.attr("type"), Some("result") | Some("error")) {
-        if let Some(result) = account_mgr.on_iq_result(&el) {
-            match result.kind {
-                AccountIqKind::ChangePassword => {
-                    tracing::info!(
-                        "account: change-password {}",
-                        if result.success { "succeeded" } else { "failed" }
-                    );
-                    let _ = event_tx
-                        .send(XmppEvent::PasswordChanged { success: result.success })
-                        .await;
-                }
-                AccountIqKind::DeleteAccount => {
-                    tracing::info!(
-                        "account: delete-account {}",
-                        if result.success { "succeeded" } else { "failed" }
-                    );
-                    let _ = event_tx
-                        .send(XmppEvent::AccountDeleted { success: result.success })
-                        .await;
-                }
-            }
-            return;
-        }
-    }
-
-    let iq = match Iq::try_from(el) {
-        Ok(i) => i,
-        Err(_) => return,
-    };
-
-    if let xmpp_parsers::iq::IqType::Result(Some(payload)) = iq.payload {
-        if let Ok(roster) = Roster::try_from(payload) {
-            let contacts = roster
-                .items
-                .into_iter()
-                .map(|item| RosterContact {
-                    jid: item.jid.to_string(),
-                    name: item.name,
-                    subscription: format!("{:?}", item.subscription),
-                })
-                .collect();
-            let _ = event_tx.send(XmppEvent::RosterReceived(contacts)).await;
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// MEMO: OMEMO encrypt/decrypt helpers
-// ---------------------------------------------------------------------------
-
-/// Error variants for outbound OMEMO encryption.
-#[derive(Debug)]
-enum OmemoEncryptError {
-    /// No trusted devices found for the recipient — need device list + key exchange.
-    NoTrustedDevices,
-    /// Trusted devices exist but none have an Olm session yet — need bundle fetches.
-    NoSessions {
-        /// Device IDs that need bundle fetches before a session can be established.
-        device_ids: Vec<u32>,
-    },
-    /// Any other failure.
-    Other(anyhow::Error),
-}
-
-impl From<anyhow::Error> for OmemoEncryptError {
-    fn from(e: anyhow::Error) -> Self {
-        OmemoEncryptError::Other(e)
-    }
-}
-
-/// Encrypt `body` for all trusted devices of `to` and build the `<message>` stanza.
-///
-/// For each device that has an existing Olm session, Olm-encrypts the AES key.
-/// Devices without sessions are skipped; the caller triggers a bundle fetch
-/// for those and retries after key exchange.
-async fn omemo_encrypt_and_send(
-    mgr: &mut OmemoManager,
-    account_jid: &str,
-    to: &str,
-    body: &str,
-) -> Result<Element, OmemoEncryptError> {
-    // Load own identity so we know our device_id.
-    let identity = mgr
-        .store
-        .load_own_identity(account_jid)
-        .await
-        .map_err(OmemoEncryptError::Other)?
-        .ok_or_else(|| {
-            OmemoEncryptError::Other(anyhow::anyhow!("OMEMO identity not initialised"))
-        })?;
-
-    let own_device_id = identity.device_id;
-
-    // Load trusted devices for the recipient.
-    let peer_devices = mgr
-        .store
-        .load_devices(account_jid, to)
-        .await
-        .map_err(OmemoEncryptError::Other)?;
-
-    let trusted: Vec<_> = peer_devices
-        .iter()
-        .filter(|d| d.trust.is_encryptable())
-        .collect();
-    if trusted.is_empty() {
-        return Err(OmemoEncryptError::NoTrustedDevices);
-    }
-
-    // AES-256-GCM encrypt the message body.
-    let enc_payload =
-        OmemoSessionManager::encrypt_payload(body).map_err(OmemoEncryptError::Other)?;
-
-    // Build the key slots for each trusted device that has an established session.
-    let mut key_slots: Vec<MessageKey> = Vec::new();
-    // Track trusted devices that have no session yet — need bundle fetches.
-    let mut missing_sessions: Vec<u32> = Vec::new();
-
-    for device in &trusted {
-        let stored_session = mgr
-            .store
-            .load_session(account_jid, to, device.device_id)
-            .await
-            .map_err(OmemoEncryptError::Other)?;
-
-        let ss = match stored_session {
-            Some(s) => s,
-            None => {
-                // No session yet for this device — collect for bundle fetch.
-                tracing::debug!(
-                    "omemo: no session for {}/{}, queuing bundle fetch",
-                    to,
-                    device.device_id
-                );
-                missing_sessions.push(device.device_id);
-                continue;
-            }
-        };
-
-        let mut session = OmemoSessionManager::unpickle_session(&ss.session_data)
-            .map_err(OmemoEncryptError::Other)?;
-        let olm_msg = OmemoSessionManager::encrypt(&mut session, &enc_payload.key);
-
-        // Persist updated session state.
-        let pickled =
-            OmemoSessionManager::pickle_session(&session).map_err(OmemoEncryptError::Other)?;
-        mgr.store
-            .save_session(account_jid, to, device.device_id, &pickled)
-            .await
-            .map_err(OmemoEncryptError::Other)?;
-
-        use vodozemac::olm::OlmMessage;
-        let (prekey, ciphertext) = match olm_msg {
-            OlmMessage::PreKey(ref pk) => (true, pk.to_bytes()),
-            OlmMessage::Normal(ref nm) => (false, nm.to_bytes()),
-        };
-
-        key_slots.push(MessageKey {
-            rid: device.device_id,
-            prekey,
-            data: ciphertext,
-        });
-    }
-
-    if key_slots.is_empty() {
-        // Distinguish: trusted devices with no sessions (fetch bundles) vs
-        // genuinely no trusted devices (fetch device list first).
-        if !missing_sessions.is_empty() {
-            return Err(OmemoEncryptError::NoSessions {
-                device_ids: missing_sessions,
-            });
-        }
-        return Err(OmemoEncryptError::NoTrustedDevices);
-    }
-
-    let header = MessageHeader {
-        sid: own_device_id,
-        keys: key_slots,
-        iv: enc_payload.nonce,
-    };
-
-    let encrypted_msg = EncryptedMessage {
-        header,
-        payload: Some(enc_payload.ciphertext),
-    };
-
-    Ok(build_encrypted_message(to, own_device_id, &encrypted_msg))
-}
-
-/// Attempt to decrypt an incoming OMEMO `<message>` stanza.
-///
-/// Returns `Ok(Some(body))` on success, `Ok(None)` for key-transport (no payload),
-/// `Err` on any decryption failure.
-async fn omemo_try_decrypt(
-    mgr: &mut OmemoManager,
-    account_jid: &str,
-    el: &Element,
-) -> anyhow::Result<Option<String>> {
-    use vodozemac::olm::OlmMessage;
-
-    let encrypted = parse_encrypted_message(el)
-        .ok_or_else(|| anyhow::anyhow!("failed to parse <encrypted> element"))?;
-
-    // Load own identity to find our device_id.
-    let identity = mgr
-        .store
-        .load_own_identity(account_jid)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("OMEMO identity not initialised"))?;
-
-    let own_device_id = identity.device_id;
-
-    // Find the key slot addressed to our device.
-    let our_key = match encrypted
-        .header
-        .keys
-        .iter()
-        .find(|k| k.rid == own_device_id)
-    {
-        Some(k) => k.clone(),
-        None => {
-            return Err(anyhow::anyhow!(
-                "no key slot for our device_id={own_device_id}"
-            ));
-        }
-    };
-
-    let sender_device_id = encrypted.header.sid;
-    let from_jid = el
-        .attr("from")
-        .unwrap_or("")
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .to_string();
-
-    // Reconstruct the AES key via Olm.
-    let aes_key: Vec<u8> = if our_key.prekey {
-        // PreKey message — create an inbound session from the X3DH material.
-        let account_bytes = &identity.identity_key;
-        let mut own_account = OmemoSessionManager::unpickle_account(account_bytes)?;
-
-        use vodozemac::olm::PreKeyMessage;
-        let prekey_msg = PreKeyMessage::from_bytes(&our_key.data)
-            .map_err(|e| anyhow::anyhow!("PreKeyMessage::from_bytes failed: {e}"))?;
-
-        // The sender's identity key is embedded in the PreKeyMessage.
-        let sender_ik = prekey_msg.identity_key();
-
-        let result =
-            OmemoSessionManager::create_inbound_session(&mut own_account, sender_ik, &prekey_msg)?;
-
-        // Persist the new inbound session.
-        let pickled_session = OmemoSessionManager::pickle_session(&result.session)?;
-        mgr.store
-            .save_session(account_jid, &from_jid, sender_device_id, &pickled_session)
-            .await?;
-
-        // Persist the updated own account (one-time key consumed).
-        let pickled_account = OmemoSessionManager::pickle_account(&own_account)?;
-        use crate::xmpp::modules::omemo::store::OwnIdentity;
-        let updated_identity = OwnIdentity {
-            account_jid: account_jid.to_owned(),
-            device_id: identity.device_id,
-            identity_key: pickled_account,
-            signed_prekey: identity.signed_prekey.clone(),
-            spk_id: identity.spk_id,
-        };
-        mgr.store.save_own_identity(&updated_identity).await?;
-
-        result.plaintext
-    } else {
-        // Normal message — use existing session.
-        let stored_session = mgr
-            .store
-            .load_session(account_jid, &from_jid, sender_device_id)
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "no session for {from_jid}/{sender_device_id} and message is not PreKey"
-                )
-            })?;
-
-        let mut session = OmemoSessionManager::unpickle_session(&stored_session.session_data)?;
-        use vodozemac::olm::Message as NormalMessage;
-        let normal_msg = NormalMessage::from_bytes(&our_key.data)
-            .map_err(|e| anyhow::anyhow!("NormalMessage::from_bytes failed: {e}"))?;
-        let key = OmemoSessionManager::decrypt(&mut session, &OlmMessage::Normal(normal_msg))?;
-
-        // Persist updated session state.
-        let pickled = OmemoSessionManager::pickle_session(&session)?;
-        mgr.store
-            .save_session(account_jid, &from_jid, sender_device_id, &pickled)
-            .await?;
-        key
-    };
-
-    // Decrypt the AES-256-GCM payload.
-    match encrypted.payload {
-        None => Ok(None), // key-transport, no body
-        Some(ref ciphertext) => {
-            let body =
-                OmemoSessionManager::decrypt_payload(&aes_key, &encrypted.header.iv, ciphertext)?;
-            Ok(Some(body))
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// MEMO: Pre-key rotation helper
-// ---------------------------------------------------------------------------
-
-/// Minimum number of unconsumed one-time pre-keys to maintain.
-const OMEMO_PREKEY_LOW_WATERMARK: u32 = 20;
-/// Number of pre-keys to generate when replenishing.
-const OMEMO_PREKEY_BATCH_SIZE: usize = 50;
-
-/// Check the current one-time pre-key stock. If below `OMEMO_PREKEY_LOW_WATERMARK`,
-/// generate a fresh batch and push a new bundle publish IQ into `outbox`.
-async fn omemo_check_prekey_rotation(
-    mgr: &mut OmemoManager,
-    account_jid: &str,
-    outbox: &mut VecDeque<Element>,
-) {
-    let count = match mgr.store.count_unconsumed_prekeys(account_jid).await {
-        Ok(n) => n,
-        Err(e) => {
-            tracing::warn!("omemo: count_unconsumed_prekeys failed: {e}");
-            return;
-        }
-    };
-    if count >= OMEMO_PREKEY_LOW_WATERMARK {
-        return;
-    }
-
-    tracing::info!("omemo: pre-key stock low ({count}), replenishing");
-
-    let identity = match mgr.store.load_own_identity(account_jid).await {
-        Ok(Some(id)) => id,
-        Ok(None) => return,
-        Err(e) => {
-            tracing::warn!("omemo: load_own_identity failed in prekey rotation: {e}");
-            return;
-        }
-    };
-
-    let mut account = match OmemoSessionManager::unpickle_account(&identity.identity_key) {
-        Ok(a) => a,
-        Err(e) => {
-            tracing::warn!("omemo: unpickle_account failed in prekey rotation: {e}");
-            return;
-        }
-    };
-
-    account.generate_one_time_keys(OMEMO_PREKEY_BATCH_SIZE);
-
-    // Derive new prekey IDs using a large offset to avoid collisions.
-    let new_otks: Vec<(u32, Vec<u8>)> = {
-        let offset = (identity.device_id as u64 * 1_000_000) as u32;
-        account
-            .one_time_keys()
-            .iter()
-            .enumerate()
-            .map(|(i, (_kid, pk))| (offset.wrapping_add(i as u32 + 1), pk.to_bytes().to_vec()))
-            .collect()
-    };
-
-    account.mark_keys_as_published();
-
-    // Persist updated account (keys marked published).
-    let pickled = match OmemoSessionManager::pickle_account(&account) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::warn!("omemo: pickle_account failed in prekey rotation: {e}");
-            return;
-        }
-    };
-    use crate::xmpp::modules::omemo::store::OwnIdentity;
-    let updated_identity = OwnIdentity {
-        account_jid: account_jid.to_owned(),
-        device_id: identity.device_id,
-        identity_key: pickled,
-        signed_prekey: identity.signed_prekey.clone(),
-        spk_id: identity.spk_id,
-    };
-    if let Err(e) = mgr.store.save_own_identity(&updated_identity).await {
-        tracing::warn!("omemo: save_own_identity failed in prekey rotation: {e}");
-        return;
-    }
-    if let Err(e) = mgr.store.insert_prekeys(account_jid, &new_otks).await {
-        tracing::warn!("omemo: insert_prekeys failed in prekey rotation: {e}");
-        return;
-    }
-
-    // Publish the updated bundle.
-    use super::modules::omemo::bundle::{build_bundle_publish, OmemoBundle};
-    let bundle = OmemoBundle {
-        identity_key: account.identity_keys().curve25519.to_bytes().to_vec(),
-        signed_pre_key: identity.signed_prekey.clone(),
-        signed_pre_key_id: identity.spk_id,
-        signed_pre_key_signature: account.sign(&identity.signed_prekey).to_bytes().to_vec(),
-        pre_keys: new_otks,
-    };
-    outbox.push_back(build_bundle_publish(identity.device_id, &bundle));
-    tracing::info!("omemo: published replenished bundle ({OMEMO_PREKEY_BATCH_SIZE} new keys)");
-}
-
-// ---------------------------------------------------------------------------
 // Carbon helper (XEP-0280)
 // ---------------------------------------------------------------------------
 
@@ -2153,269 +1420,6 @@ fn extract_carbon(el: &Element, direction: &str) -> Option<Element> {
         .children()
         .find(|c| c.name() == "message")
         .cloned()
-}
-
-// ---------------------------------------------------------------------------
-// Message handler (P1.5)
-// ---------------------------------------------------------------------------
-
-async fn handle_message(
-    el: Element,
-    event_tx: &mpsc::Sender<XmppEvent>,
-    blocking_mgr: &BlockingManager,
-    outbox: &mut VecDeque<Element>,
-) {
-    // DC-5: stateless manager for XEP-0308/0424/0444 parsing
-    let mutation_mgr = MutationManager::new();
-
-    // K3: XEP-0249 direct invitation
-    if let Some(x_el) = el
-        .children()
-        .find(|c| c.name() == "x" && c.ns() == NS_X_CONFERENCE)
-    {
-        if let Some(room_jid) = x_el.attr("jid") {
-            let from_jid = el.attr("from").unwrap_or("").to_string();
-            let bare_from = from_jid.split('/').next().unwrap_or(&from_jid).to_string();
-            let reason = x_el
-                .children()
-                .find(|c| c.name() == "reason")
-                .map(tokio_xmpp::minidom::Element::text);
-            let _ = event_tx
-                .send(XmppEvent::RoomInvitationReceived {
-                    room_jid: room_jid.to_string(),
-                    from_jid: bare_from,
-                    reason,
-                })
-                .await;
-        }
-        return;
-    }
-
-    // K3: XEP-0045 §7.8 mediated invitation
-    if let Some(x_muc) = el
-        .children()
-        .find(|c| c.name() == "x" && c.ns() == NS_MUC_USER)
-    {
-        if let Some(invite_el) = x_muc.children().find(|c| c.name() == "invite") {
-            let from_jid = invite_el.attr("from").unwrap_or("").to_string();
-            let room_jid_full = el.attr("from").unwrap_or("").to_string();
-            let bare_room = room_jid_full
-                .split('/')
-                .next()
-                .unwrap_or(&room_jid_full)
-                .to_string();
-            let reason = invite_el
-                .children()
-                .find(|c| c.name() == "reason")
-                .map(tokio_xmpp::minidom::Element::text);
-            let _ = event_tx
-                .send(XmppEvent::RoomInvitationReceived {
-                    room_jid: bare_room,
-                    from_jid,
-                    reason,
-                })
-                .await;
-        }
-        return;
-    }
-
-    // E3: detect XEP-0444 reaction stanza before consuming el
-    {
-        let from = el.attr("from").unwrap_or("").to_string();
-        let bare_from = from.split('/').next().unwrap_or(&from).to_string();
-        if let Some(update) = mutation_mgr.parse_reaction(&bare_from, &el) {
-            if !blocking_mgr.is_blocked(&bare_from) {
-                let _ = event_tx
-                    .send(XmppEvent::ReactionReceived {
-                        msg_id: update.target_id,
-                        from: update.from_jid,
-                        emojis: update.emojis,
-                    })
-                    .await;
-            }
-            return;
-        }
-    }
-
-    // E1: detect XEP-0308 last message correction before consuming el
-    {
-        let from = el.attr("from").unwrap_or("").to_string();
-        let bare_from = from.split('/').next().unwrap_or(&from).to_string();
-        if let Some(correction) = mutation_mgr.parse_correction(&bare_from, &el) {
-            if !blocking_mgr.is_blocked(&bare_from) {
-                let _ = event_tx
-                    .send(XmppEvent::CorrectionReceived {
-                        original_id: correction.target_id,
-                        _from_jid: correction.from_jid,
-                        new_body: correction.new_body,
-                    })
-                    .await;
-            }
-            return;
-        }
-    }
-
-    // E2: detect XEP-0424 message retraction before consuming el
-    {
-        let from = el.attr("from").unwrap_or("").to_string();
-        let bare_from = from.split('/').next().unwrap_or(&from).to_string();
-        if let Some(retraction) = mutation_mgr.parse_retraction(&bare_from, &el) {
-            if !blocking_mgr.is_blocked(&bare_from) {
-                let _ = event_tx
-                    .send(XmppEvent::RetractionReceived {
-                        _origin_id: retraction.target_id,
-                        _from_jid: retraction.from_jid,
-                    })
-                    .await;
-            }
-            return;
-        }
-    }
-
-    // K4: XEP-0184 delivery receipt — <received xmlns='urn:xmpp:receipts' id='...'/>
-    if let Some(received_el) = el
-        .children()
-        .find(|c| c.name() == "received" && c.ns() == NS_RECEIPTS)
-    {
-        if let Some(receipt_id) = received_el.attr("id") {
-            let from = el.attr("from").unwrap_or("").to_string();
-            let bare_from = from.split('/').next().unwrap_or(&from).to_string();
-            let _ = event_tx
-                .send(XmppEvent::MessageDelivered {
-                    id: receipt_id.to_string(),
-                    from: bare_from,
-                })
-                .await;
-        }
-        return;
-    }
-
-    // K5: XEP-0333 displayed marker — <displayed xmlns='urn:xmpp:chat-markers:0' id='...'/>
-    if let Some(displayed_el) = el
-        .children()
-        .find(|c| c.name() == "displayed" && c.ns() == NS_CHAT_MARKERS)
-    {
-        if let Some(marker_id) = displayed_el.attr("id") {
-            let from = el.attr("from").unwrap_or("").to_string();
-            let bare_from = from.split('/').next().unwrap_or(&from).to_string();
-            let _ = event_tx
-                .send(XmppEvent::MessageRead {
-                    id: marker_id.to_string(),
-                    from: bare_from,
-                })
-                .await;
-        }
-        return;
-    }
-
-    // K4: if sender is requesting a receipt, remember message id for auto-reply below
-    let receipt_request = el
-        .children()
-        .any(|c| c.name() == "request" && c.ns() == NS_RECEIPTS);
-    let msg_from = el.attr("from").map(str::to_string);
-    let msg_id_raw = el.attr("id").map(str::to_string);
-
-    // G2: detect XEP-0085 chat state notifications from the raw element
-    // before consuming el into XmppMessage (which may drop unknown children)
-    let has_composing = el
-        .children()
-        .any(|c| c.name() == "composing" && c.ns() == "jabber:x:chatstates");
-    let has_paused = el.children().any(|c| {
-        (c.name() == "paused" || c.name() == "inactive") && c.ns() == "jabber:x:chatstates"
-    });
-    let chat_state_from = el.attr("from").map(str::to_string);
-
-    let msg = match XmppMessage::try_from(el) {
-        Ok(m) => m,
-        Err(_) => return,
-    };
-
-    // Only handle chat/normal messages with a body.
-    if msg.type_ == MessageType::Error {
-        return;
-    }
-
-    // G2: emit PeerTyping if we found a chat state
-    if has_composing || has_paused {
-        if let Some(from_str) = chat_state_from.as_deref() {
-            let bare_jid = from_str.split('/').next().unwrap_or(from_str).to_string();
-            let _ = event_tx
-                .send(XmppEvent::PeerTyping {
-                    jid: bare_jid,
-                    composing: has_composing,
-                })
-                .await;
-        }
-    }
-
-    let body = match msg.bodies.get("") {
-        Some(Body(b)) => b.clone(),
-        None => return,
-    };
-
-    let from = match msg.from {
-        Some(ref f) => f.to_string(),
-        None => return,
-    };
-
-    // C4: skip messages from blocked JIDs
-    let bare_from = from.split('/').next().unwrap_or(&from);
-    if blocking_mgr.is_blocked(bare_from) {
-        tracing::debug!("blocking: dropped message from {bare_from}");
-        return;
-    }
-
-    let id = msg.id.unwrap_or_default();
-
-    // K4: auto-reply with <received> if sender requested a delivery receipt
-    // S6: respect user's privacy preference for delivery receipts
-    if PRIVACY_FLAGS.load(std::sync::atomic::Ordering::SeqCst) & 0b001 != 0 && receipt_request {
-        if let (Some(reply_to), Some(orig_id)) = (msg_from, msg_id_raw) {
-            let receipt = Element::builder("message", "jabber:client")
-                .attr("to", reply_to)
-                .append(
-                    Element::builder("received", NS_RECEIPTS)
-                        .attr("id", orig_id)
-                        .build(),
-                )
-                .build();
-            outbox.push_back(receipt);
-        }
-    }
-
-    let _ = event_tx
-        .send(XmppEvent::MessageReceived(IncomingMessage {
-            id,
-            from,
-            body,
-            is_historical: false,
-        }))
-        .await;
-}
-
-// ---------------------------------------------------------------------------
-// Presence handler (P1.4)
-// ---------------------------------------------------------------------------
-
-async fn handle_presence(el: Element, event_tx: &mpsc::Sender<XmppEvent>) {
-    let presence = match Presence::try_from(el) {
-        Ok(p) => p,
-        Err(_) => return,
-    };
-
-    let jid = match presence.from {
-        Some(ref f) => f.to_string(),
-        None => return,
-    };
-
-    let available = !matches!(
-        presence.type_,
-        PresenceType::Unavailable | PresenceType::Error
-    );
-
-    let _ = event_tx
-        .send(XmppEvent::PresenceUpdated { jid, available })
-        .await;
 }
 
 // ---------------------------------------------------------------------------
@@ -2709,6 +1713,7 @@ async fn run_registration_session(
 mod tests {
     use super::*;
     use crate::xmpp::connection::sasl::SaslMechanism;
+    use crate::xmpp::RosterContact;
 
     // --- XmppEvent derives ---
 

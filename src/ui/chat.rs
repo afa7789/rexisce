@@ -786,21 +786,6 @@ impl ChatScreen {
                     return Task::none();
                 }
 
-                // G8: intercept RequestOlderHistory to queue a FetchHistory command
-                if let super::conversation::Message::RequestOlderHistory = cmsg {
-                    let before_id = self
-                        .conversations
-                        .get(&jid)
-                        .and_then(|cv| cv.messages().first())
-                        .map(|m| m.id.clone());
-                    self.pending_commands
-                        .push(crate::xmpp::XmppCommand::FetchHistory {
-                            jid: jid.clone(),
-                            before_id,
-                        });
-                    return Task::none();
-                }
-
                 // E4/I3: intercept OpenFilePicker to spawn picker task
                 if let super::conversation::Message::OpenFilePicker = cmsg {
                     if let Some(convo) = self.conversations.get_mut(&jid) {
@@ -1190,13 +1175,13 @@ impl ChatScreen {
             .on_press(Message::OpenSettings)
             .padding([2, 8]);
         // C2: presence status picker buttons
-        let available_btn = iced::widget::button(text("● Available").size(11))
+        let available_btn = iced::widget::button(text("[+] Available").size(11))
             .on_press(Message::SetPresence(PresenceStatus::Available))
             .padding([2, 8]);
-        let away_btn = iced::widget::button(text("◌ Away").size(11))
+        let away_btn = iced::widget::button(text("[-] Away").size(11))
             .on_press(Message::SetPresence(PresenceStatus::Away))
             .padding([2, 8]);
-        let dnd_btn = iced::widget::button(text("⊘ DND").size(11))
+        let dnd_btn = iced::widget::button(text("[x] DND").size(11))
             .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
             .padding([2, 8]);
         let status_bar = container(

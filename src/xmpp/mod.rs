@@ -6,6 +6,7 @@
 
 pub mod connection;
 pub mod engine;
+pub mod handlers;
 pub mod modules;
 pub mod multi_engine;
 pub mod subscription;
@@ -36,37 +37,6 @@ impl AccountId {
 impl std::fmt::Display for AccountId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// MULTI: Account-scoped event wrapper
-// ---------------------------------------------------------------------------
-
-/// Wraps an [`XmppEvent`] with the [`AccountId`] that produced it.
-///
-/// When multiple engine instances are running concurrently the UI needs to
-/// know which account an event came from so it can update the right account state.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct AccountEvent {
-    /// The account this event originated from.
-    pub account_id: AccountId,
-    /// The event payload.
-    pub event: XmppEvent,
-}
-
-impl AccountEvent {
-    /// Convenience constructor.
-    #[allow(dead_code)]
-    pub fn new(account_id: AccountId, event: XmppEvent) -> Self {
-        Self { account_id, event }
-    }
-}
-
-impl std::fmt::Display for AccountEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] {:?}", self.account_id, self.event)
     }
 }
 
@@ -300,9 +270,13 @@ pub enum XmppEvent {
 
     // DC-9: XEP-0077 account management IQ results.
     /// The server responded to a change-password request.
-    PasswordChanged { success: bool },
+    PasswordChanged {
+        success: bool,
+    },
     /// The server responded to a delete-account request.
-    AccountDeleted { success: bool },
+    AccountDeleted {
+        success: bool,
+    },
 }
 
 /// Commands sent from the UI to the XMPP engine.
@@ -525,7 +499,10 @@ pub enum XmppCommand {
 
     // DC-9: XEP-0077 account management IQ commands.
     /// Change the account password via an in-band registration IQ.
-    ChangePassword { username: String, new_password: String },
+    ChangePassword {
+        username: String,
+        new_password: String,
+    },
     /// Delete (unregister) the current account via in-band registration IQ.
     DeleteAccount,
 

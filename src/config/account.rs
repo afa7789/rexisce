@@ -7,6 +7,19 @@ use serde::{Deserialize, Serialize};
 
 use super::default_true;
 
+/// Returns `true` if `jid` is a minimally valid bare JID: `local@domain`.
+///
+/// Rules enforced:
+/// - Exactly one `@` character.
+/// - Non-empty local part (before `@`).
+/// - Non-empty domain part (after `@`) containing at least one `.`.
+pub fn is_valid_jid(jid: &str) -> bool {
+    let Some((local, domain)) = jid.split_once('@') else {
+        return false;
+    };
+    !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
+}
+
 /// Optional proxy configuration for routing an account's connection.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProxyConfig {
@@ -48,6 +61,21 @@ impl AccountConfig {
             color: None,
         }
     }
+
+    /// Validate the configuration, returning an error message if invalid.
+    ///
+    /// Currently checks that `jid` is a well-formed bare JID (`local@domain`).
+    #[allow(dead_code)]
+    pub fn validate(&self) -> Result<(), String> {
+        if is_valid_jid(&self.jid) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Invalid JID \"{}\": must be in the form user@domain",
+                self.jid
+            ))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -57,6 +85,55 @@ impl AccountConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- is_valid_jid -------------------------------------------------------
+
+    #[test]
+    fn valid_jid_accepted() {
+        assert!(is_valid_jid("alice@example.com"));
+        assert!(is_valid_jid("user@xmpp.server.org"));
+        assert!(is_valid_jid("a@b.c"));
+    }
+
+    #[test]
+    fn jid_without_at_rejected() {
+        assert!(!is_valid_jid("nodomainsign"));
+        assert!(!is_valid_jid(""));
+    }
+
+    #[test]
+    fn jid_empty_local_rejected() {
+        assert!(!is_valid_jid("@example.com"));
+    }
+
+    #[test]
+    fn jid_domain_without_dot_rejected() {
+        assert!(!is_valid_jid("user@localhost"));
+    }
+
+    #[test]
+    fn jid_domain_leading_trailing_dot_rejected() {
+        assert!(!is_valid_jid("user@.example.com"));
+        assert!(!is_valid_jid("user@example.com."));
+    }
+
+    // --- AccountConfig::validate --------------------------------------------
+
+    #[test]
+    fn validate_ok_for_valid_jid() {
+        let a = AccountConfig::new("alice@example.com");
+        assert!(a.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_err_for_invalid_jid() {
+        let mut a = AccountConfig::new("alice@example.com");
+        a.jid = "notajid".into();
+        let err = a.validate().unwrap_err();
+        assert!(err.contains("notajid"));
+    }
+
+    // --- existing tests -----------------------------------------------------
 
     #[test]
     fn account_config_defaults() {

@@ -385,7 +385,7 @@ impl SidebarScreen {
             .iter()
             .map(|c| {
                 let available = self.presence.get(c.jid.as_str()).copied().unwrap_or(false);
-                let indicator = if available { "●" } else { "○" };
+                let indicator = if available { "*" } else { "o" };
                 let display_name = c.name.as_deref().unwrap_or(&c.jid);
                 // G6: append [draft] if this JID has a non-empty draft
                 let has_draft = drafts.iter().any(|d| d == &c.jid);
@@ -452,7 +452,7 @@ impl SidebarScreen {
                 let current_name = c.name.clone().unwrap_or_else(|| c.jid.clone());
                 let jid_for_rename = c.jid.clone();
                 let rename_btn = tooltip(
-                    button(text("✎").size(10))
+                    button(text("~").size(10))
                         .on_press(Message::StartRename(jid_for_rename, current_name))
                         .padding([2, 4]),
                     "Rename",
@@ -462,7 +462,7 @@ impl SidebarScreen {
                 // H3: remove button
                 let jid_for_remove = c.jid.clone();
                 let remove_btn = tooltip(
-                    button(text("✕").size(10))
+                    button(text("X").size(10))
                         .on_press(Message::RemoveContact(jid_for_remove))
                         .padding([2, 4]),
                     "Remove contact",
@@ -470,10 +470,8 @@ impl SidebarScreen {
                 );
 
                 // H3: if renaming this contact, show inline rename input
-                let is_renaming = self.rename_state.as_ref().is_some_and(|(j, _)| j == &c.jid);
-
-                if is_renaming {
-                    let (_, new_name) = self.rename_state.as_ref().unwrap();
+                if let Some((_, new_name)) = self.rename_state.as_ref().filter(|(j, _)| j == &c.jid)
+                {
                     let rename_input = text_input("New name…", new_name)
                         .on_input(Message::RenameInputChanged)
                         .on_submit(Message::SubmitRename)
@@ -481,7 +479,7 @@ impl SidebarScreen {
                     let confirm_btn = button(text("OK").size(10))
                         .on_press(Message::SubmitRename)
                         .padding([2, 5]);
-                    let cancel_btn = button(text("✕").size(10))
+                    let cancel_btn = button(text("X").size(10))
                         .on_press(Message::CancelRename)
                         .padding([2, 4]);
                     row![rename_input, confirm_btn, cancel_btn]
@@ -532,7 +530,7 @@ impl SidebarScreen {
             let name = contact
                 .and_then(|c| c.name.as_deref())
                 .unwrap_or(jid.as_str());
-            let close_btn = button(text("✕").size(10))
+            let close_btn = button(text("X").size(10))
                 .on_press(Message::CloseProfile)
                 .padding([2, 4]);
             let profile_col = column![

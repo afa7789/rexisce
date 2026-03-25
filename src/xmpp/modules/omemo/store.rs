@@ -37,16 +37,6 @@ impl TrustState {
         }
     }
 
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "tofu" => TrustState::Tofu,
-            "trusted" => TrustState::Trusted,
-            "untrusted" => TrustState::Untrusted,
-            _ => TrustState::Undecided,
-        }
-    }
-
     /// Returns true when this state permits receiving messages from the device.
     #[allow(dead_code)]
     pub fn is_decryptable(&self) -> bool {
@@ -56,6 +46,19 @@ impl TrustState {
     /// Returns true when this state permits encrypting outbound messages to the device.
     pub fn is_encryptable(&self) -> bool {
         matches!(self, TrustState::Tofu | TrustState::Trusted)
+    }
+}
+
+impl std::str::FromStr for TrustState {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "tofu" => TrustState::Tofu,
+            "trusted" => TrustState::Trusted,
+            "untrusted" => TrustState::Untrusted,
+            _ => TrustState::Undecided,
+        })
     }
 }
 
@@ -208,20 +211,6 @@ impl OmemoStore {
             .collect())
     }
 
-    /// Mark a pre-key as consumed (called when a remote device claims it).
-    #[allow(dead_code)]
-    pub async fn mark_prekey_consumed(&self, account_jid: &str, prekey_id: u32) -> Result<()> {
-        sqlx::query(
-            "UPDATE omemo_prekeys SET consumed = 1
-             WHERE account_jid = ? AND prekey_id = ?",
-        )
-        .bind(account_jid)
-        .bind(prekey_id as i64)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
     /// Count remaining unconsumed pre-keys. Used to trigger replenishment.
     pub async fn count_unconsumed_prekeys(&self, account_jid: &str) -> Result<u32> {
         let row = sqlx::query(
@@ -287,26 +276,6 @@ impl OmemoStore {
         Ok(())
     }
 
-    /// Delete a session (e.g., after a device is untrusted or key exchange fails).
-    #[allow(dead_code)]
-    pub async fn delete_session(
-        &self,
-        account_jid: &str,
-        peer_jid: &str,
-        device_id: u32,
-    ) -> Result<()> {
-        sqlx::query(
-            "DELETE FROM omemo_sessions
-             WHERE account_jid = ? AND peer_jid = ? AND device_id = ?",
-        )
-        .bind(account_jid)
-        .bind(peer_jid)
-        .bind(device_id as i64)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
     // -----------------------------------------------------------------------
     // Peer devices
     // -----------------------------------------------------------------------
@@ -327,7 +296,10 @@ impl OmemoStore {
             .map(|r| PeerDevice {
                 _peer_jid: r.get("peer_jid"),
                 device_id: r.get::<i64, _>("device_id") as u32,
-                trust: TrustState::from_str(r.get("trust")),
+                trust: r
+                    .get::<&str, _>("trust")
+                    .parse::<TrustState>()
+                    .unwrap_or(TrustState::Undecided),
                 _label: r.get("label"),
                 _active: r.get::<i64, _>("active") != 0,
             })
@@ -434,7 +406,7 @@ mod tests {
             TrustState::Trusted,
             TrustState::Untrusted,
         ] {
-            assert_eq!(TrustState::from_str(state.as_str()), *state);
+            assert_eq!(state.as_str().parse::<TrustState>().unwrap(), *state);
         }
     }
 

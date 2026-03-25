@@ -117,12 +117,6 @@ impl SettingsScreen {
         }
     }
 
-    /// Replace the block list shown in the panel.
-    #[allow(dead_code)]
-    pub fn set_blocked_jids(&mut self, jids: Vec<String>) {
-        self.blocklist = BlocklistPanel::new(jids);
-    }
-
     /// Update the account info shown in the Account Details section.
     pub fn set_account_info(&mut self, info: AccountInfo) {
         self.account_info = info;
@@ -290,10 +284,7 @@ impl SettingsScreen {
                 {
                     match crate::store::avatar_crop::crop_to_avatar(bytes, state, 256) {
                         Ok(cropped) => {
-                            return Task::done(Message::AvatarSelected(
-                                cropped,
-                                mime.clone(),
-                            ));
+                            return Task::done(Message::AvatarSelected(cropped, mime.clone()));
                         }
                         Err(e) => {
                             tracing::warn!("Avatar crop failed: {e}");

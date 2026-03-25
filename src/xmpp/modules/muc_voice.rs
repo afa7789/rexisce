@@ -9,14 +9,6 @@ use tokio_xmpp::minidom::Element;
 
 use super::{NS_CLIENT, NS_MUC};
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct VoiceRequest {
-    pub room_jid: String,
-    pub nick: String,
-    pub role: String,
-}
-
 #[derive(Debug, Clone)]
 pub struct MucVoiceManager;
 

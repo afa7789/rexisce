@@ -1,15 +1,39 @@
-// MULTI: Multi-engine manager
-//
-// Manages one XMPP engine task per configured account.
-// Each engine runs in its own Tokio task and communicates via channel pairs.
-// The manager routes commands to the correct engine and tags inbound events
-// with the originating AccountId before forwarding them to the UI.
+//! # Multi-engine manager
+//!
+//! **Status: EXPERIMENTAL / ALPHA**
+//!
+//! [`MultiEngineManager`] manages one XMPP engine task per configured account,
+//! enabling multi-account support within a single application process.
+//! Each engine runs in its own Tokio task and communicates via a dedicated
+//! command/event channel pair. The manager routes outbound commands to the
+//! correct engine and tags every inbound event with the originating
+//! [`AccountId`] before forwarding it to the UI layer.
+//!
+//! ## Current limitations
+//!
+//! - **No persistent reconnection logic.** If an engine task exits unexpectedly
+//!   (e.g. due to a network error), it is not automatically restarted. Callers
+//!   must call [`MultiEngineManager::start_account`] again.
+//! - **No per-engine database access.** OMEMO / message persistence rely on the
+//!   main application's database pool; the manager itself has no direct DB
+//!   integration.
+//! - **Password handling:** `start_account` resolves credentials from the OS
+//!   keychain via `config::load_account_password`. If lookup fails the engine
+//!   is not started and an error is logged.
+//! - **No backpressure when the UI channel is saturated.** If the shared
+//!   `event_tx` is full, a bridge task will silently drop the receiver and stop
+//!   relaying events.
+//! - The active-account sentinel after `stop_account` is an empty string JID,
+//!   not a proper `Option<AccountId>`.
+//!
+//! This module will evolve as multi-account support matures. Public API may
+//! change without a deprecation period while in alpha.
 
 use std::collections::HashMap;
 
 use tokio::sync::mpsc;
 
-use crate::config::AccountConfig;
+use crate::config::{self, AccountConfig};
 
 use super::connection::ConnectConfig;
 use super::{engine::run_engine, AccountId, XmppCommand, XmppEvent};
@@ -29,6 +53,9 @@ struct EngineHandle {
 // ---------------------------------------------------------------------------
 
 /// Owns one XMPP engine per account and routes commands / events accordingly.
+///
+/// **Experimental / alpha** — see the [module-level documentation](self) for
+/// current limitations and stability caveats.
 pub struct MultiEngineManager {
     /// Live engine handles, keyed by account JID.
     engines: HashMap<AccountId, EngineHandle>,
@@ -54,6 +81,10 @@ impl MultiEngineManager {
     ///
     /// Calling this twice for the same account is a no-op (the existing engine
     /// is left running).
+    ///
+    /// The credential is resolved from the OS keychain using
+    /// `config.password_key` as the lookup key. If no credential is found the
+    /// method logs a `tracing::error!` and returns without starting the engine.
     pub fn start_account(
         &mut self,
         config: AccountConfig,
@@ -65,6 +96,31 @@ impl MultiEngineManager {
             tracing::debug!("multi: engine for {} already running", id);
             return;
         }
+
+        // Resolve the actual credential from the OS keychain before spawning
+        // anything.  `password_key` is a keychain lookup identifier, not the
+        // cleartext password itself.
+        let password = match config::load_account_password(&config) {
+            Some(pw) => pw,
+            None => {
+                // In test builds, fall back to password_key so unit tests that
+                // don't have a real keychain can still exercise the manager.
+                #[cfg(test)]
+                {
+                    tracing::warn!("multi-engine: keychain unavailable in test — using password_key as fallback");
+                    config.password_key.clone()
+                }
+                #[cfg(not(test))]
+                {
+                    tracing::error!(
+                        jid = %config.jid,
+                        password_key = %config.password_key,
+                        "multi-engine: keychain lookup failed — no credential found for account; engine not started"
+                    );
+                    return;
+                }
+            }
+        };
 
         let (cmd_tx, cmd_rx) = mpsc::channel::<XmppCommand>(32);
         let (engine_event_tx, mut engine_event_rx) = mpsc::channel::<XmppEvent>(64);
@@ -91,11 +147,9 @@ impl MultiEngineManager {
         tokio::spawn(run_engine(engine_event_tx, cmd_rx, None));
 
         // Immediately issue a Connect command so the engine dials the server.
-        // Password lookup from OS keychain is the caller's responsibility; here
-        // we use password_key as a placeholder (real integration would read it).
         let connect_config = ConnectConfig {
             jid: config.jid.clone(),
-            password: config.password_key.clone(),
+            password,
             server: String::new(),
             status_message: None,
             send_receipts: true,

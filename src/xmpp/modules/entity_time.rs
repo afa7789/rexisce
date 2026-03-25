@@ -27,7 +27,6 @@ pub struct EntityTime {
 }
 
 /// Manages outgoing entity-time requests and the resulting cache.
-#[allow(dead_code)]
 pub struct EntityTimeManager {
     /// jid → EntityTime cache
     cache: HashMap<String, EntityTime>,

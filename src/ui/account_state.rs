@@ -103,13 +103,14 @@ impl AccountStateManager {
     pub fn add_account(&mut self, id: AccountId) -> &mut AccountState {
         let is_first = self.accounts.is_empty();
         let jid = id.0.clone();
-        self.accounts
+        let state = self
+            .accounts
             .entry(id.clone())
             .or_insert_with(|| AccountState::new(jid));
         if is_first {
-            self.active = Some(id.clone());
+            self.active = Some(id);
         }
-        self.accounts.get_mut(&id).unwrap()
+        state
     }
 
     /// Remove an account and its state. If the removed account was active,

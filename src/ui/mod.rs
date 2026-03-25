@@ -113,7 +113,8 @@ fn palette_commands() -> Vec<command_palette::Command> {
 }
 
 // DC-21: shared optional receiver for the multi-account event channel
-type MultiEventRx = std::sync::Arc<std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<(AccountId, XmppEvent)>>>>;
+type MultiEventRx =
+    std::sync::Arc<std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<(AccountId, XmppEvent)>>>>;
 
 /// Top-level application state.
 pub struct App {
@@ -169,13 +170,10 @@ enum IdleState {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum Message {
     Login(login::Message),
     Benchmark(benchmark::Message),
     Chat(chat::Message),
-    GoToBenchmark,
-    ToggleTheme,
     XmppReady(mpsc::Sender<XmppCommand>),
     XmppEvent(XmppEvent),
     // J1: toast messages
@@ -915,24 +913,14 @@ impl App {
                 Task::batch([avatar_task, update_task])
             }
 
-            Message::ToggleTheme => {
-                self.settings.theme = match self.settings.theme {
-                    Theme::Dark => Theme::Light,
-                    Theme::Light => Theme::Dark,
-                };
-                let _ = config::save(&self.settings);
-                Task::none()
-            }
-
-            Message::GoToBenchmark => {
-                self.screen = Screen::Benchmark(BenchmarkScreen::new());
-                Task::none()
-            }
-
             Message::Login(msg) => {
                 if matches!(msg, login::Message::Connect) {
                     if let Screen::Login(ref mut login) = self.screen {
                         let cfg = login.connect_config();
+                        if !config::is_valid_jid(&cfg.jid) {
+                            login.on_error("Invalid JID: must be in the form user@domain".into());
+                            return Task::none();
+                        }
                         if let Some(ref tx) = self.xmpp_tx {
                             let tx = tx.clone();
                             self.settings.last_jid = cfg.jid.clone();
@@ -1125,10 +1113,9 @@ impl App {
 
             Message::XmppReady(tx) => {
                 tracing::debug!("xmpp command channel ready");
-                self.xmpp_tx = Some(tx);
+                self.xmpp_tx = Some(tx.clone());
                 // AUTH-1: if we have a pending auto-connect config, connect now.
                 if let Some(cfg) = self.auto_connect_cfg.take() {
-                    let tx = self.xmpp_tx.as_ref().unwrap().clone();
                     self.last_connect_cfg = Some(cfg.clone());
                     self.reconnect_attempt = 0;
                     return Task::future(async move {
@@ -1159,8 +1146,7 @@ impl App {
                         // so future commands can be routed to it.
                         if self.is_adding_account {
                             self.is_adding_account = false;
-                            let cfg =
-                                config::AccountConfig::new(bound_jid.clone());
+                            let cfg = config::AccountConfig::new(bound_jid.clone());
                             self.multi_engine
                                 .start_account(cfg, self.multi_event_tx.clone());
                             self.multi_engine.switch_active(account_id.clone());
@@ -1232,6 +1218,11 @@ impl App {
                     }
                     XmppEvent::Disconnected { ref reason } => {
                         tracing::warn!("XMPP: disconnected — {reason}");
+                        // BUG-7: auth failure while on Login screen — clear stale cfg so
+                        // the Reconnecting handler won't attempt a retry with bad creds.
+                        if matches!(self.screen, Screen::Login(_)) {
+                            self.last_connect_cfg = None;
+                        }
                         if let Screen::Login(ref mut login) = self.screen {
                             login.on_error(reason.clone());
                         }
@@ -1248,17 +1239,23 @@ impl App {
                     XmppEvent::Reconnecting { attempt } => {
                         tracing::info!("XMPP: reconnecting (attempt {attempt})");
                         self.reconnect_attempt = attempt;
-                        let delay_secs = 2u64.pow(attempt.min(6));
-                        if let (Some(cfg), Some(tx)) =
-                            (self.last_connect_cfg.clone(), self.xmpp_tx.clone())
-                        {
-                            return Task::future(async move {
-                                tokio::time::sleep(std::time::Duration::from_secs(delay_secs))
-                                    .await;
-                                let _ = tx.send(XmppCommand::Connect(cfg)).await;
-                                Message::XmppEvent(XmppEvent::Reconnecting { attempt: 0 })
-                            })
-                            .discard();
+                        // BUG-7: if still on Login screen the user hasn't successfully
+                        // authenticated yet — don't auto-reconnect with stale credentials.
+                        if matches!(self.screen, Screen::Login(_)) {
+                            tracing::info!("XMPP: on Login screen, skipping auto-reconnect");
+                        } else {
+                            let delay_secs = 2u64.pow(attempt.min(6));
+                            if let (Some(cfg), Some(tx)) =
+                                (self.last_connect_cfg.clone(), self.xmpp_tx.clone())
+                            {
+                                return Task::future(async move {
+                                    tokio::time::sleep(std::time::Duration::from_secs(delay_secs))
+                                        .await;
+                                    let _ = tx.send(XmppCommand::Connect(cfg)).await;
+                                    Message::XmppEvent(XmppEvent::Reconnecting { attempt: 0 })
+                                })
+                                .discard();
+                            }
                         }
                     }
                     XmppEvent::RosterReceived(ref contacts) => {
@@ -1654,8 +1651,7 @@ impl App {
                         let oid = original_id.clone();
                         let nb = body.clone();
                         tokio::spawn(async move {
-                            let _ =
-                                crate::store::message_repo::update_body(&pool, &oid, &nb).await;
+                            let _ = crate::store::message_repo::update_body(&pool, &oid, &nb).await;
                         });
                     }
                     // MEMO / other agents: unhandled events from additional modules.
@@ -1997,19 +1993,27 @@ impl App {
             iced::stream::channel(32, move |mut output| async move {
                 // Take the receiver out of the shared slot (once).
                 let mut rx = {
-                    let mut guard = multi_rx.lock().unwrap();
+                    let mut guard = multi_rx
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     guard.take()
                 };
                 if let Some(ref mut rx) = rx {
                     while let Some((_account_id, event)) = rx.recv().await {
-                        let _ = output
-                            .try_send(Message::XmppEvent(event));
+                        let _ = output.try_send(Message::XmppEvent(event));
                     }
                 }
                 // Keep the future alive so the subscription isn't dropped.
                 std::future::pending::<()>().await;
             })
         });
-        Subscription::batch([xmpp_sub, kb_sub, drop_sub, idle_sub, voice_tick_sub, multi_sub])
+        Subscription::batch([
+            xmpp_sub,
+            kb_sub,
+            drop_sub,
+            idle_sub,
+            voice_tick_sub,
+            multi_sub,
+        ])
     }
 }

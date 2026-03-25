@@ -219,7 +219,7 @@ fn rand_byte() -> u8 {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .subsec_nanos();
     ((nanos as u8).wrapping_mul(17)).wrapping_add(42)
 }

@@ -267,7 +267,12 @@ mod tests {
     const NICK: &str = "alice";
     const NS_MUC_USER: &str = "http://jabber.org/protocol/muc#user";
 
-    fn make_available_presence(room_jid: &str, nick: &str, role: &str, affiliation: &str) -> Element {
+    fn make_available_presence(
+        room_jid: &str,
+        nick: &str,
+        role: &str,
+        affiliation: &str,
+    ) -> Element {
         let item = Element::builder("item", NS_MUC_USER)
             .attr("role", role)
             .attr("affiliation", affiliation)
@@ -360,7 +365,12 @@ mod tests {
     fn on_presence_unavailable_removes_occupant() {
         let mut mgr = MucManager::new();
         mgr.join_room(ROOM_JID, NICK);
-        mgr.on_presence(&make_available_presence(ROOM_JID, "bob", "participant", "member"));
+        mgr.on_presence(&make_available_presence(
+            ROOM_JID,
+            "bob",
+            "participant",
+            "member",
+        ));
         assert!(mgr.rooms[ROOM_JID].occupants.contains_key("bob"));
         mgr.on_presence(&make_unavailable_presence(ROOM_JID, "bob"));
         assert!(!mgr.rooms[ROOM_JID].occupants.contains_key("bob"));

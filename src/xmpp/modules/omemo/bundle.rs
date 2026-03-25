@@ -257,10 +257,7 @@ impl OmemoManager {
         let spk_sig = account.sign(&ik_pub).to_bytes().to_vec();
 
         // Load unconsumed one-time pre-keys.
-        let stored_otks = self
-            .store
-            .load_unconsumed_prekeys(account_jid)
-            .await?;
+        let stored_otks = self.store.load_unconsumed_prekeys(account_jid).await?;
         let pre_keys: Vec<(u32, Vec<u8>)> = stored_otks
             .into_iter()
             .map(|pk| (pk.prekey_id, pk.key_data))
@@ -491,10 +488,7 @@ mod tests {
             std::collections::HashMap::new();
         map.insert("iq-abc".to_string(), ("alice@example.com".to_string(), 42));
         let entry = map.remove("iq-abc");
-        assert_eq!(
-            entry,
-            Some(("alice@example.com".to_string(), 42))
-        );
+        assert_eq!(entry, Some(("alice@example.com".to_string(), 42)));
         assert!(map.remove("iq-abc").is_none());
     }
 }

@@ -100,11 +100,8 @@ impl OmemoTrustScreen {
     pub fn view(&self) -> Element<'_, Message> {
         let title = text(format!("Encryption Keys — {}", self.contact_jid)).size(18);
 
-        let device_rows: Vec<Element<Message>> = self
-            .devices
-            .iter()
-            .map(|dev| device_row(dev))
-            .collect();
+        let device_rows: Vec<Element<Message>> =
+            self.devices.iter().map(|dev| device_row(dev)).collect();
 
         let list = device_rows
             .into_iter()
@@ -112,9 +109,7 @@ impl OmemoTrustScreen {
 
         let list_scroll = scrollable(list).height(Length::Fill);
 
-        let close_btn = button("Close")
-            .on_press(Message::Close)
-            .padding([8, 24]);
+        let close_btn = button("Close").on_press(Message::Close).padding([8, 24]);
 
         let content = column![
             title,
@@ -166,7 +161,9 @@ impl OwnDeviceInfo {
         .align_y(Alignment::Start);
 
         let sessions_row = row![
-            text("Active sessions:").size(13).width(Length::Fixed(140.0)),
+            text("Active sessions:")
+                .size(13)
+                .width(Length::Fixed(140.0)),
             text(self.data.active_session_count.to_string()).size(13),
         ]
         .spacing(8)
@@ -186,10 +183,7 @@ impl OwnDeviceInfo {
 // ---------------------------------------------------------------------------
 
 fn device_row(dev: &DeviceEntry) -> Element<'_, Message> {
-    let label_text = dev
-        .label
-        .as_deref()
-        .unwrap_or("Unknown device");
+    let label_text = dev.label.as_deref().unwrap_or("Unknown device");
 
     let device_id_text = text(format!("ID {}", dev.device_id)).size(11);
     let label = text(label_text).size(13);
@@ -216,13 +210,10 @@ fn device_row(dev: &DeviceEntry) -> Element<'_, Message> {
         .spacing(4)
         .align_x(Alignment::End);
 
-    row![
-        left.width(Length::Fill),
-        right,
-    ]
-    .spacing(12)
-    .align_y(Alignment::Center)
-    .into()
+    row![left.width(Length::Fill), right,]
+        .spacing(12)
+        .align_y(Alignment::Center)
+        .into()
 }
 
 // ---------------------------------------------------------------------------

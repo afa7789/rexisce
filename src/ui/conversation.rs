@@ -222,8 +222,6 @@ pub struct ConversationView {
     pending_previews: std::collections::HashMap<String, String>,
     /// E1: currently editing — (msg_id, original_body)
     edit_mode: Option<(String, String)>,
-    /// G8: true while waiting for older MAM history to arrive
-    pub loading_older: bool,
     /// I4: loaded image attachment handles — msg_id → image handle
     attachments: std::collections::HashMap<String, iced_image::Handle>,
     /// I4: pending image URLs to fetch — msg_id → url
@@ -276,7 +274,6 @@ pub enum Message {
     CancelEdit,                      // E1: cancel edit mode
     RetractMessage(String),          // E2: (msg_id) — retract own message
     ModerateMessage(String, Option<String>), // L3: (msg_id, reason) — moderator retract any message
-    RequestOlderHistory,             // G8: emitted on scroll to top to request older MAM history
     AttachmentLoaded(String, iced_image::Handle), // I4: (msg_id, image_handle)
     // E4/I3: file upload
     OpenFilePicker,                         // E4: open native file picker
@@ -331,7 +328,6 @@ impl ConversationView {
             previews: std::collections::HashMap::new(),
             pending_previews: std::collections::HashMap::new(),
             edit_mode: None,
-            loading_older: false,
             attachments: std::collections::HashMap::new(),
             pending_images: std::collections::HashMap::new(),
             pending_attachments: vec![],
@@ -368,14 +364,6 @@ impl ConversationView {
     /// B4: Replace all messages with history loaded from DB.
     pub fn load_history(&mut self, msgs: Vec<DisplayMessage>) {
         self.messages = msgs;
-    }
-
-    /// G8: Prepend older messages at the front of the message list.
-    #[allow(dead_code)]
-    pub fn prepend_messages(&mut self, mut older: Vec<DisplayMessage>) {
-        older.append(&mut self.messages);
-        self.messages = older;
-        self.loading_older = false;
     }
 
     /// L1: record how many messages existed when the conversation was opened.
@@ -450,11 +438,6 @@ impl ConversationView {
             }
             Message::Scrolled(offset) => {
                 self.scroll_offset = offset;
-                // G8: if scrolled to (or near) the top, request older history
-                if offset.y < 20.0 && !self.loading_older && !self.messages.is_empty() {
-                    self.loading_older = true;
-                    return Task::done(Message::RequestOlderHistory);
-                }
                 Task::none()
             }
             Message::ScrollToBottom => {
@@ -558,7 +541,6 @@ impl ConversationView {
                 Task::none()
             }
             Message::OpenOmemoTrust(_) => Task::none(), // bubbled to ChatScreen
-            Message::RequestOlderHistory => Task::none(), // bubbled to ChatScreen
             Message::AttachmentLoaded(msg_id, handle) => {
                 self.attachments.insert(msg_id, handle);
                 Task::none()
@@ -911,11 +893,6 @@ impl ConversationView {
         occupants: &[OccupantEntry],
         own_nick: &str,
     ) -> Element<'_, Message> {
-        let ts_format = match time_format {
-            crate::config::TimeFormat::TwentyFourHour => "%H:%M",
-            crate::config::TimeFormat::TwelveHour => "%I:%M %p",
-        };
-
         // ---- Message list (G5: grouping + date separators) ----
         let mut rows: Vec<Element<Message>> = Vec::new();
         let mut prev_date: Option<chrono::NaiveDate> = None;
@@ -931,7 +908,7 @@ impl ConversationView {
             // L1: insert "New messages" separator before the first unseen message (only when not searching)
             if query_lower.is_empty() && self.last_seen_count > 0 && msg_idx == self.last_seen_count
             {
-                let sep = container(text("── New messages ──").size(11))
+                let sep = container(text("-- New messages --").size(11))
                     .width(Length::Fill)
                     .align_x(Alignment::Center)
                     .padding([4, 0]);
@@ -952,7 +929,7 @@ impl ConversationView {
             if let Some(date) = msg_date {
                 if prev_date != Some(date) {
                     let label = date.format("%b %-d").to_string();
-                    let sep = container(text(format!("── {} ──", label)).size(11))
+                    let sep = container(text(format!("-- {} --", label)).size(11))
                         .width(Length::Fill)
                         .align_x(Alignment::Center)
                         .padding([4, 0]);
@@ -1071,7 +1048,7 @@ impl ConversationView {
             let edit_msg_id = m.id.clone();
             let edit_body = m.body.clone();
             let edit_btn = tooltip(
-                button(text("✏").size(10))
+                button(text("Ed").size(10))
                     .on_press(Message::StartEdit(edit_msg_id, edit_body))
                     .padding([2, 4]),
                 "Edit message",
@@ -1080,7 +1057,7 @@ impl ConversationView {
             // E2: retract button (own messages only)
             let retract_msg_id = m.id.clone();
             let retract_btn = tooltip(
-                button(text("🗑").size(10))
+                button(text("Del").size(10))
                     .on_press(Message::RetractMessage(retract_msg_id))
                     .padding([2, 4]),
                 "Retract message",
@@ -1094,7 +1071,7 @@ impl ConversationView {
                 if is_hovered && is_moderator && !m.retracted {
                     let mod_msg_id = m.id.clone();
                     Some(tooltip(
-                        button(text("\u{1F6E1}").size(10))
+                        button(text("Mod").size(10))
                             .on_press(Message::OpenModerateDialog(mod_msg_id))
                             .padding([2, 4]),
                         "Moderate (remove) message",
@@ -1153,7 +1130,7 @@ impl ConversationView {
                     let mut col = column![header_row].spacing(2).padding([0, 6]);
                     if let Some(preview) = m.reply_preview.as_ref() {
                         col = col.push(
-                            container(text(format!("↩ {}", preview)).size(11)).padding([2, 6]),
+                            container(text(format!("> {}", preview)).size(11)).padding([2, 6]),
                         );
                     }
                     col.push(body_widget)
@@ -1161,7 +1138,7 @@ impl ConversationView {
                     let mut col = column![].spacing(2).padding([0, 6]);
                     if let Some(preview) = m.reply_preview.as_ref() {
                         col = col.push(
-                            container(text(format!("↩ {}", preview)).size(11)).padding([2, 6]),
+                            container(text(format!("> {}", preview)).size(11)).padding([2, 6]),
                         );
                     }
                     col.push(body_widget)
@@ -1176,10 +1153,7 @@ impl ConversationView {
             } else {
                 // Own message: right-aligned, no avatar
                 let own_ts_label = if m.timestamp > 0 {
-                    Utc.timestamp_millis_opt(m.timestamp)
-                        .single()
-                        .map(|dt| dt.format(ts_format).to_string())
-                        .unwrap_or_default()
+                    time_format.format_timestamp(m.timestamp)
                 } else {
                     String::new()
                 };
@@ -1202,9 +1176,7 @@ impl ConversationView {
                     if let Some(btn) = moderate_btn {
                         own_header = own_header.push(btn);
                     }
-                    let mut col = column![own_header, body_widget]
-                        .spacing(2)
-                        .padding([6, 10]);
+                    let mut col = column![own_header, body_widget].spacing(2).padding([6, 10]);
                     if let Some(lbl) = edited_label {
                         col = col.push(lbl);
                     }
@@ -1238,14 +1210,15 @@ impl ConversationView {
                 row_elem
             };
 
-            // M6: wrap in mouse_area for hover detection and add react row below
+            // M6: wrap message + react_row together in a single mouse_area so that
+            // moving the cursor into the reaction bar doesn't trigger on_exit from
+            // the message, which would cause a flicker loop.
             let msg_id_for_hover = m.id.clone();
-            let row_elem = mouse_area(row_elem)
+            let combined = column![row_elem, react_row].spacing(0);
+            let hover_area = mouse_area(combined)
                 .on_enter(Message::SetHoveredMessage(Some(msg_id_for_hover.clone())))
                 .on_exit(Message::SetHoveredMessage(None));
-            rows.push(row_elem.into());
-            // M6: render reaction buttons below message when hovered
-            rows.push(react_row);
+            rows.push(hover_area.into());
 
             // E3/R1: render reaction pills below the message bubble
             // R1: pills show who reacted (tooltip) and toggle own reaction on click
@@ -1312,7 +1285,7 @@ impl ConversationView {
 
         // ---- Jump-to-bottom button (only visible when not at bottom) ----
         let jump_btn = tooltip(
-            button(text("↓").size(12))
+            button(text("v").size(12))
                 .on_press(Message::ScrollToBottom)
                 .padding([4, 10]),
             "Jump to bottom",
@@ -1324,11 +1297,11 @@ impl ConversationView {
             if let Some(msg) = last_own {
                 let state = self.message_states.get(&msg.id).copied();
                 let label = match state {
-                    None => "·", // sending
-                    Some(MessageState::Sending) => "·",
-                    Some(MessageState::Sent) => "✓",
-                    Some(MessageState::Delivered) => "✓✓",
-                    Some(MessageState::Read) => "✓✓",
+                    None => ".", // sending
+                    Some(MessageState::Sending) => ".",
+                    Some(MessageState::Sent) => "v",
+                    Some(MessageState::Delivered) => "vv",
+                    Some(MessageState::Read) => "vv",
                 };
                 let color = if state == Some(MessageState::Read) {
                     iced::Color::from_rgb(0.0, 0.67, 1.0) // blue for read
@@ -1348,11 +1321,11 @@ impl ConversationView {
         // ---- Composer ----
         // G3: reply quote strip
         let reply_strip: Option<Element<Message>> = self.reply_to.as_ref().map(|(_id, preview)| {
-            let cancel_btn = button(text("✕").size(10))
+            let cancel_btn = button(text("X").size(10))
                 .on_press(Message::CancelReply)
                 .padding([2, 4]);
             let strip = row![
-                text(format!("↩ {}", preview)).size(11).width(Length::Fill),
+                text(format!("> {}", preview)).size(11).width(Length::Fill),
                 cancel_btn,
             ]
             .spacing(4)
@@ -1363,11 +1336,11 @@ impl ConversationView {
 
         // E1: edit-mode strip above composer
         let edit_strip: Option<Element<Message>> = self.edit_mode.as_ref().map(|(_id, _orig)| {
-            let cancel_btn = button(text("✕").size(10))
+            let cancel_btn = button(text("X").size(10))
                 .on_press(Message::CancelEdit)
                 .padding([2, 4]);
             let strip = row![
-                text("✏ Editing message").size(11).width(Length::Fill),
+                text("Ed: Editing message").size(11).width(Length::Fill),
                 cancel_btn,
             ]
             .spacing(4)
@@ -1433,7 +1406,7 @@ impl ConversationView {
                     column![].spacing(2).padding([4, 8]);
                 // Dismiss button at the top
                 panel_col = panel_col.push(
-                    button(text("✕ Dismiss").size(10))
+                    button(text("X Dismiss").size(10))
                         .on_press(Message::MentionDismissed)
                         .padding([2, 6]),
                 );
@@ -1457,13 +1430,13 @@ impl ConversationView {
             None
         };
 
-        let emoji_btn = button(text("😊").size(14))
+        let emoji_btn = button(text(":)").size(14))
             .on_press(Message::EmojiPickerToggled)
             .padding([6, 8]);
 
         // E4/I3: paperclip button for file picker
         let attach_btn = tooltip(
-            button(text("📎").size(14))
+            button(text("+").size(14))
                 .on_press(Message::OpenFilePicker)
                 .padding([6, 8]),
             "Attach file",
@@ -1475,7 +1448,7 @@ impl ConversationView {
             VoiceState::Idle => {
                 // Normal composer with mic button on the right of attach
                 let mic_btn = tooltip(
-                    button(text("🎤").size(14))
+                    button(text("mic").size(14))
                         .on_press(Message::StartRecording)
                         .padding([6, 8]),
                     "Record voice message",
@@ -1499,13 +1472,13 @@ impl ConversationView {
             VoiceState::Recording(_) => {
                 let mins = self.voice_elapsed_secs / 60;
                 let secs = self.voice_elapsed_secs % 60;
-                let elapsed_str = format!("🔴 {}:{:02}", mins, secs);
+                let elapsed_str = format!("REC {}:{:02}", mins, secs);
                 row![
-                    button(text("✕ Cancel").size(13))
+                    button(text("X Cancel").size(13))
                         .on_press(Message::CancelRecording)
                         .padding([8, 12]),
                     text(elapsed_str).size(14).width(Length::Fill),
-                    button(text("■ Stop").size(13))
+                    button(text("[] Stop").size(13))
                         .on_press(Message::StopRecording)
                         .padding([8, 12]),
                 ]
@@ -1527,7 +1500,7 @@ impl ConversationView {
             for (i, att) in self.pending_attachments.iter().enumerate() {
                 let size_kb = att.size / 1024;
                 let label = format!("{} ({}KB)", att.name, size_kb);
-                let remove_btn = button(text("✕").size(10))
+                let remove_btn = button(text("X").size(10))
                     .on_press(Message::RemoveAttachment(i))
                     .padding([2, 4]);
                 let progress_bar = container(
@@ -1569,7 +1542,7 @@ impl ConversationView {
         };
 
         let close_btn = tooltip(
-            button(text("×").size(14))
+            button(text("X").size(14))
                 .on_press(Message::Close)
                 .padding([4, 10]),
             "Close conversation",
@@ -1606,7 +1579,7 @@ impl ConversationView {
             tooltip::Position::Bottom,
         );
         let search_btn = tooltip(
-            button(text("⌕").size(14))
+            button(text("?").size(14))
                 .on_press(Message::SearchToggled)
                 .padding([4, 8]),
             "Search messages",

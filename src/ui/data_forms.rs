@@ -221,14 +221,14 @@ pub fn render_form<M: Clone + 'static>(form: DataForm) -> Element<'static, M> {
                     let is_selected = selected.contains(&opt_value);
                     let prefix = if field.field_type == FieldType::ListMulti {
                         if is_selected {
-                            "☑"
+                            "[x]"
                         } else {
-                            "☐"
+                            "[ ]"
                         }
                     } else if is_selected {
-                        "●"
+                        "(*)"
                     } else {
-                        "○"
+                        "( )"
                     };
                     field_col = field_col.push(
                         container(text(format!("  {} {}", prefix, opt_label)).size(13))
@@ -315,14 +315,14 @@ where
                     let is_selected = selected.contains(&opt_value);
                     let prefix = if field.field_type == FieldType::ListMulti {
                         if is_selected {
-                            "☑"
+                            "[x]"
                         } else {
-                            "☐"
+                            "[ ]"
                         }
                     } else if is_selected {
-                        "●"
+                        "(*)"
                     } else {
-                        "○"
+                        "( )"
                     };
                     field_col = field_col.push(
                         container(text(format!("  {} {}", prefix, opt_label)).size(13))
