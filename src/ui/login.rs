@@ -2,8 +2,8 @@
 // Source reference: apps/fluux/src/components/LoginScreen.tsx
 
 use iced::{
-    widget::{button, checkbox, column, container, text, text_input},
-    Alignment, Element, Length, Task,
+    widget::{button, checkbox, column, container, mouse_area, text, text_input},
+    Alignment, Color, Element, Length, Task,
 };
 
 mod field_ids {
@@ -178,9 +178,13 @@ impl LoginScreen {
             ]
             .spacing(10),
             status,
-            button("Benchmark →")
-                .on_press(Message::GoToBenchmark)
-                .padding([6, 16]),
+            iced::widget::Space::with_height(8),
+            mouse_area(
+                text("Benchmark →")
+                    .size(11)
+                    .color(Color::from_rgb(0.5, 0.5, 0.5)),
+            )
+            .on_press(Message::GoToBenchmark),
         ]
         .spacing(12)
         .max_width(400)
