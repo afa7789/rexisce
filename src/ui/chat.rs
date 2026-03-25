@@ -494,6 +494,20 @@ impl ChatScreen {
                         convo.mark_seen();
                     }
                 }
+
+                // UX-2: intercept SetPresence from account menu popover
+                if let sidebar::Message::SetPresence(ref status) = smsg {
+                    let status = status.clone();
+                    let _ = self.sidebar.update(smsg);
+                    return self.update(Message::SetPresence(status));
+                }
+
+                // UX-2: intercept OpenSettings from account menu popover
+                if let sidebar::Message::OpenSettings = smsg {
+                    let _ = self.sidebar.update(smsg);
+                    return self.update(Message::OpenSettings);
+                }
+
                 self.sidebar.update(smsg).map(Message::Sidebar)
             }
 
@@ -866,10 +880,14 @@ impl ChatScreen {
 
                         let body = convo.take_draft();
                         if !body.trim().is_empty() {
+                            // Generate the message ID once so the stanza ID
+                            // matches the local DisplayMessage — reactions and
+                            // corrections reference this ID.
+                            let msg_id = uuid::Uuid::new_v4().to_string();
                             // Also push the message to our own view optimistically.
                             let own_jid = self.own_jid.clone();
                             convo.push_message(DisplayMessage {
-                                id: uuid::Uuid::new_v4().to_string(),
+                                id: msg_id.clone(),
                                 from: own_jid.clone(),
                                 body: body.clone(),
                                 own: true,
@@ -938,6 +956,7 @@ impl ChatScreen {
                                     self.pending_commands.push(XmppCommand::SendMessage {
                                         to: jid_for_cmd,
                                         body: body_clone,
+                                        id: msg_id.clone(),
                                     });
                                 }
                                 return preview_task;
@@ -958,6 +977,7 @@ impl ChatScreen {
                                 self.pending_commands.push(XmppCommand::SendMessage {
                                     to: jid.clone(),
                                     body,
+                                    id: msg_id,
                                 });
                             }
                         }
@@ -1227,12 +1247,14 @@ impl ChatScreen {
             iced::widget::button(text("● Available").size(11).shaping(Shaping::Advanced))
                 .on_press(Message::SetPresence(PresenceStatus::Available))
                 .padding([2, 8]);
-        let away_btn = iced::widget::button(text("○ Away").size(11))
-            .on_press(Message::SetPresence(PresenceStatus::Away))
-            .padding([2, 8]);
-        let dnd_btn = iced::widget::button(text("✕ DND").size(11))
-            .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
-            .padding([2, 8]);
+        let away_btn =
+            iced::widget::button(text("○ Away").size(11).shaping(Shaping::Advanced))
+                .on_press(Message::SetPresence(PresenceStatus::Away))
+                .padding([2, 8]);
+        let dnd_btn =
+            iced::widget::button(text("⛔ DND").size(11).shaping(Shaping::Advanced))
+                .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
+                .padding([2, 8]);
         let status_bar = if show_jid_label {
             let own_label = text(format!("Signed in as {}", self.own_jid)).size(11);
             container(
@@ -1360,6 +1382,7 @@ mod tests {
         s.pending_commands.push(XmppCommand::SendMessage {
             to: "alice@example.com".into(),
             body: "hi".into(),
+            id: "test-id".into(),
         });
         let drained = s.drain_commands();
         assert_eq!(drained.len(), 1);
@@ -1423,5 +1446,132 @@ mod tests {
         let mut s = ChatScreen::new("me@example.com".into());
         // No active conversation set — should not panic
         let _ = s.update(Message::ComposerBold);
+    }
+
+    /// BUG-13: VoiceEncodingDone processed through ChatScreen stages
+    /// an attachment in the conversation, so the subsequent Send
+    /// intercept can find it.
+    #[test]
+    fn voice_encoding_done_stages_attachment_via_chatscreen() {
+        use crate::ui::sidebar;
+        let mut s = ChatScreen::new("me@example.com".into());
+        let _ = s.update(Message::Sidebar(sidebar::Message::SelectContact(
+            "alice@example.com".into(),
+        )));
+        // Dispatch VoiceEncodingDone through ChatScreen — it should
+        // fall through to convo.update and stage the attachment.
+        let _ = s.update(Message::Conversation(
+            "alice@example.com".into(),
+            super::conversation::Message::VoiceEncodingDone(
+                std::path::PathBuf::from("/tmp/voice_test.wav"),
+                44100,
+            ),
+        ));
+        // The attachment should now be staged in the conversation
+        let convo = s.conversations.get("alice@example.com").unwrap();
+        assert_eq!(
+            convo.pending_attachments.len(),
+            1,
+            "VoiceEncodingDone should stage a voice attachment"
+        );
+        assert_eq!(convo.pending_attachments[0].name, "voice_message.wav");
+    }
+
+    /// BUG-13: simulate VoiceEncodingDone → Send flow and verify that
+    /// the upload target and RequestUploadSlot command are queued.
+    #[test]
+    fn voice_encoding_done_triggers_upload() {
+        use crate::ui::sidebar;
+        let mut s = ChatScreen::new("me@example.com".into());
+        // Open a conversation
+        let _ = s.update(Message::Sidebar(sidebar::Message::SelectContact(
+            "alice@example.com".into(),
+        )));
+        // Simulate VoiceEncodingDone by manually staging the attachment
+        // and setting voice state, then sending Send.
+        if let Some(convo) = s.conversations.get_mut("alice@example.com") {
+            convo.pending_attachments.push(super::conversation::Attachment {
+                name: "voice_message.wav".into(),
+                path: std::path::PathBuf::from("/tmp/voice_test.wav"),
+                size: 44100,
+                progress: 0,
+                thumbnail: None,
+            });
+        }
+        // Dispatch Send — this should be intercepted by ChatScreen,
+        // which should take the pending_attachments and queue an upload.
+        let _ = s.update(Message::Conversation(
+            "alice@example.com".into(),
+            super::conversation::Message::Send,
+        ));
+        // Verify: upload target should be queued
+        let targets = s.drain_upload_targets();
+        assert_eq!(targets.len(), 1, "expected 1 upload target for voice message");
+        assert_eq!(targets[0].0, "alice@example.com");
+        // Verify: RequestUploadSlot command should be queued
+        let cmds = s.drain_commands();
+        assert!(
+            cmds.iter().any(|c| matches!(c, XmppCommand::RequestUploadSlot { .. })),
+            "expected RequestUploadSlot command"
+        );
+    }
+
+    /// BUG-13: full ChatScreen flow — VoiceEncodingDone followed by
+    /// the Task::done(Send) that it produces.  After both steps the
+    /// upload target and slot request must be queued.
+    #[test]
+    fn voice_full_flow_encoding_then_send() {
+        use crate::ui::sidebar;
+        let mut s = ChatScreen::new("me@example.com".into());
+        let _ = s.update(Message::Sidebar(sidebar::Message::SelectContact(
+            "alice@example.com".into(),
+        )));
+        // Step 1: dispatch VoiceEncodingDone — this stages the attachment
+        // and returns a Task that would produce Message::Send.
+        let _ = s.update(Message::Conversation(
+            "alice@example.com".into(),
+            super::conversation::Message::VoiceEncodingDone(
+                std::path::PathBuf::from("/tmp/voice_test.wav"),
+                44100,
+            ),
+        ));
+        // At this point the attachment should be staged
+        assert_eq!(
+            s.conversations["alice@example.com"]
+                .pending_attachments
+                .len(),
+            1,
+            "VoiceEncodingDone should stage 1 attachment"
+        );
+        // No upload target yet (Send hasn't fired)
+        assert!(
+            s.drain_upload_targets().is_empty(),
+            "no upload target until Send is processed"
+        );
+
+        // Step 2: simulate the Task::done(Send) by dispatching Send.
+        let _ = s.update(Message::Conversation(
+            "alice@example.com".into(),
+            super::conversation::Message::Send,
+        ));
+        // Now the attachment should be consumed and upload queued
+        assert!(
+            s.conversations["alice@example.com"]
+                .pending_attachments
+                .is_empty(),
+            "pending_attachments should be empty after Send"
+        );
+        let targets = s.drain_upload_targets();
+        assert_eq!(
+            targets.len(),
+            1,
+            "expected 1 upload target after voice Send"
+        );
+        let cmds = s.drain_commands();
+        assert!(
+            cmds.iter()
+                .any(|c| matches!(c, XmppCommand::RequestUploadSlot { .. })),
+            "expected RequestUploadSlot command after voice Send"
+        );
     }
 }

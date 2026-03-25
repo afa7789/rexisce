@@ -426,9 +426,9 @@ async fn run_session(
                         let _ = client.send_end().await;
                         break;
                     }
-                    Some(XmppCommand::SendMessage { to, body }) => {
+                    Some(XmppCommand::SendMessage { to, body, id }) => {
                         if let Ok(to_jid) = to.parse::<Jid>() {
-                            outbox.push_back(make_message(to_jid, &body));
+                            outbox.push_back(make_message(to_jid, &body, &id));
                         }
                     }
                     Some(XmppCommand::BlockJid(jid)) => {
@@ -1460,10 +1460,10 @@ fn make_presence_with_caps(disco_mgr: &DiscoManager, status_message: Option<&str
     raw
 }
 
-fn make_message(to: Jid, body: &str) -> Element {
+fn make_message(to: Jid, body: &str, id: &str) -> Element {
     let mut msg = XmppMessage::new(Some(to));
     msg.type_ = MessageType::Chat;
-    msg.id = Some(uuid::Uuid::new_v4().to_string());
+    msg.id = Some(id.to_string());
     msg.bodies.insert(String::new(), Body(body.to_owned()));
     let mut el: Element = msg.into();
     // K4: request a delivery receipt (XEP-0184)

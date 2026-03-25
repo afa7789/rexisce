@@ -1,6 +1,9 @@
 -- Minimal Prosody config for local development / integration testing.
 -- Not for production use.
 
+-- PID file required by the posix module.
+pidfile = "/var/run/prosody/prosody.pid"
+
 -- Disable TLS requirement so the app can connect with plain TCP on localhost.
 c2s_require_encryption = false
 s2s_require_encryption = false

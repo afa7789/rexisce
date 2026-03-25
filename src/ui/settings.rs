@@ -1,13 +1,98 @@
 // F3: Settings panel screen
 
 use iced::{
-    widget::{button, column, container, row, scrollable, text, text_input, toggler},
+    widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, toggler},
     Alignment, Element, Length, Task,
 };
 
 use super::account_details::AccountInfo;
 use super::blocklist::{BlocklistCommand, BlocklistPanel};
 use crate::config::{self, Settings, Theme};
+
+// ---------------------------------------------------------------------------
+// Section card helper — wraps grouped settings in a themed card container
+// ---------------------------------------------------------------------------
+
+fn settings_section<'a>(
+    title: &str,
+    content: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let heading = text(title.to_string())
+        .size(18)
+        .font(iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..Default::default()
+        });
+
+    container(
+        column![heading, content].spacing(10),
+    )
+    .padding(15)
+    .width(Length::Fill)
+    .style(|theme: &iced::Theme| {
+        let palette = theme.extended_palette();
+        iced::widget::container::Style {
+            background: Some(iced::Background::Color(
+                palette.background.weak.color,
+            )),
+            border: iced::Border {
+                color: palette.background.strong.color,
+                width: 1.0,
+                radius: 10.0.into(),
+            },
+            ..Default::default()
+        }
+    })
+    .into()
+}
+
+/// Build a segmented-control button: highlighted when active, transparent when inactive.
+fn segmented_btn(
+    label: &str,
+    active: bool,
+) -> button::Button<'_, Message, iced::Theme, iced::Renderer> {
+    let btn_text = text(label.to_string()).size(13);
+    let b = button(btn_text).padding([5, 12]);
+    if active {
+        b.style(|theme: &iced::Theme, status| {
+            let palette = theme.extended_palette();
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    palette.primary.strong.color
+                }
+                _ => palette.primary.base.color,
+            };
+            button::Style {
+                background: Some(iced::Background::Color(bg)),
+                text_color: palette.primary.base.text,
+                border: iced::Border {
+                    color: palette.primary.base.color,
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+    } else {
+        b.style(|theme: &iced::Theme, status| {
+            let palette = theme.extended_palette();
+            let bg = match status {
+                button::Status::Hovered => palette.background.strong.color,
+                _ => iced::Color::TRANSPARENT,
+            };
+            button::Style {
+                background: Some(iced::Background::Color(bg)),
+                text_color: palette.background.base.text,
+                border: iced::Border {
+                    color: palette.background.strong.color,
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+    }
+}
 
 // ---------------------------------------------------------------------------
 // SettingsScreen — not Clone because it owns XmppCommands
@@ -95,6 +180,8 @@ pub enum Message {
     ForceTlsToggled(bool),
     // MEMO: enable OMEMO encryption
     EnableOmemo,
+    // UX-5: copy account detail to clipboard
+    CopyToClipboard(String),
 }
 
 impl SettingsScreen {
@@ -425,78 +512,60 @@ impl SettingsScreen {
             }
             // MEMO: EnableOmemo is intercepted by App::update before reaching here.
             Message::EnableOmemo => Task::none(),
+            // UX-5: copy account detail to clipboard
+            Message::CopyToClipboard(content) => iced::clipboard::write::<Message>(content),
         }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        // Top bar: back button (left), title (center), logout (right).
-        // This stays outside the scrollable so it is always visible.
+        // Top bar: back button (left), title (center).
+        // Logout moved to bottom of the settings panel.
         let back_btn = button("< Back").on_press(Message::Back).padding([6, 14]);
-        let logout_btn = button("Logout").on_press(Message::Logout).padding([6, 14]);
         let top_bar = row![
             back_btn,
-            iced::widget::Space::with_width(Length::Fill),
+            horizontal_space(),
             text("Settings").size(18),
-            iced::widget::Space::with_width(Length::Fill),
-            logout_btn,
+            horizontal_space(),
         ]
         .spacing(8)
         .align_y(Alignment::Center)
         .padding([8, 16]);
 
+        // === Appearance section ===
         let is_dark = self.settings.theme == Theme::Dark;
         let theme_row = row![
-            text("Dark theme").size(14).width(Length::Fill),
+            text("Dark theme").size(14),
+            horizontal_space(),
             toggler(is_dark).on_toggle(|_| Message::ThemeToggled),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center);
 
-        // M1: system theme toggle
         let system_theme_row = row![
-            text("Use system theme").size(14).width(Length::Fill),
+            text("Use system theme").size(14),
+            horizontal_space(),
             toggler(self.settings.use_system_theme).on_toggle(Message::SystemThemeToggled),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center);
 
-        // M1: time format selector
-        let time_fmt = match self.settings.time_format {
-            crate::config::TimeFormat::TwentyFourHour => "24h",
-            crate::config::TimeFormat::TwelveHour => "12h",
-        };
+        let is_24h = matches!(
+            self.settings.time_format,
+            crate::config::TimeFormat::TwentyFourHour
+        );
         let time_format_row: Element<Message> = row![
-            text("Time format:").size(14).width(Length::Fill),
-            button("24h")
-                .on_press(Message::TimeFormatToggled("24h".into()))
-                .padding([4, 8]),
-            button("12h")
-                .on_press(Message::TimeFormatToggled("12h".into()))
-                .padding([4, 8]),
-            text(time_fmt).size(14),
+            text("Time format").size(14),
+            horizontal_space(),
+            segmented_btn("24h", is_24h).on_press(Message::TimeFormatToggled("24h".into())),
+            segmented_btn("12h", !is_24h).on_press(Message::TimeFormatToggled("12h".into())),
         ]
         .spacing(4)
         .align_y(Alignment::Center)
         .into();
 
-        let notif_row = row![
-            text("Notifications").size(14).width(Length::Fill),
-            toggler(self.settings.notifications_enabled).on_toggle(Message::NotificationsToggled),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-
-        let sound_row = row![
-            text("Sound").size(14).width(Length::Fill),
-            toggler(self.settings.sound_enabled).on_toggle(Message::SoundToggled),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-
         let font_row = row![
-            text(format!("Font size: {}", self.settings.font_size))
-                .size(14)
-                .width(Length::Fill),
+            text(format!("Font size: {}", self.settings.font_size)).size(14),
+            horizontal_space(),
             button("-")
                 .on_press(Message::FontSizeDecreased)
                 .padding([4, 10]),
@@ -504,167 +573,225 @@ impl SettingsScreen {
                 .on_press(Message::FontSizeIncreased)
                 .padding([4, 10]),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center);
 
-        let status_row = row![
-            text("Status:").size(14).width(80),
-            text_input("e.g. In a meeting", &self.status_input)
-                .on_input(Message::StatusInputChanged)
-                .width(Length::Fill),
+        let appearance_content: Element<Message> = column![
+            theme_row,
+            system_theme_row,
+            time_format_row,
+            font_row,
         ]
-        .spacing(8)
+        .spacing(15)
+        .into();
+        let appearance_section = settings_section("Appearance", appearance_content);
+
+        // === Notifications section ===
+        let notif_row = row![
+            text("Notifications").size(14),
+            horizontal_space(),
+            toggler(self.settings.notifications_enabled).on_toggle(Message::NotificationsToggled),
+        ]
+        .spacing(10)
         .align_y(Alignment::Center);
 
-        // S6: privacy toggles
+        let sound_row = row![
+            text("Sound").size(14),
+            horizontal_space(),
+            toggler(self.settings.sound_enabled).on_toggle(Message::SoundToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let notifications_content: Element<Message> = column![notif_row, sound_row]
+            .spacing(15)
+            .into();
+        let notifications_section = settings_section("Notifications", notifications_content);
+
+        // === Messages section ===
         let receipts_row = row![
-            text("Send delivery receipts").size(14).width(Length::Fill),
+            text("Send delivery receipts").size(14),
+            horizontal_space(),
             toggler(self.settings.send_receipts).on_toggle(Message::SendReceiptsToggled),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center);
 
         let typing_row = row![
-            text("Send typing indicators").size(14).width(Length::Fill),
+            text("Send typing indicators").size(14),
+            horizontal_space(),
             toggler(self.settings.send_typing).on_toggle(Message::SendTypingToggled),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center);
 
         let read_markers_row = row![
-            text("Send read markers").size(14).width(Length::Fill),
+            text("Send read markers").size(14),
+            horizontal_space(),
             toggler(self.settings.send_read_markers).on_toggle(Message::SendReadMarkersToggled),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center);
 
-        // J10: MAM archiving mode selector
+        let mam_current = self
+            .settings
+            .mam_default_mode
+            .as_deref()
+            .unwrap_or("roster");
         let mam_mode_row: Element<Message> = row![
-            text("MAM:").size(14).width(Length::Fill),
-            button("roster")
-                .on_press(Message::MamModeSelected("roster".into()))
-                .padding([4, 8]),
-            button("always")
-                .on_press(Message::MamModeSelected("always".into()))
-                .padding([4, 8]),
-            button("never")
-                .on_press(Message::MamModeSelected("never".into()))
-                .padding([4, 8]),
+            text("MAM archive mode").size(14),
+            horizontal_space(),
+            segmented_btn("roster", mam_current == "roster")
+                .on_press(Message::MamModeSelected("roster".into())),
+            segmented_btn("always", mam_current == "always")
+                .on_press(Message::MamModeSelected("always".into())),
+            segmented_btn("never", mam_current == "never")
+                .on_press(Message::MamModeSelected("never".into())),
         ]
         .spacing(4)
         .align_y(Alignment::Center)
         .into();
 
-        let avatar_row = row![
-            text("Profile Avatar").size(14).width(Length::Fill),
-            button(text("Upload…").size(13))
-                .on_press(Message::OpenAvatarPicker)
-                .padding([4, 12]),
+        let messages_content: Element<Message> = column![
+            receipts_row,
+            typing_row,
+            read_markers_row,
+            mam_mode_row,
         ]
-        .spacing(8)
-        .align_y(Alignment::Center);
+        .spacing(15)
+        .into();
+        let messages_section = settings_section("Messages", messages_content);
 
-        // K6: Chat Preferences section
-        let chat_prefs_title = text("Chat Preferences").size(15);
+        // === Chat Preferences section ===
         let join_leave_row = row![
-            text("Show join/leave in rooms")
-                .size(14)
-                .width(Length::Fill),
+            text("Show join/leave in rooms").size(14),
+            horizontal_space(),
             toggler(self.settings.show_join_leave).on_toggle(Message::ShowJoinLeaveToggled),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center);
         let typing_indicators_row = row![
-            text("Show typing indicators").size(14).width(Length::Fill),
+            text("Show typing indicators").size(14),
+            horizontal_space(),
             toggler(self.settings.show_typing_indicators)
                 .on_toggle(Message::ShowTypingIndicatorsToggled),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center);
         let compact_layout_row = row![
-            text("Compact message layout").size(14).width(Length::Fill),
+            text("Compact message layout").size(14),
+            horizontal_space(),
             toggler(self.settings.compact_layout).on_toggle(Message::CompactLayoutToggled),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center);
-        let contact_sort_label = if self.settings.contact_sort == "alphabetical" {
-            "Alphabetical"
-        } else {
-            "Recent activity"
-        };
+        let is_alpha = self.settings.contact_sort == "alphabetical";
         let sort_row: Element<Message> = row![
-            text("Contact sort:").size(14).width(Length::Fill),
-            button("Alphabetical")
-                .on_press(Message::SortContactsSelected("alphabetical".into()))
-                .padding([4, 8]),
-            button("Recent")
-                .on_press(Message::SortContactsSelected("recent".into()))
-                .padding([4, 8]),
-            text(contact_sort_label).size(13),
+            text("Contact sort").size(14),
+            horizontal_space(),
+            segmented_btn("Alphabetical", is_alpha)
+                .on_press(Message::SortContactsSelected("alphabetical".into())),
+            segmented_btn("Recent", !is_alpha)
+                .on_press(Message::SortContactsSelected("recent".into())),
         ]
         .spacing(4)
         .align_y(Alignment::Center)
         .into();
-        let chat_prefs_section = column![
-            chat_prefs_title,
+        let chat_prefs_content: Element<Message> = column![
             join_leave_row,
             typing_indicators_row,
             compact_layout_row,
             sort_row,
         ]
-        .spacing(8);
+        .spacing(15)
+        .into();
+        let chat_prefs_section = settings_section("Chat Preferences", chat_prefs_content);
 
-        // M3: Blocked Users section
-        let blocklist_section = self.blocklist.view().map(Message::Blocklist);
-
-        // M4: Account Details section — rendered inline to avoid borrow/lifetime issues
-        let account_section = self.view_account_details();
-
-        // M6: Data & Storage section
-        let data_section = self.view_data_storage();
-
-        // M5: Network section
-        let network_section = self.view_network();
-
-        // MEMO: OMEMO encryption section
-        let omemo_section = self.view_omemo();
-
+        // === Profile section ===
+        let avatar_row = row![
+            text("Profile avatar").size(14),
+            horizontal_space(),
+            button(text("Upload\u{2026}").size(13))
+                .on_press(Message::OpenAvatarPicker)
+                .padding([4, 12]),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+        let status_row = row![
+            text("Status message").size(14),
+            horizontal_space(),
+            text_input("e.g. In a meeting", &self.status_input)
+                .on_input(Message::StatusInputChanged)
+                .width(Length::Fixed(220.0)),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
         let edit_profile_btn = button("Edit Profile")
             .on_press(Message::OpenVCardEditor)
             .padding([6, 14]);
+        let profile_content: Element<Message> = column![avatar_row, status_row, edit_profile_btn]
+            .spacing(15)
+            .into();
+        let profile_section = settings_section("Profile", profile_content);
+
+        // === Account section ===
+        let account_section = self.view_account_details();
+
+        // === OMEMO section ===
+        let omemo_section = self.view_omemo();
+
+        // === Blocked Users section ===
+        let blocklist_section = self.blocklist.view().map(Message::Blocklist);
+
+        // === Network section ===
+        let network_section = self.view_network();
+
+        // === Data & Storage section ===
+        let data_section = self.view_data_storage();
+
+        // === Bottom actions: About + Logout ===
         let about_btn = button("About")
             .on_press(Message::OpenAbout)
             .padding([6, 14]);
-        let bottom_row = row![
-            iced::widget::Space::with_width(Length::Fill),
-            edit_profile_btn,
-            about_btn,
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
+        let logout_btn = button("Logout")
+            .on_press(Message::Logout)
+            .padding([6, 14])
+            .style(|theme: &iced::Theme, status| {
+                let palette = theme.extended_palette();
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        palette.danger.strong.color
+                    }
+                    _ => palette.danger.base.color,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    text_color: palette.danger.base.text,
+                    border: iced::Border {
+                        radius: 6.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            });
+        let bottom_row = row![horizontal_space(), about_btn, logout_btn]
+            .spacing(8)
+            .align_y(Alignment::Center);
 
         let content = column![
-            theme_row,
-            system_theme_row,
-            time_format_row,
-            notif_row,
-            sound_row,
-            font_row,
-            status_row,
-            receipts_row,
-            typing_row,
-            read_markers_row,
-            mam_mode_row,
-            avatar_row,
+            appearance_section,
+            notifications_section,
+            messages_section,
             chat_prefs_section,
-            blocklist_section,
+            profile_section,
             account_section,
             omemo_section,
+            blocklist_section,
             network_section,
             data_section,
             bottom_row,
         ]
-        .spacing(16)
+        .spacing(30)
         .padding(24)
         .width(500);
 
@@ -680,76 +807,71 @@ impl SettingsScreen {
     }
 
     // M4: Account Details sub-view — rendered inline to avoid borrow/lifetime issues.
+    // UX-5: copyable text fields with copy-to-clipboard buttons.
     fn view_account_details(&self) -> Element<'_, Message> {
         let info = &self.account_info;
-        let header = text("Account Details").size(16);
 
-        let bare_jid = info.bound_jid.split('/').next().unwrap_or("");
-        let server = bare_jid.split('@').nth(1).unwrap_or("");
-        let resource = info.bound_jid.split('/').nth(1).unwrap_or("");
+        let bare_jid = info.bound_jid.split('/').next().unwrap_or("").to_string();
+        let server = bare_jid.split('@').nth(1).unwrap_or("").to_string();
+        let resource = info.bound_jid.split('/').nth(1).unwrap_or("").to_string();
         let status_str = if info.connected {
             "Connected"
         } else {
             "Offline"
         };
+        let auth_val = if info.auth_method.is_empty() {
+            "\u{2014}".to_string()
+        } else {
+            info.auth_method.clone()
+        };
+        let features_val = if info.server_features.is_empty() {
+            "\u{2014}".to_string()
+        } else {
+            info.server_features.clone()
+        };
 
-        let details = column![
-            header,
-            row![
-                text("JID").size(13).width(Length::Fixed(140.0)),
-                text(bare_jid.to_string()).size(13).width(Length::Fill),
-            ]
-            .spacing(8),
-            row![
-                text("Server").size(13).width(Length::Fixed(140.0)),
-                text(server.to_string()).size(13).width(Length::Fill),
-            ]
-            .spacing(8),
-            row![
-                text("Resource").size(13).width(Length::Fixed(140.0)),
-                text(resource.to_string()).size(13).width(Length::Fill),
-            ]
-            .spacing(8),
+        // UX-5 helper: build a row with label, read-only text_input, and copy button.
+        macro_rules! copyable_row {
+            ($label:expr, $value:expr) => {{
+                let val: String = $value.clone();
+                let e: Element<'_, Message> = row![
+                    text($label).size(13).width(Length::Fixed(140.0)),
+                    text_input("", &val).size(13).width(Length::Fill).padding([3, 5]),
+                    button(text("cp").size(10))
+                        .on_press(Message::CopyToClipboard(val))
+                        .padding([2, 6]),
+                ]
+                .spacing(5)
+                .align_y(Alignment::Center)
+                .into();
+                e
+            }};
+        }
+
+        let details: Element<Message> = column![
+            copyable_row!("JID", bare_jid),
+            copyable_row!("Server", server),
+            copyable_row!("Resource", resource),
             row![
                 text("Status").size(13).width(Length::Fixed(140.0)),
-                text(status_str.to_string()).size(13).width(Length::Fill),
+                text(status_str).size(13).width(Length::Fill),
             ]
             .spacing(8),
-            row![
-                text("Auth").size(13).width(Length::Fixed(140.0)),
-                text(if info.auth_method.is_empty() {
-                    "—".to_string()
-                } else {
-                    info.auth_method.clone()
-                })
-                .size(13)
-                .width(Length::Fill),
-            ]
-            .spacing(8),
-            row![
-                text("Server features").size(13).width(Length::Fixed(140.0)),
-                text(if info.server_features.is_empty() {
-                    "—".to_string()
-                } else {
-                    info.server_features.clone()
-                })
-                .size(13)
-                .width(Length::Fill),
-            ]
-            .spacing(8),
+            copyable_row!("Auth", auth_val),
+            copyable_row!("Server features", features_val),
         ]
-        .spacing(6);
+        .spacing(10)
+        .into();
 
-        container(details).padding(0).into()
+        settings_section("Account", details)
     }
 
     // M6: Data & Storage sub-view.
     fn view_data_storage(&self) -> Element<'_, Message> {
-        let header = text("Data & Storage").size(16);
-
         // MAM fetch limit
         let limit_row: Element<Message> = row![
-            text("MAM fetch limit:").size(14).width(Length::Fill),
+            text("MAM fetch limit").size(14),
+            horizontal_space(),
             text_input("50", &self.mam_fetch_limit_input)
                 .on_input(Message::MamFetchLimitChanged)
                 .on_submit(Message::MamFetchLimitConfirm)
@@ -759,14 +881,15 @@ impl SettingsScreen {
                 .on_press(Message::MamFetchLimitConfirm)
                 .padding([4, 10]),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center)
         .into();
 
         // Clear chat history
         let clear_section: Element<Message> = if self.clear_history_confirm {
             row![
-                text("Clear all chat history?").size(14).width(Length::Fill),
+                text("Clear all chat history?").size(14),
+                horizontal_space(),
                 button(text("Confirm").size(13))
                     .on_press(Message::ClearHistoryConfirm)
                     .padding([4, 10]),
@@ -774,88 +897,86 @@ impl SettingsScreen {
                     .on_press(Message::ClearHistoryCancel)
                     .padding([4, 10]),
             ]
-            .spacing(8)
+            .spacing(10)
             .align_y(Alignment::Center)
             .into()
         } else {
             row![
-                text("Chat history").size(14).width(Length::Fill),
-                button(text("Clear…").size(13))
+                text("Chat history").size(14),
+                horizontal_space(),
+                button(text("Clear\u{2026}").size(13))
                     .on_press(Message::ClearHistoryRequest)
                     .padding([4, 10]),
             ]
-            .spacing(8)
+            .spacing(10)
             .align_y(Alignment::Center)
             .into()
         };
 
         // Export conversations — disabled placeholder (no on_press)
         let export_row: Element<Message> = row![
-            text("Export conversations").size(14).width(Length::Fill),
+            text("Export conversations").size(14),
+            horizontal_space(),
             button(text("Export").size(13)).padding([4, 10]),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center)
         .into();
 
-        column![header, limit_row, clear_section, export_row]
-            .spacing(8)
-            .into()
+        let content: Element<Message> = column![limit_row, clear_section, export_row]
+            .spacing(15)
+            .into();
+        settings_section("Data & Storage", content)
     }
 
     // MEMO: OMEMO encryption sub-view.
     fn view_omemo(&self) -> Element<'_, Message> {
-        let header = text("OMEMO Encryption").size(16);
         let body: Element<Message> = if self.omemo_enabled {
             let id_str = self.omemo_device_id.map_or_else(
-                || "Device ID: —".to_string(),
+                || "Device ID: \u{2014}".to_string(),
                 |id| format!("Device ID: {id}"),
             );
             column![
                 row![
-                    text("Status").size(14).width(Length::Fixed(140.0)),
-                    text("Enabled").size(14).width(Length::Fill),
+                    text("Status").size(14),
+                    horizontal_space(),
+                    text("Enabled").size(14),
                 ]
-                .spacing(8),
-                row![text(id_str).size(13).width(Length::Fill),].spacing(8),
+                .spacing(10)
+                .align_y(Alignment::Center),
+                row![text(id_str).size(13)].spacing(10),
             ]
-            .spacing(6)
+            .spacing(10)
             .into()
         } else {
             row![
-                text("End-to-end encryption").size(14).width(Length::Fill),
+                text("End-to-end encryption").size(14),
+                horizontal_space(),
                 button(text("Enable OMEMO").size(13))
                     .on_press(Message::EnableOmemo)
                     .padding([4, 12]),
             ]
-            .spacing(8)
+            .spacing(10)
             .align_y(Alignment::Center)
             .into()
         };
-        column![header, body].spacing(8).into()
+        settings_section("OMEMO Encryption", body)
     }
 
     // M5: Network settings sub-view.
     fn view_network(&self) -> Element<'_, Message> {
-        let header = text("Network").size(16);
-
-        let proxy_type_label = match self.settings.proxy_type.as_deref() {
-            Some("socks5") => "SOCKS5",
-            Some("http") => "HTTP",
-            _ => "None",
-        };
+        let is_none = self.settings.proxy_type.is_none();
+        let is_socks5 = self.settings.proxy_type.as_deref() == Some("socks5");
+        let is_http = self.settings.proxy_type.as_deref() == Some("http");
         let proxy_type_row: Element<Message> = row![
-            text("Proxy type:").size(14).width(Length::Fill),
-            button("None")
-                .on_press(Message::ProxyTypeSelected("none".into()))
-                .padding([4, 8]),
-            button("SOCKS5")
-                .on_press(Message::ProxyTypeSelected("socks5".into()))
-                .padding([4, 8]),
-            button("HTTP")
-                .on_press(Message::ProxyTypeSelected("http".into()))
-                .padding([4, 8]),
-            text(proxy_type_label).size(13),
+            text("Proxy type").size(14),
+            horizontal_space(),
+            segmented_btn("None", is_none)
+                .on_press(Message::ProxyTypeSelected("none".into())),
+            segmented_btn("SOCKS5", is_socks5)
+                .on_press(Message::ProxyTypeSelected("socks5".into())),
+            segmented_btn("HTTP", is_http)
+                .on_press(Message::ProxyTypeSelected("http".into())),
         ]
         .spacing(4)
         .align_y(Alignment::Center)
@@ -864,55 +985,58 @@ impl SettingsScreen {
         // Proxy host + port: only shown when a proxy type is selected
         let proxy_detail: Option<Element<Message>> = if self.settings.proxy_type.is_some() {
             let host_row: Element<Message> = row![
-                text("Proxy host:").size(14).width(Length::Fixed(120.0)),
+                text("Proxy host").size(14).width(Length::Fixed(120.0)),
                 text_input("hostname or IP", &self.proxy_host_input)
                     .on_input(Message::ProxyHostChanged)
                     .width(Length::Fill)
                     .padding([4, 8]),
             ]
-            .spacing(8)
+            .spacing(10)
             .align_y(Alignment::Center)
             .into();
             let port_row: Element<Message> = row![
-                text("Proxy port:").size(14).width(Length::Fixed(120.0)),
+                text("Proxy port").size(14).width(Length::Fixed(120.0)),
                 text_input("1080", &self.proxy_port_input)
                     .on_input(Message::ProxyPortChanged)
                     .width(Length::Fixed(80.0))
                     .padding([4, 8]),
             ]
-            .spacing(8)
+            .spacing(10)
             .align_y(Alignment::Center)
             .into();
-            Some(column![host_row, port_row].spacing(8).into())
+            Some(column![host_row, port_row].spacing(15).into())
         } else {
             None
         };
 
         let srv_row: Element<Message> = row![
-            text("Manual SRV:").size(14).width(Length::Fixed(120.0)),
-            text_input("_xmpp-client._tcp…", &self.manual_srv_input)
+            text("Manual SRV").size(14).width(Length::Fixed(120.0)),
+            text_input("_xmpp-client._tcp\u{2026}", &self.manual_srv_input)
                 .on_input(Message::ManualSrvChanged)
                 .width(Length::Fill)
                 .padding([4, 8]),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center)
         .into();
 
         let tls_row = row![
-            text("Force TLS").size(14).width(Length::Fill),
+            text("Force TLS").size(14),
+            horizontal_space(),
             toggler(self.settings.force_tls).on_toggle(Message::ForceTlsToggled),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(Alignment::Center);
 
-        let mut col = column![header, proxy_type_row].spacing(8);
+        let mut col = column![proxy_type_row].spacing(15);
         if let Some(detail) = proxy_detail {
             col = col.push(detail);
         }
         col = col.push(srv_row);
         col = col.push(tls_row);
-        col.into()
+
+        let content: Element<Message> = col.into();
+        settings_section("Advanced", content)
     }
 }
 

@@ -6,14 +6,17 @@ use std::collections::HashMap;
 
 use iced::{
     widget::text::Shaping,
-    widget::{button, column, container, image, row, scrollable, text, text_input, tooltip},
+    widget::{
+        button, column, container, horizontal_rule, image, row, scrollable, text, text_input,
+        tooltip,
+    },
     Alignment, Element, Length, Task,
 };
 
 use crate::ui::account_state::account_color;
 use crate::ui::avatar::{jid_color, jid_initial};
 
-use crate::xmpp::{AccountId, RosterContact};
+use crate::xmpp::{modules::presence_machine::PresenceStatus, AccountId, RosterContact};
 
 #[derive(Debug, Clone)]
 pub struct SidebarScreen {
@@ -37,6 +40,8 @@ pub struct SidebarScreen {
     create_room_local: String,
     create_room_service: String,
     create_room_nick: String,
+    // UX-2: account menu popover state
+    show_account_menu: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +69,10 @@ pub enum Message {
     SubmitCreateRoom,
     // MULTI: open the account switcher panel
     OpenAccountSwitcher,
+    // UX-2: account menu popover
+    ToggleAccountMenu,
+    SetPresence(PresenceStatus),
+    OpenSettings,
 }
 
 impl Default for SidebarScreen {
@@ -90,6 +99,7 @@ impl SidebarScreen {
             create_room_local: String::new(),
             create_room_service: String::new(),
             create_room_nick: String::new(),
+            show_account_menu: false,
         }
     }
 
@@ -227,7 +237,20 @@ impl SidebarScreen {
                 self.create_room_nick.clear();
             }
             Message::OpenAccountSwitcher => {
-                // Handled by the parent (ChatScreen / App); no local state change.
+                // Handled by the parent (ChatScreen / App); close menu.
+                self.show_account_menu = false;
+            }
+            // UX-2: account menu popover
+            Message::ToggleAccountMenu => {
+                self.show_account_menu = !self.show_account_menu;
+            }
+            Message::SetPresence(_) => {
+                // Handled by ChatScreen / App; close menu after selection.
+                self.show_account_menu = false;
+            }
+            Message::OpenSettings => {
+                // Handled by ChatScreen / App; close menu after selection.
+                self.show_account_menu = false;
             }
         }
         Task::none()
@@ -291,7 +314,7 @@ impl SidebarScreen {
                 .width(Length::Fill);
 
             button(indicator_row)
-                .on_press(Message::OpenAccountSwitcher)
+                .on_press(Message::ToggleAccountMenu)
                 .width(Length::Fill)
                 .padding([4, 8])
                 .into()
@@ -523,6 +546,64 @@ impl SidebarScreen {
         let mut col = column![].spacing(4).padding(8).width(Length::Fill);
         if let Some(indicator) = account_indicator {
             col = col.push(indicator);
+        }
+        // UX-2: account menu popover — presence options + settings
+        if self.show_account_menu {
+            let available_btn = button(
+                text("● Available").size(12).shaping(Shaping::Advanced),
+            )
+            .on_press(Message::SetPresence(PresenceStatus::Available))
+            .width(Length::Fill)
+            .padding([4, 8]);
+            let away_btn = button(
+                text("◐ Away").size(12).shaping(Shaping::Advanced),
+            )
+            .on_press(Message::SetPresence(PresenceStatus::Away))
+            .width(Length::Fill)
+            .padding([4, 8]);
+            let dnd_btn = button(
+                text("⛔ DND").size(12).shaping(Shaping::Advanced),
+            )
+            .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
+            .width(Length::Fill)
+            .padding([4, 8]);
+            let settings_btn = button(
+                text("⚙ Settings").size(12).shaping(Shaping::Advanced),
+            )
+            .on_press(Message::OpenSettings)
+            .width(Length::Fill)
+            .padding([4, 8]);
+            let switch_btn = button(
+                text("Switch Account").size(12),
+            )
+            .on_press(Message::OpenAccountSwitcher)
+            .width(Length::Fill)
+            .padding([4, 8]);
+            let menu_col = column![
+                available_btn,
+                away_btn,
+                dnd_btn,
+                horizontal_rule(1),
+                settings_btn,
+                switch_btn,
+            ]
+            .spacing(2)
+            .padding(4);
+            let menu_panel =
+                container(menu_col)
+                    .width(Length::Fill)
+                    .style(|_theme: &iced::Theme| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(
+                            0.13, 0.13, 0.16,
+                        ))),
+                        border: iced::Border {
+                            color: iced::Color::from_rgb(0.3, 0.3, 0.35),
+                            width: 1.0,
+                            radius: 6.0.into(),
+                        },
+                        ..Default::default()
+                    });
+            col = col.push(menu_panel);
         }
         col = col.push(header_row);
         if let Some(add_row) = add_contact_row {

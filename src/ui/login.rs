@@ -46,6 +46,10 @@ pub enum Message {
     GoToBenchmark,
     /// AUTH-1: toggled by the Remember Me checkbox.
     RememberMeToggled(bool),
+    /// Tab-advance: JID → Password
+    FocusPassword,
+    /// Tab-advance: Password → Server
+    FocusServer,
 }
 
 impl Default for LoginScreen {
@@ -125,6 +129,12 @@ impl LoginScreen {
             Message::RememberMeToggled(v) => {
                 self.remember_me = v;
             }
+            Message::FocusPassword => {
+                return text_input::focus(text_input::Id::new(field_ids::PASSWORD));
+            }
+            Message::FocusServer => {
+                return text_input::focus(text_input::Id::new(field_ids::SERVER));
+            }
         }
         Task::none()
     }
@@ -158,13 +168,13 @@ impl LoginScreen {
             text_input("JID (user@server.tld)", &self.jid)
                 .id(text_input::Id::new(field_ids::JID))
                 .on_input(Message::JidChanged)
-                .on_submit(Message::Connect)
+                .on_submit(Message::FocusPassword)
                 .padding(10),
             text_input("Password", &self.password)
                 .id(text_input::Id::new(field_ids::PASSWORD))
                 .secure(true)
                 .on_input(Message::PasswordChanged)
-                .on_submit(Message::Connect)
+                .on_submit(Message::FocusServer)
                 .padding(10),
             text_input("Server (optional)", &self.server)
                 .id(text_input::Id::new(field_ids::SERVER))

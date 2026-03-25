@@ -12,6 +12,7 @@ pub enum SpanStyle {
     Code,
     Strike,
     Quote,
+    Link,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,10 +60,114 @@ fn is_after_close(ch: char) -> bool {
     ch.is_whitespace() || ch.is_ascii_punctuation()
 }
 
+/// URL schemes recognised by `split_urls`.
+const URL_SCHEMES: &[&str] = &[
+    "https://",
+    "http://",
+    "xmpp:",
+    "mailto:",
+    "magnet:",
+];
+
+/// Characters that close a URL when they appear without a matching opener inside the URL.
+const TRAILING_PUNCT: &[char] = &['.', ',', ')', ']', '>'];
+
+/// Opener/closer pairs used when deciding whether a trailing bracket is part of the URL.
+const BRACKET_PAIRS: &[(char, char)] = &[('(', ')'), ('[', ']'), ('<', '>')];
+
+/// Split `text` into `(segment, is_url)` pairs.
+///
+/// URL detection runs before inline-style parsing so that characters like `_`
+/// or `*` inside a URL are never mistaken for style delimiters.
+///
+/// Trailing punctuation (`.`, `,`, `)`, `]`, `>`) is stripped from the URL end
+/// unless the URL contains a matching opener for the bracket character.
+fn split_urls(text: &str) -> Vec<(&str, bool)> {
+    let mut segments: Vec<(&str, bool)> = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        // Find the earliest scheme match.
+        let url_start = URL_SCHEMES
+            .iter()
+            .filter_map(|scheme| remaining.find(scheme))
+            .min();
+
+        match url_start {
+            None => {
+                segments.push((remaining, false));
+                break;
+            }
+            Some(start) => {
+                // Emit the text before the URL as a plain segment.
+                if start > 0 {
+                    segments.push((&remaining[..start], false));
+                }
+
+                let url_slice = &remaining[start..];
+
+                // URL ends at the first whitespace.
+                let raw_end = url_slice
+                    .find(|c: char| c.is_whitespace())
+                    .unwrap_or(url_slice.len());
+
+                let mut url = &url_slice[..raw_end];
+
+                // Strip unmatched trailing punctuation characters.
+                url = strip_trailing_punct(url);
+
+                let url_len = url.len();
+                segments.push((&remaining[start..start + url_len], true));
+                remaining = &remaining[start + url_len..];
+            }
+        }
+    }
+
+    segments
+}
+
+/// Strip trailing punctuation that is not balanced by an opener inside the URL.
+fn strip_trailing_punct(url: &str) -> &str {
+    let mut end = url.len();
+
+    loop {
+        let trimmed = &url[..end];
+        if trimmed.is_empty() {
+            break;
+        }
+        let last_char = trimmed.chars().last().unwrap();
+
+        // Check whether this trailing character is in our strip list.
+        if !TRAILING_PUNCT.contains(&last_char) {
+            break;
+        }
+
+        // For bracket closers, only strip if there is no matching opener in the URL.
+        let should_strip = BRACKET_PAIRS
+            .iter()
+            .find(|(_, closer)| *closer == last_char)
+            .map_or(
+                true, // plain punctuation like '.' or ',' — always strip
+                |(opener, _)| !trimmed.contains(*opener),
+            );
+
+        if should_strip {
+            // Shrink by the byte length of `last_char`.
+            end -= last_char.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    &url[..end]
+}
+
 /// Parse a message body into styled spans per XEP-0393.
 ///
 /// Lines beginning with `> ` (greater-than + space) are emitted as a single
-/// `SpanStyle::Quote` span. All other lines are scanned for inline delimiters.
+/// `SpanStyle::Quote` span. All other lines are first split on URL boundaries
+/// so that URL text is never processed by inline-style scanning, then the
+/// non-URL segments are scanned for inline delimiters.
 /// Nested styling is not supported — only one style is active at a time.
 pub fn parse(input: &str) -> Vec<Span> {
     if input.is_empty() {
@@ -91,8 +196,15 @@ pub fn parse(input: &str) -> Vec<Span> {
             continue;
         }
 
-        // Inline parsing: scan character by character.
-        parse_inline(line, &mut result);
+        // URL-first pass: split the line on URL boundaries, then apply inline
+        // styling only to non-URL segments.
+        for (segment, is_url) in split_urls(line) {
+            if is_url {
+                result.push(Span::styled(segment, SpanStyle::Link));
+            } else {
+                parse_inline(segment, &mut result);
+            }
+        }
     }
 
     result
@@ -299,5 +411,123 @@ mod tests {
     fn empty_delimiter_pair_is_plain() {
         // "**" has nothing inside — not a valid styled span.
         assert_eq!(parse("**"), vec![plain("**")]);
+    }
+
+    // --- URL / Link tests ---
+
+    fn link(text: &str) -> Span {
+        s(text, SpanStyle::Link)
+    }
+
+    #[test]
+    fn bare_https_url_becomes_link() {
+        assert_eq!(parse("https://example.com"), vec![link("https://example.com")]);
+    }
+
+    #[test]
+    fn bare_http_url_becomes_link() {
+        assert_eq!(parse("http://example.com"), vec![link("http://example.com")]);
+    }
+
+    #[test]
+    fn xmpp_uri_becomes_link() {
+        assert_eq!(parse("xmpp:user@example.com"), vec![link("xmpp:user@example.com")]);
+    }
+
+    #[test]
+    fn mailto_uri_becomes_link() {
+        assert_eq!(parse("mailto:user@example.com"), vec![link("mailto:user@example.com")]);
+    }
+
+    #[test]
+    fn magnet_uri_becomes_link() {
+        assert_eq!(parse("magnet:?xt=urn:btih:abc123"), vec![link("magnet:?xt=urn:btih:abc123")]);
+    }
+
+    #[test]
+    fn url_embedded_in_text() {
+        assert_eq!(
+            parse("visit https://example.com today"),
+            vec![plain("visit "), link("https://example.com"), plain(" today")]
+        );
+    }
+
+    #[test]
+    fn url_underscore_not_mangled() {
+        // An underscore inside a URL must not trigger italic parsing.
+        assert_eq!(
+            parse("https://example.com/foo_bar_baz"),
+            vec![link("https://example.com/foo_bar_baz")]
+        );
+    }
+
+    #[test]
+    fn trailing_period_stripped_from_url() {
+        assert_eq!(
+            parse("see https://example.com."),
+            vec![plain("see "), link("https://example.com"), plain(".")]
+        );
+    }
+
+    #[test]
+    fn trailing_comma_stripped_from_url() {
+        assert_eq!(
+            parse("https://example.com,"),
+            vec![link("https://example.com"), plain(",")]
+        );
+    }
+
+    #[test]
+    fn trailing_paren_stripped_when_no_opener() {
+        // URL has no '(' so trailing ')' should be stripped.
+        assert_eq!(
+            parse("(see https://example.com)"),
+            vec![plain("(see "), link("https://example.com"), plain(")")]
+        );
+    }
+
+    #[test]
+    fn trailing_paren_kept_when_opener_present() {
+        // URL contains '(' so the trailing ')' is part of the URL.
+        let url = "https://example.com/foo(bar)";
+        assert_eq!(parse(url), vec![link(url)]);
+    }
+
+    #[test]
+    fn multiple_urls_on_one_line() {
+        assert_eq!(
+            parse("https://a.com and https://b.com"),
+            vec![link("https://a.com"), plain(" and "), link("https://b.com")]
+        );
+    }
+
+    #[test]
+    fn bold_text_around_url_not_affected() {
+        // Bold markers outside the URL should still work.
+        assert_eq!(
+            parse("*bold* https://example.com"),
+            vec![s("bold", SpanStyle::Bold), plain(" "), link("https://example.com")]
+        );
+    }
+
+    #[test]
+    fn url_at_end_of_line() {
+        // URL with no trailing text — must still produce a Link span.
+        assert_eq!(
+            parse("visit https://example.com"),
+            vec![plain("visit "), link("https://example.com")]
+        );
+    }
+
+    #[test]
+    fn url_inside_bold_markers_becomes_link_not_bold() {
+        // URL detection runs before inline-style scanning, so the `*` markers
+        // never trigger bold parsing.  The leading `*` is emitted as plain text
+        // and the URL (including the trailing `*`, which is not in TRAILING_PUNCT)
+        // is emitted as a Link span.
+        assert_eq!(
+            parse("*https://example.com*"),
+            vec![plain("*"), link("https://example.com*")]
+        );
     }
 }

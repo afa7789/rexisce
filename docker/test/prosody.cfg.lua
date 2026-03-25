@@ -1,6 +1,8 @@
 -- Test-only Prosody config.
 -- Self-signed TLS cert so tokio-xmpp STARTTLS works.
 
+pidfile = "/var/run/prosody/prosody.pid"
+
 c2s_require_encryption = false
 s2s_require_encryption = false
 authentication = "internal_plain"

@@ -40,8 +40,8 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 # Storage
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros", "migrate", "chrono", "uuid"] }
 
-# Keychain
-keyring = "3"
+# Keychain — platform backends must be feature-gated in keyring v3
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 
 # i18n
 fluent = "0.16"
@@ -79,6 +79,9 @@ vodozemac = "0.8"
 # AES-256-GCM for OMEMO payload encryption
 aes-gcm = "0.10"
 rand = "0.8"
+
+# Open URLs in default browser
+opener = "0.7"
 
 # Utilities
 uuid = { version = "1", features = ["v4"] }

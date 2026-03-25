@@ -293,7 +293,7 @@ pub enum XmppCommand {
     /// C2: Update the user's own presence status.
     SetPresence(modules::presence_machine::PresenceStatus),
     /// Send a chat message to a JID.
-    SendMessage { to: String, body: String },
+    SendMessage { to: String, body: String, id: String },
     /// G2: Send a chat state notification (XEP-0085).
     SendChatState { to: String, composing: bool },
     /// H3: Add a contact to the roster.

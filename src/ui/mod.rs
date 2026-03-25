@@ -26,6 +26,7 @@ pub mod omemo_trust;
 pub mod settings;
 pub mod sidebar;
 pub mod spam_report;
+pub mod styles;
 pub mod styling;
 pub mod toast;
 pub mod vcard_editor;
@@ -229,6 +230,9 @@ pub enum Message {
     ConversationsPrefill(Vec<String>),
     // MEMO: OMEMO trust dialog messages
     OmemoTrust(omemo_trust::Message),
+    // Tab focus navigation between input fields
+    FocusNext,
+    FocusPrevious,
 }
 
 enum Screen {
@@ -500,7 +504,14 @@ impl App {
 
             Message::ConversationsPrefill(jids) => {
                 if let Screen::Chat(ref mut chat) = self.screen {
-                    chat.prefill_conversations(jids);
+                    chat.prefill_conversations(jids.clone());
+                }
+                // Auto-select the most recent conversation so the user sees
+                // their last chat history immediately after restart.
+                if let Some(first_jid) = jids.first() {
+                    return self.update(Message::Chat(chat::Message::Sidebar(
+                        crate::ui::sidebar::Message::SelectContact(first_jid.clone()),
+                    )));
                 }
                 Task::none()
             }
@@ -1019,6 +1030,11 @@ impl App {
                 if !self.settings.remember_me && !self.settings.last_jid.is_empty() {
                     config::delete_password(&self.settings.last_jid);
                 }
+                // Remove the active account from the state manager so it
+                // doesn't linger as a stale entry on re-login.
+                if let Some(id) = self.account_state_mgr.active_id().cloned() {
+                    self.account_state_mgr.remove_account(&id);
+                }
                 // Reset own presence
                 self.own_presence = PresenceStatus::Available;
                 let login = LoginScreen::with_saved(
@@ -1156,7 +1172,7 @@ impl App {
                         let send_cmds: Vec<(String, String)> = cmds
                             .iter()
                             .filter_map(|c| {
-                                if let XmppCommand::SendMessage { to, body } = c {
+                                if let XmppCommand::SendMessage { to, body, .. } = c {
                                     Some((to.clone(), body.clone()))
                                 } else {
                                     None
@@ -1239,6 +1255,10 @@ impl App {
                 Task::none()
             }
 
+            // Tab focus navigation between input fields
+            Message::FocusNext => iced::widget::focus_next(),
+            Message::FocusPrevious => iced::widget::focus_previous(),
+
             Message::XmppReady(tx) => {
                 tracing::debug!("xmpp command channel ready");
                 self.xmpp_tx = Some(tx.clone());
@@ -1260,13 +1280,27 @@ impl App {
                         tracing::info!("XMPP: online as {bound_jid}");
                         if let Screen::Login(ref login) = self.screen {
                             let cfg = login.connect_config();
-                            if !cfg.password.is_empty() {
-                                let _ = config::save_password(&cfg.jid, &cfg.password);
+                            if !cfg.password.is_empty() && login.remember_me {
+                                if let Err(e) =
+                                    config::save_password(&cfg.jid, &cfg.password)
+                                {
+                                    tracing::error!(
+                                        "failed to save password to keychain: {e}"
+                                    );
+                                }
                             }
                         }
                         // MULTI: register this account in the state manager so the
                         // sidebar indicator bar is populated on first connect.
-                        let account_id = AccountId::new(bound_jid.clone());
+                        // Use bare JID (without resource) so reconnects don't
+                        // create duplicate entries — the server assigns a fresh
+                        // resource on every bind.
+                        let bare_jid = bound_jid
+                            .split('/')
+                            .next()
+                            .unwrap_or(bound_jid.as_str())
+                            .to_string();
+                        let account_id = AccountId::new(bare_jid);
                         self.account_state_mgr.add_account(account_id.clone());
 
                         // DC-21: if this connection was triggered by AddAccount,
@@ -1286,6 +1320,14 @@ impl App {
                             .account_state_mgr
                             .get_active()
                             .map_or(0, |s| s.unread_total);
+                        // H2: restore cached own avatar so it displays immediately
+                        // before the server fetch completes.
+                        if let Some(ref avatar_bytes) = self.settings.avatar_data {
+                            self.avatar_cache
+                                .insert(account_id.0.clone(), avatar_bytes.clone());
+                            chat_screen
+                                .on_avatar_received(account_id.0.clone(), avatar_bytes.clone());
+                        }
                         chat_screen.set_active_account(Some(account_id), unread);
                         self.screen = Screen::Chat(Box::new(chat_screen));
                         // A3: pre-populate sidebar from cached DB roster before server responds
@@ -1355,7 +1397,18 @@ impl App {
                             login.on_error(reason.clone());
                         }
                         if matches!(self.screen, Screen::Chat(_)) {
-                            self.screen = Screen::Login(LoginScreen::new());
+                            let pw = if self.settings.remember_me {
+                                config::load_password(&self.settings.last_jid)
+                                    .unwrap_or_default()
+                            } else {
+                                String::new()
+                            };
+                            self.screen = Screen::Login(LoginScreen::with_saved(
+                                self.settings.last_jid.clone(),
+                                pw,
+                                self.settings.last_server.clone(),
+                                self.settings.remember_me,
+                            ));
                         }
                         // J1: show disconnect toast
                         let msg = Message::ShowToast(
@@ -1547,6 +1600,17 @@ impl App {
                         self.avatar_cache.insert(jid.clone(), png_bytes.clone());
                         if let Screen::Chat(ref mut chat) = self.screen {
                             chat.on_avatar_received(jid.clone(), png_bytes.clone());
+                            // H2: persist own avatar to settings for instant
+                            // restore on next login.
+                            let own_bare = chat
+                                .own_jid()
+                                .split('/')
+                                .next()
+                                .unwrap_or(chat.own_jid());
+                            if jid == own_bare {
+                                self.settings.avatar_data = Some(png_bytes.clone());
+                                let _ = config::save(&self.settings);
+                            }
                         }
                     }
                     XmppEvent::CatchupFinished {
@@ -1582,6 +1646,7 @@ impl App {
                                                         .send(XmppCommand::SendMessage {
                                                             to: target_jid,
                                                             body: get_url,
+                                                            id: uuid::Uuid::new_v4().to_string(),
                                                         })
                                                         .await;
                                                 }
@@ -1640,6 +1705,17 @@ impl App {
                         self.avatar_cache.insert(jid.clone(), data.clone());
                         if let Screen::Chat(ref mut chat) = self.screen {
                             chat.on_avatar_received(jid.clone(), data.clone());
+                            // H2: persist own avatar to settings for instant
+                            // restore on next login.
+                            let own_bare = chat
+                                .own_jid()
+                                .split('/')
+                                .next()
+                                .unwrap_or(chat.own_jid());
+                            if jid == own_bare {
+                                self.settings.avatar_data = Some(data.clone());
+                                let _ = config::save(&self.settings);
+                            }
                         }
                     }
                     // K4: delivery receipt — update message state in conversation
@@ -2196,6 +2272,13 @@ impl App {
             }
             if key == Key::Named(iced::keyboard::key::Named::Escape) {
                 return Some(Message::TogglePalette);
+            }
+            if key == Key::Named(iced::keyboard::key::Named::Tab) {
+                return if modifiers.shift() {
+                    Some(Message::FocusPrevious)
+                } else {
+                    Some(Message::FocusNext)
+                };
             }
             None
         });

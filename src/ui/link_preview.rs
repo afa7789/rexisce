@@ -23,10 +23,11 @@
 
 use iced::{
     font,
-    widget::{column, container, image, row, text},
+    widget::{button, column, container, image, row, text},
     Alignment, Color, Element, Font, Length,
 };
 
+use crate::ui::styles::{link_style, LINK_COLOR};
 use crate::xmpp::modules::link_preview::LinkPreview;
 
 // We need to refer to the conversation Message type. Import it via pub use so
@@ -80,9 +81,16 @@ pub fn render_preview_card(
         card_col = card_col.push(
             text(image_url.clone())
                 .size(10)
-                .color(Color::from_rgb(0.4, 0.6, 1.0)),
+                .color(LINK_COLOR),
         );
     }
+
+    // "Open" button that opens the preview URL in the system browser.
+    card_col = card_col.push(
+        button(text("Open").size(11))
+            .style(link_style)
+            .on_press(Message::OpenLink(preview.url.clone())),
+    );
 
     let card = container(card_col)
         .width(MAX_PREVIEW_WIDTH as f32)

@@ -22,6 +22,15 @@ fn main() -> iced::Result {
         )
         .init();
 
+    // On macOS, set the notification application bundle ID before any
+    // notification is sent.  Without this, mac-notification-sys passes the
+    // sentinel "use_default" to AppleScript's `get id of application`, which
+    // macOS cannot resolve — opening a "Choose Application" dialog repeatedly.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = notify_rust::set_application("com.apple.Terminal");
+    }
+
     // Load settings synchronously at startup (no async needed — it's just fs::read).
     let settings = config::load();
 

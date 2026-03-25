@@ -22,6 +22,7 @@ use crate::ui::muc_panel::OccupantEntry;
 use chrono::{TimeZone, Utc};
 
 use crate::ui::link_preview::{domain_label, render_preview_card};
+use crate::ui::styles::LINK_COLOR;
 use crate::xmpp::modules::link_preview::LinkPreview;
 
 // G4: /me action message prefix (XEP-0245)
@@ -310,6 +311,8 @@ pub enum Message {
     OpenOmemoTrust(String), // peer_jid
     /// OMEMO Phase 2: toggle per-conversation encryption on/off
     ToggleEncryption,
+    /// UX-4: open a URL in the default browser
+    OpenLink(String),
 }
 
 impl ConversationView {
@@ -548,6 +551,12 @@ impl ConversationView {
             Message::OpenOmemoTrust(_) => Task::none(), // bubbled to ChatScreen
             Message::ToggleEncryption => {
                 self.is_encryption_enabled = !self.is_encryption_enabled;
+                Task::none()
+            }
+            Message::OpenLink(url) => {
+                if let Err(e) = opener::open(&url) {
+                    tracing::warn!("failed to open URL {}: {}", url, e);
+                }
                 Task::none()
             }
             Message::AttachmentLoaded(msg_id, handle) => {
@@ -795,7 +804,9 @@ impl ConversationView {
                 Task::none()
             }
 
-            // M4: stop recording — collect samples, encode to WAV in blocking thread
+            // M4: stop recording — join the recording thread, drain all
+            // samples, and encode to WAV.  Everything runs off the UI thread
+            // via spawn_blocking so the event loop is never blocked.
             Message::StopRecording => {
                 let handle = match std::mem::replace(&mut self.voice_state, VoiceState::Encoding) {
                     VoiceState::Recording(h) => h,
@@ -804,24 +815,32 @@ impl ConversationView {
                         return Task::none();
                     }
                 };
-                // Signal the recording thread to stop
-                handle
-                    .stop_flag
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                // Drain all buffered chunks
-                let mut all_samples: Vec<i16> = Vec::new();
-                // Give the thread a moment to flush its final chunk
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                while let Ok(chunk) = handle.rx.try_recv() {
-                    all_samples.extend(chunk);
-                }
+                // Move all handle components into the blocking task so the
+                // recording thread is properly joined and the channel is
+                // fully drained before encoding.
+                let stop_flag = handle.stop_flag;
+                let rx = handle.rx;
+                let thread_handle = handle._thread;
                 let sample_rate = handle.sample_rate;
                 let channels = handle.channels;
-                // Encode to WAV in a blocking task, then emit VoiceEncodingDone
+
                 Task::future(async move {
                     let result = tokio::task::spawn_blocking(move || {
+                        // Signal the recording thread to stop
+                        stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        // Wait for the recording thread to exit — this ensures the
+                        // cpal stream is dropped and all audio callbacks have finished.
+                        if let Some(th) = thread_handle {
+                            let _ = th.join();
+                        }
+                        // Now drain every sample from the channel.  The sender
+                        // has been dropped (thread exited), so this is exhaustive.
+                        let mut all_samples: Vec<i16> = Vec::new();
+                        while let Ok(chunk) = rx.try_recv() {
+                            all_samples.extend(chunk);
+                        }
                         let id = uuid::Uuid::new_v4().to_string();
-                        let path = std::env::temp_dir().join(format!("voice_{}.wav", id));
+                        let path = std::env::temp_dir().join(format!("voice_{id}.wav"));
                         let spec = hound::WavSpec {
                             channels,
                             sample_rate,
@@ -1074,7 +1093,7 @@ impl ConversationView {
             // E2: retract button (own messages only)
             let retract_msg_id = m.id.clone();
             let retract_btn = tooltip(
-                button(text("✕").size(10))
+                button(text("↩").size(10).shaping(Shaping::Advanced))
                     .on_press(Message::RetractMessage(retract_msg_id))
                     .padding([2, 4]),
                 "Retract message",
@@ -1362,7 +1381,7 @@ impl ConversationView {
 
         // ---- Jump-to-bottom button (only visible when not at bottom) ----
         let jump_btn = tooltip(
-            button(text("↓").size(12))
+            button(text("↓").size(12).shaping(Shaping::Advanced))
                 .on_press(Message::ScrollToBottom)
                 .padding([4, 10]),
             "Jump to bottom",
@@ -1433,7 +1452,7 @@ impl ConversationView {
 
         // E1: edit-mode strip above composer
         let edit_strip: Option<Element<Message>> = self.edit_mode.as_ref().map(|(_id, _orig)| {
-            let cancel_btn = button(text("✕").size(10))
+            let cancel_btn = button(text("✕").size(10).shaping(Shaping::Advanced))
                 .on_press(Message::CancelEdit)
                 .padding([2, 4]);
             let strip = row![
@@ -1571,11 +1590,11 @@ impl ConversationView {
                 let secs = self.voice_elapsed_secs % 60;
                 let elapsed_str = format!("REC {}:{:02}", mins, secs);
                 row![
-                    button(text("X Cancel").size(13))
+                    button(text("✕ Cancel").size(13).shaping(Shaping::Advanced))
                         .on_press(Message::CancelRecording)
                         .padding([8, 12]),
                     text(elapsed_str).size(14).width(Length::Fill),
-                    button(text("[] Stop").size(13))
+                    button(text("⏹ Stop").size(13).shaping(Shaping::Advanced))
                         .on_press(Message::StopRecording)
                         .padding([8, 12]),
                 ]
@@ -1597,12 +1616,15 @@ impl ConversationView {
             for (i, att) in self.pending_attachments.iter().enumerate() {
                 let size_kb = att.size / 1024;
                 let label = format!("{} ({}KB)", att.name, size_kb);
-                let remove_btn = button(text("✕").size(10))
+                let remove_btn = button(text("\u{00D7}").size(12).shaping(Shaping::Advanced))
                     .on_press(Message::RemoveAttachment(i))
-                    .padding([2, 4]);
+                    .padding([2, 6])
+                    .style(crate::ui::styles::cancel_btn_style);
+                let track_width: f32 = 200.0;
+                let fill_width = (att.progress as f32 / 100.0) * track_width;
                 let progress_bar = container(
                     container(text("").size(1))
-                        .width(Length::Fixed(att.progress as f32 * 2.0))
+                        .width(Length::Fixed(fill_width.max(0.0)))
                         .height(4)
                         .style(|_theme: &iced::Theme| iced::widget::container::Style {
                             background: Some(iced::Background::Color(iced::Color::from_rgb(
@@ -1611,7 +1633,7 @@ impl ConversationView {
                             ..Default::default()
                         }),
                 )
-                .width(200)
+                .width(Length::Fixed(track_width))
                 .height(4)
                 .style(|_theme: &iced::Theme| iced::widget::container::Style {
                     background: Some(iced::Background::Color(iced::Color::from_rgb(
@@ -1639,7 +1661,7 @@ impl ConversationView {
         };
 
         let close_btn = tooltip(
-            button(text("✕").size(14))
+            button(text("✕").size(14).shaping(Shaping::Advanced))
                 .on_press(Message::Close)
                 .padding([4, 10]),
             "Close conversation",
@@ -1676,7 +1698,7 @@ impl ConversationView {
             tooltip::Position::Bottom,
         );
         let search_btn = tooltip(
-            button(text("?").size(14))
+            button(text("🔍").size(14).shaping(Shaping::Advanced))
                 .on_press(Message::SearchToggled)
                 .padding([4, 8]),
             "Search messages",
@@ -1823,33 +1845,51 @@ impl ConversationView {
     }
 }
 
+
+/// Apply the styling for a `SpanStyle` to an iced span.
+fn apply_style(t: IcedSpan<'static, Message>, style: &SpanStyle) -> IcedSpan<'static, Message> {
+    match style {
+        SpanStyle::Plain => t,
+        SpanStyle::Bold => t.font(Font {
+            weight: font::Weight::Bold,
+            ..Font::DEFAULT
+        }),
+        SpanStyle::Italic => t.font(Font {
+            style: font::Style::Italic,
+            ..Font::DEFAULT
+        }),
+        SpanStyle::Code => t
+            .font(Font::MONOSPACE)
+            .color(Color::from_rgb(0.2, 0.8, 0.4)),
+        SpanStyle::Strike => t.strikethrough(true),
+        SpanStyle::Quote => t.color(Color::from_rgb(0.6, 0.6, 0.6)).font(Font {
+            style: font::Style::Italic,
+            ..Font::DEFAULT
+        }),
+        SpanStyle::Link => unreachable!("Link spans are handled in build_styled_text"),
+    }
+}
+
 /// Map parsed `Span`s to an iced `rich_text` widget.
+/// URL spans (SpanStyle::Link) are rendered as clickable links; all other
+/// span styles are delegated to `apply_style`.
 fn build_styled_text(spans: &[styling::Span]) -> Element<'static, Message> {
-    let iced_spans: Vec<IcedSpan<'static, Message>> = spans
-        .iter()
-        .map(|s| {
-            let t: IcedSpan<'static, Message> = span(s.text.clone());
-            match s.style {
-                SpanStyle::Plain => t,
-                SpanStyle::Bold => t.font(Font {
-                    weight: font::Weight::Bold,
-                    ..Font::DEFAULT
-                }),
-                SpanStyle::Italic => t.font(Font {
-                    style: font::Style::Italic,
-                    ..Font::DEFAULT
-                }),
-                SpanStyle::Code => t
-                    .font(Font::MONOSPACE)
-                    .color(Color::from_rgb(0.2, 0.8, 0.4)),
-                SpanStyle::Strike => t.strikethrough(true),
-                SpanStyle::Quote => t.color(Color::from_rgb(0.6, 0.6, 0.6)).font(Font {
-                    style: font::Style::Italic,
-                    ..Font::DEFAULT
-                }),
+    let mut iced_spans: Vec<IcedSpan<'static, Message>> = Vec::new();
+    for s in spans {
+        let t: IcedSpan<'static, Message> = span(s.text.clone());
+        match s.style {
+            SpanStyle::Link => {
+                iced_spans.push(
+                    t.color(LINK_COLOR)
+                        .underline(true)
+                        .link(Message::OpenLink(s.text.clone())),
+                );
             }
-        })
-        .collect();
+            _ => {
+                iced_spans.push(apply_style(t, &s.style));
+            }
+        }
+    }
     rich_text(iced_spans).size(14).into()
 }
 
@@ -1910,4 +1950,5 @@ mod tests {
         assert!(!is_me_action("/me")); // no trailing space + content
         assert!(!is_me_action("/menu"));
     }
+
 }

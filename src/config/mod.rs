@@ -220,17 +220,37 @@ const KEYRING_SERVICE: &str = "rexisce";
 
 /// Store a password in the OS keychain for the given JID.
 pub fn save_password(jid: &str, password: &str) -> Result<()> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, jid)?;
-    entry.set_password(password)?;
+    let entry = keyring::Entry::new(KEYRING_SERVICE, jid).map_err(|e| {
+        tracing::error!("keyring: failed to create entry for {jid}: {e}");
+        e
+    })?;
+    entry.set_password(password).map_err(|e| {
+        tracing::error!("keyring: failed to store password for {jid}: {e}");
+        e
+    })?;
+    tracing::debug!("keyring: stored password for {jid}");
     Ok(())
 }
 
 /// Retrieve the stored password for the given JID; returns `None` if not found.
 pub fn load_password(jid: &str) -> Option<String> {
-    keyring::Entry::new(KEYRING_SERVICE, jid)
-        .ok()?
-        .get_password()
-        .ok()
+    let entry = match keyring::Entry::new(KEYRING_SERVICE, jid) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!("keyring: failed to create entry for {jid}: {e}");
+            return None;
+        }
+    };
+    match entry.get_password() {
+        Ok(pw) => {
+            tracing::debug!("keyring: loaded password for {jid}");
+            Some(pw)
+        }
+        Err(e) => {
+            tracing::debug!("keyring: no stored password for {jid}: {e}");
+            None
+        }
+    }
 }
 
 /// M1: Detect the OS dark/light mode preference.
