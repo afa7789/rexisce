@@ -207,7 +207,7 @@ pub fn render_form<M: Clone + 'static>(form: DataForm) -> Element<'static, M> {
                 let checked = field.value.is_some_and(|v| v == "1" || v == "true");
                 col = col.push(row![
                     text(label).size(14),
-                    text(if checked { "☑" } else { "☐" }).size(14),
+                    text(if checked { "☑" } else { "☐" }).size(16),
                 ]);
             }
             FieldType::ListSingle | FieldType::ListMulti => {
@@ -231,7 +231,7 @@ pub fn render_form<M: Clone + 'static>(form: DataForm) -> Element<'static, M> {
                         "○"
                     };
                     field_col = field_col.push(
-                        container(text(format!("  {} {}", prefix, opt_label)).size(13))
+                        container(text(format!("  {} {}", prefix, opt_label)).size(16))
                             .padding([2, 0]),
                     );
                 }
@@ -301,7 +301,7 @@ where
                 let checked = field.value.is_some_and(|v| v == "1" || v == "true");
                 col = col.push(row![
                     text(label).size(14),
-                    text(if checked { "☑" } else { "☐" }).size(14),
+                    text(if checked { "☑" } else { "☐" }).size(16),
                 ]);
             }
             FieldType::ListSingle | FieldType::ListMulti => {
@@ -325,7 +325,7 @@ where
                         "○"
                     };
                     field_col = field_col.push(
-                        container(text(format!("  {} {}", prefix, opt_label)).size(13))
+                        container(text(format!("  {} {}", prefix, opt_label)).size(16))
                             .padding([2, 0]),
                     );
                 }

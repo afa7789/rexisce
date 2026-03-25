@@ -1434,13 +1434,13 @@ impl ConversationView {
             None
         };
 
-        let emoji_btn = button(text("☺").size(14))
+        let emoji_btn = button(text("☺").size(18).shaping(Shaping::Advanced))
             .on_press(Message::EmojiPickerToggled)
             .padding([6, 8]);
 
         // E4/I3: paperclip button for file picker
         let attach_btn = tooltip(
-            button(text("⊕").size(14))
+            button(text("⊕").size(18).shaping(Shaping::Advanced))
                 .on_press(Message::OpenFilePicker)
                 .padding([6, 8]),
             "Attach file",
@@ -1452,7 +1452,7 @@ impl ConversationView {
             VoiceState::Idle => {
                 // Normal composer with mic button on the right of attach
                 let mic_btn = tooltip(
-                    button(text("♪").size(14))
+                    button(text("♪").size(18).shaping(Shaping::Advanced))
                         .on_press(Message::StartRecording)
                         .padding([6, 8]),
                     "Record voice message",

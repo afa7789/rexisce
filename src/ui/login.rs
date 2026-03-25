@@ -6,6 +6,12 @@ use iced::{
     Alignment, Element, Length, Task,
 };
 
+mod field_ids {
+    pub const JID: &str = "login_jid";
+    pub const PASSWORD: &str = "login_password";
+    pub const SERVER: &str = "login_server";
+}
+
 use crate::xmpp::ConnectConfig;
 
 #[derive(Debug, Clone)]
@@ -150,14 +156,20 @@ impl LoginScreen {
         let form = column![
             text("XMPP Messenger").size(28),
             text_input("JID (user@server.tld)", &self.jid)
+                .id(text_input::Id::new(field_ids::JID))
                 .on_input(Message::JidChanged)
+                .on_submit(Message::Connect)
                 .padding(10),
             text_input("Password", &self.password)
+                .id(text_input::Id::new(field_ids::PASSWORD))
                 .secure(true)
                 .on_input(Message::PasswordChanged)
+                .on_submit(Message::Connect)
                 .padding(10),
             text_input("Server (optional)", &self.server)
+                .id(text_input::Id::new(field_ids::SERVER))
                 .on_input(Message::ServerChanged)
+                .on_submit(Message::Connect)
                 .padding(10),
             remember_me_row,
             iced::widget::row![

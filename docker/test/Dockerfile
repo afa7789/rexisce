@@ -6,6 +6,7 @@ USER root
 COPY prosody.cfg.lua /etc/prosody/conf.avail/localhost.cfg.lua
 COPY entrypoint.sh   /usr/local/bin/test-entrypoint.sh
 RUN chmod +x /usr/local/bin/test-entrypoint.sh \
+ && mkdir -p /etc/prosody/conf.d \
  && ln -sf /etc/prosody/conf.avail/localhost.cfg.lua \
            /etc/prosody/conf.d/localhost.cfg.lua
 

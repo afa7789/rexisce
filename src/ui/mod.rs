@@ -1096,6 +1096,48 @@ impl App {
                     }
                     let cmds = chat.drain_commands();
                     if !cmds.is_empty() {
+                        // Persist outgoing messages to SQLite before forwarding to engine.
+                        let own_jid = chat.own_jid().to_string();
+                        let pool = self.db.clone();
+                        let send_cmds: Vec<(String, String)> = cmds
+                            .iter()
+                            .filter_map(|c| {
+                                if let XmppCommand::SendMessage { to, body } = c {
+                                    Some((to.clone(), body.clone()))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                        if !send_cmds.is_empty() {
+                            tokio::spawn(async move {
+                                let ts = chrono::Utc::now().timestamp_millis();
+                                for (to, body) in send_cmds {
+                                    let _ =
+                                        crate::store::conversation_repo::upsert(&pool, &to).await;
+                                    let _ = crate::store::conversation_repo::update_last_activity(
+                                        &pool, &to, ts,
+                                    )
+                                    .await;
+                                    let _ = crate::store::message_repo::insert(
+                                        &pool,
+                                        &crate::store::message_repo::Message {
+                                            id: uuid::Uuid::new_v4().to_string(),
+                                            conversation_jid: to,
+                                            from_jid: own_jid.clone(),
+                                            body: Some(body),
+                                            timestamp: ts,
+                                            stanza_id: None,
+                                            origin_id: None,
+                                            state: "sent".into(),
+                                            edited_body: None,
+                                            retracted: 0,
+                                        },
+                                    )
+                                    .await;
+                                }
+                            });
+                        }
                         if let Some(ref tx) = self.xmpp_tx {
                             let tx = tx.clone();
                             tokio::spawn(async move {
