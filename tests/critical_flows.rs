@@ -10,7 +10,7 @@
 
 #[test]
 fn muc_join_message_leave_lifecycle() {
-    use xmpp_start::xmpp::modules::muc::{MucManager, Role};
+    use rexisce::xmpp::modules::muc::{MucManager, Role};
 
     let mut mgr = MucManager::new();
 
@@ -51,7 +51,7 @@ fn muc_join_message_leave_lifecycle() {
 
 #[test]
 fn mam_sync_orchestrator_start_and_complete() {
-    use xmpp_start::xmpp::modules::sync::SyncOrchestrator;
+    use rexisce::xmpp::modules::sync::SyncOrchestrator;
 
     let conversations = vec![
         ("alice@example.com".to_string(), None),
@@ -79,7 +79,7 @@ fn mam_sync_orchestrator_start_and_complete() {
 
 #[test]
 fn stream_mgmt_ack_and_desync_flow() {
-    use xmpp_start::xmpp::modules::stream_mgmt::StreamMgmt;
+    use rexisce::xmpp::modules::stream_mgmt::StreamMgmt;
 
     let mut sm = StreamMgmt::new();
 
@@ -111,7 +111,7 @@ fn stream_mgmt_ack_and_desync_flow() {
 
 #[test]
 fn presence_auto_away_xa_restore_cycle() {
-    use xmpp_start::xmpp::modules::presence_machine::{PresenceMachine, PresenceStatus};
+    use rexisce::xmpp::modules::presence_machine::{PresenceMachine, PresenceStatus};
 
     let mut pm = PresenceMachine::new();
     pm.on_connected();
@@ -139,7 +139,7 @@ fn presence_auto_away_xa_restore_cycle() {
 
 #[test]
 fn blocking_full_lifecycle() {
-    use xmpp_start::xmpp::modules::blocking::BlockingManager;
+    use rexisce::xmpp::modules::blocking::BlockingManager;
 
     let mut bm = BlockingManager::new();
 
@@ -180,7 +180,7 @@ fn blocking_full_lifecycle() {
 
 #[test]
 fn avatar_publish_flow() {
-    use xmpp_start::xmpp::modules::avatar::AvatarManager;
+    use rexisce::xmpp::modules::avatar::AvatarManager;
 
     let avatar_mgr = AvatarManager::new();
 
@@ -300,9 +300,9 @@ fn message_lifecycle_xml_roundtrip() {
 ///   6. StreamMgmt counters are back to zero for the new session.
 #[test]
 fn reconnect_flow_state_reset_and_preservation() {
+    use rexisce::xmpp::modules::presence_machine::{PresenceMachine, PresenceStatus};
+    use rexisce::xmpp::modules::stream_mgmt::StreamMgmt;
     use tokio_xmpp::minidom::Element;
-    use xmpp_start::xmpp::modules::presence_machine::{PresenceMachine, PresenceStatus};
-    use xmpp_start::xmpp::modules::stream_mgmt::StreamMgmt;
 
     let mut pm = PresenceMachine::new();
     let mut sm = StreamMgmt::new();
@@ -353,8 +353,8 @@ fn reconnect_flow_state_reset_and_preservation() {
 /// Reconnect resets the stream-management counters so new session acks start at 0.
 #[test]
 fn reconnect_stream_mgmt_resets_to_zero() {
+    use rexisce::xmpp::modules::stream_mgmt::StreamMgmt;
     use tokio_xmpp::minidom::Element;
-    use xmpp_start::xmpp::modules::stream_mgmt::StreamMgmt;
 
     let mut sm = StreamMgmt::new();
     let dummy: Element = "<message xmlns='jabber:client'/>".parse().unwrap();
@@ -388,7 +388,7 @@ fn reconnect_stream_mgmt_resets_to_zero() {
 /// contains all expected children in the correct namespaces.
 #[test]
 fn mam_sync_query_build_with_filter_and_cursor() {
-    use xmpp_start::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
+    use rexisce::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
 
     let mut mgr = MamManager::new();
     let query = MamQuery {
@@ -430,8 +430,8 @@ fn mam_sync_query_build_with_filter_and_cursor() {
 /// Parse a multi-message MAM response and verify each extracted message.
 #[test]
 fn mam_sync_parse_multi_message_response() {
+    use rexisce::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
     use tokio_xmpp::minidom::Element;
-    use xmpp_start::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
 
     const NS_MAM: &str = "urn:xmpp:mam:2";
     const NS_FORWARD: &str = "urn:xmpp:forward:0";
@@ -518,8 +518,8 @@ fn mam_sync_parse_multi_message_response() {
 /// → verify accumulated result contains all messages with correct RSM metadata.
 #[test]
 fn mam_sync_full_lifecycle_with_fin() {
+    use rexisce::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
     use tokio_xmpp::minidom::Element;
-    use xmpp_start::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
 
     const NS_MAM: &str = "urn:xmpp:mam:2";
     const NS_FORWARD: &str = "urn:xmpp:forward:0";
@@ -618,7 +618,7 @@ fn mam_sync_full_lifecycle_with_fin() {
 /// call to the formula produces an independent value from its own config.
 #[test]
 fn privacy_flags_computed_from_config() {
-    use xmpp_start::xmpp::connection::ConnectConfig;
+    use rexisce::xmpp::connection::ConnectConfig;
 
     // Config A: receipts=true, typing=false, read_markers=false  → 0b001 = 1
     let config_a = ConnectConfig {
@@ -858,7 +858,7 @@ fn presence_stanza_structure() {
 /// emits Disconnected instead of Reconnecting.
 #[test]
 fn bug7_auth_errors_are_detected() {
-    use xmpp_start::xmpp::engine::is_auth_error;
+    use rexisce::xmpp::engine::is_auth_error;
 
     assert!(is_auth_error("not-authorized"));
     assert!(is_auth_error("Authentication failed"));
@@ -870,7 +870,7 @@ fn bug7_auth_errors_are_detected() {
 /// still attempts reconnection for transient network problems.
 #[test]
 fn bug7_non_auth_errors_are_not_detected() {
-    use xmpp_start::xmpp::engine::is_auth_error;
+    use rexisce::xmpp::engine::is_auth_error;
 
     assert!(!is_auth_error("connection reset"));
     assert!(!is_auth_error("timeout"));
@@ -881,7 +881,7 @@ fn bug7_non_auth_errors_are_not_detected() {
 /// Detection must be case-insensitive so upper-case server messages are caught.
 #[test]
 fn bug7_auth_detection_is_case_insensitive() {
-    use xmpp_start::xmpp::engine::is_auth_error;
+    use rexisce::xmpp::engine::is_auth_error;
 
     assert!(is_auth_error("NOT-AUTHORIZED"));
     assert!(is_auth_error("Sasl Error"));
@@ -899,8 +899,8 @@ fn bug7_auth_detection_is_case_insensitive() {
 /// must match the original.
 #[test]
 fn omemo_full_encrypt_decrypt_flow() {
+    use rexisce::xmpp::modules::omemo::session::OmemoSessionManager;
     use vodozemac::olm::OlmMessage;
-    use xmpp_start::xmpp::modules::omemo::session::OmemoSessionManager;
 
     // --- Setup: Alice and Bob generate identity + one-time keys ---
     let alice = OmemoSessionManager::init_account(0);
@@ -967,8 +967,8 @@ fn omemo_full_encrypt_decrypt_flow() {
 /// every send).
 #[test]
 fn omemo_ratchet_forward() {
+    use rexisce::xmpp::modules::omemo::session::OmemoSessionManager;
     use vodozemac::olm::OlmMessage;
-    use xmpp_start::xmpp::modules::omemo::session::OmemoSessionManager;
 
     // --- Initial setup ---
     let alice = OmemoSessionManager::init_account(0);
@@ -1053,10 +1053,10 @@ fn omemo_ratchet_forward() {
 /// device until one is explicitly established.
 #[test]
 fn omemo_new_device_requires_bundle_fetch() {
+    use rexisce::xmpp::modules::omemo::device::DeviceManager;
+    use rexisce::xmpp::modules::omemo::session::OmemoSessionManager;
     use std::collections::HashMap;
     use vodozemac::olm::OlmMessage;
-    use xmpp_start::xmpp::modules::omemo::device::DeviceManager;
-    use xmpp_start::xmpp::modules::omemo::session::OmemoSessionManager;
 
     let mgr = DeviceManager::new();
 
@@ -1124,8 +1124,8 @@ fn omemo_new_device_requires_bundle_fetch() {
 /// keys replenishes it, proving that the replenishment trigger works correctly.
 #[test]
 fn omemo_prekey_rotation() {
+    use rexisce::xmpp::modules::omemo::session::OmemoSessionManager;
     use vodozemac::olm::OlmMessage;
-    use xmpp_start::xmpp::modules::omemo::session::OmemoSessionManager;
 
     const INITIAL_PREKEY_COUNT: usize = 3;
 
@@ -1207,7 +1207,7 @@ fn omemo_prekey_rotation() {
 
 #[test]
 fn message_moderation_command_building() {
-    use xmpp_start::xmpp::engine::make_moderation_message;
+    use rexisce::xmpp::engine::make_moderation_message;
 
     // Build moderation message (retract command)
     let moderation_msg = make_moderation_message(
@@ -1232,9 +1232,9 @@ fn message_moderation_command_building() {
 ///    position in the next session.
 #[test]
 fn reconnect_resets_stream_mgmt_and_preserves_catchup() {
+    use rexisce::xmpp::modules::catchup::CatchupManager;
+    use rexisce::xmpp::modules::stream_mgmt::StreamMgmt;
     use tokio_xmpp::minidom::Element;
-    use xmpp_start::xmpp::modules::catchup::CatchupManager;
-    use xmpp_start::xmpp::modules::stream_mgmt::StreamMgmt;
 
     let mut sm = StreamMgmt::new();
     let mut catchup = CatchupManager::new();
@@ -1321,8 +1321,8 @@ fn reconnect_resets_stream_mgmt_and_preserves_catchup() {
 /// is still available and can be used to resume in the next session.
 #[test]
 fn mam_cursor_survives_reconnect() {
+    use rexisce::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
     use tokio_xmpp::minidom::Element;
-    use xmpp_start::xmpp::modules::mam::{MamFilter, MamManager, MamQuery, RsmQuery};
 
     const NS_MAM: &str = "urn:xmpp:mam:2";
     const NS_FORWARD: &str = "urn:xmpp:forward:0";

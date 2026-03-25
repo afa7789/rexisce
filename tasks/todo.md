@@ -1,4 +1,4 @@
-# xmpp-start Orchestration TODO
+# ReXisCe Orchestration TODO
 
 ## Wave 5 (2026-03-24) — OMEMO + Multi-account
 

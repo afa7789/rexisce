@@ -50,7 +50,7 @@ jobs:
         run: make test-e2e
       - name: Print test server logs (on fail)
         if: failure()
-        run: docker logs xmpp-start-test 2>&1 || true
+        run: docker logs rexisce-test 2>&1 || true
       - name: Cleanup
         if: always()
         run: docker compose -f docker-compose.test.yml down -v

@@ -33,7 +33,7 @@ impl AboutScreen {
     }
 
     pub fn view(&self) -> Element<'static, Message> {
-        let title = text("About xmpp-start").size(24);
+        let title = text("About rexisce").size(24);
 
         let version_text = format!("Version {}", self.version);
         let version_row = row![
@@ -58,7 +58,7 @@ impl AboutScreen {
 
         let github_row = row![
             text("GitHub:").size(14).width(Length::Fixed(100.0)),
-            text("github.com/xmpp-start/xmpp-start").size(14),
+            text("github.com/rexisce/rexisce").size(14),
         ]
         .spacing(8);
 

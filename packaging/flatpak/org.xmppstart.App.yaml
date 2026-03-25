@@ -4,7 +4,7 @@ runtime-version: '23.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-command: xmpp-start
+command: rexisce
 
 finish-args:
   - --share=network
@@ -17,16 +17,16 @@ finish-args:
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
-    CARGO_HOME: /run/build/xmpp-start/cargo
+    CARGO_HOME: /run/build/rexisce/cargo
     RUST_BACKTRACE: '1'
 
 modules:
-  - name: xmpp-start
+  - name: rexisce
     buildsystem: simple
     build-commands:
       - cargo --offline fetch --manifest-path Cargo.toml --verbose
-      - cargo --offline build --release --bin xmpp-start
-      - install -Dm755 target/release/xmpp-start /app/bin/xmpp-start
+      - cargo --offline build --release --bin rexisce
+      - install -Dm755 target/release/rexisce /app/bin/rexisce
     sources:
       - type: dir
         path: ../..

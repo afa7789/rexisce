@@ -1,7 +1,7 @@
 services:
   xmpp:
     image: prosody/prosody:latest
-    container_name: xmpp-start-server
+    container_name: rexisce-server
     ports:
       - "5222:5222"    # XMPP client connections
       - "5347:5347"    # component port (MUC)

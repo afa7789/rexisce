@@ -391,7 +391,7 @@ pub(crate) async fn handle_iq(
         }
     }
 
-    // DC-10: detect ignore list result from PubSub (xmpp-start:ignore:{room_jid})
+    // DC-10: detect ignore list result from PubSub (rexisce:ignore:{room_jid})
     if el.attr("type") == Some("result") {
         let ignore_node = el.children().find_map(|c| {
             if c.name() == "pubsub" && c.ns() == "http://jabber.org/protocol/pubsub" {
@@ -399,7 +399,7 @@ pub(crate) async fn handle_iq(
                     if items.name() == "items" {
                         items
                             .attr("node")
-                            .and_then(|n| n.strip_prefix("xmpp-start:ignore:").map(str::to_string))
+                            .and_then(|n| n.strip_prefix("rexisce:ignore:").map(str::to_string))
                     } else {
                         None
                     }
@@ -418,14 +418,13 @@ pub(crate) async fn handle_iq(
         }
     }
 
-    // DC-10: detect conversation list result from PubSub (xmpp-start:conversations)
+    // DC-10: detect conversation list result from PubSub (rexisce:conversations)
     if el.attr("type") == Some("result") {
         let is_conv_sync = el.children().any(|c| {
             c.name() == "pubsub"
                 && c.ns() == "http://jabber.org/protocol/pubsub"
                 && c.children().any(|items| {
-                    items.name() == "items"
-                        && items.attr("node") == Some("xmpp-start:conversations")
+                    items.name() == "items" && items.attr("node") == Some("rexisce:conversations")
                 })
         });
         if is_conv_sync {

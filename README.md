@@ -1,8 +1,30 @@
-# xmpp-start
+# ReXisCe — A Rust XMPP Client
 
 Native XMPP desktop messenger — pure Rust using [iced](https://github.com/iced-rs/iced).
 
 > Built with vibecoding, using other XMPP clients as reference (Halloy, Dino, Gajim).
+
+---
+
+## About the name
+
+**ReXisCe** (pronunciation: /ˈʁe.xiʃ.se/ — "ré-xis-sê")
+
+The name comes from the acronym **RXC** (R → Rust, X → XMPP, C → Client), transformed into a pronounceable word:
+
+- **Re** — "R" (pronunciado "ré" em português)
+- **Xis** — "X" (pronunciado "xis" em português)  
+- **Ce** — "C" (pronunciado "sê" em português)
+
+This solves a common problem: pure acronyms are hard to speak. ReXisCe turns the abbreviation into a name.
+
+| Item | Name |
+|------|------|
+| Project | ReXisCe |
+| Meaning | Rust XMPP Client |
+| CLI binary | `rexisce` |
+| Lib crate | `rexisce` |
+| Config dir | `~/.config/rexisce/` |
 
 ---
 
@@ -17,8 +39,8 @@ Native XMPP desktop messenger — pure Rust using [iced](https://github.com/iced
 ## Getting started
 
 ```bash
-git clone https://github.com/owner/xmpp-start
-cd xmpp-start
+git clone https://github.com/owner/rexisce
+cd rexisce
 make run
 ```
 
@@ -31,7 +53,7 @@ That's it. The first run compiles everything and opens the app.
 ```bash
 make setup          # update Rust toolchain
 make run            # compile (debug) and run
-make build          # compile release binary → target/release/xmpp-start
+make build          # compile release binary → target/release/rexisce
 make run-release    # compile release and run
 make test           # run the full test suite
 make lint           # clippy (warnings = errors)
@@ -42,7 +64,7 @@ make clean          # delete build artifacts
 For verbose XMPP logging:
 
 ```bash
-RUST_LOG=xmpp_start=debug make run
+RUST_LOG=rexisce=debug make run
 ```
 
 ---

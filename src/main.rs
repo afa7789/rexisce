@@ -15,7 +15,7 @@ fn main() -> iced::Result {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env().add_directive(
-                "xmpp_start=debug"
+                "rexisce=debug"
                     .parse()
                     .expect("hardcoded directive is valid"),
             ),

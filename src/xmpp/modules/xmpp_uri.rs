@@ -48,7 +48,7 @@ pub struct XmppUri {
 /// # Examples
 ///
 /// ```
-/// # use xmpp_start::xmpp::modules::xmpp_uri::parse;
+/// # use rexisce::xmpp::modules::xmpp_uri::parse;
 /// let uri = parse("xmpp:user@server?message;body=Hello").unwrap();
 /// assert_eq!(uri.jid, "user@server");
 /// ```

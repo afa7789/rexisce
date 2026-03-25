@@ -15,11 +15,11 @@ run:
 
 # Run the app in release mode
 run-release:
-	cargo build --release && ./target/release/xmpp-start
+	cargo build --release && ./target/release/rexisce
 
 # Run the full test suite (single-threaded — required for SQLite tests)
 test:
-	cargo test -q --bin xmpp-start -- --test-threads=1
+	cargo test -q --bin rexisce -- --test-threads=1
 
 # Run integration tests only (no Docker needed)
 test-integration:
@@ -31,7 +31,7 @@ test-e2e:
 
 # Lint with clippy (warnings are errors)
 lint:
-	cargo clippy -q --bin xmpp-start --message-format=short -- -D warnings
+	cargo clippy -q --bin rexisce --message-format=short -- -D warnings
 
 # Auto-format all source files
 fmt:

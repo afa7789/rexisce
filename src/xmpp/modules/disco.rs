@@ -36,7 +36,7 @@ pub struct DiscoIdentity {
     /// Sub-type within the category, e.g. `"pc"`, `"phone"`, `"text"`.
     /// Named `kind` in Rust to avoid collision with the `type` keyword.
     pub kind: String,
-    /// Human-readable name, e.g. `"xmpp-start"`.
+    /// Human-readable name, e.g. `"rexisce"`.
     pub name: String,
 }
 
@@ -366,11 +366,11 @@ mod tests {
 
     fn make_manager() -> DiscoManager {
         DiscoManager::new(
-            "https://example.org/xmpp-start",
+            "https://example.org/rexisce",
             &[DiscoIdentity {
                 category: "client".to_string(),
                 kind: "pc".to_string(),
-                name: "xmpp-start".to_string(),
+                name: "rexisce".to_string(),
             }],
             &["urn:xmpp:mam:2", "urn:xmpp:carbons:2"],
         )
@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(caps.ns(), NS_CAPS);
         assert_eq!(caps.name(), "c");
         assert_eq!(caps.attr("hash"), Some("sha-1"));
-        assert_eq!(caps.attr("node"), Some("https://example.org/xmpp-start"));
+        assert_eq!(caps.attr("node"), Some("https://example.org/rexisce"));
         assert!(caps.attr("ver").is_some());
     }
 

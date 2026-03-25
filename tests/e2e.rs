@@ -47,7 +47,7 @@ impl Server {
             if std::time::Instant::now() >= deadline {
                 // Dump container logs for diagnosis before panicking.
                 let logs = Command::new("docker")
-                    .args(["logs", "xmpp-start-test"])
+                    .args(["logs", "rexisce-test"])
                     .current_dir(root)
                     .output()
                     .unwrap();
@@ -56,7 +56,7 @@ impl Server {
                         "inspect",
                         "--format",
                         "{{.State.Status}} exit={{.State.ExitCode}}",
-                        "xmpp-start-test",
+                        "rexisce-test",
                     ])
                     .current_dir(root)
                     .output()
@@ -70,7 +70,7 @@ impl Server {
                 panic!("timed out (90s) waiting for XMPP test server — see logs above");
             }
             let out = Command::new("docker")
-                .args(["logs", "xmpp-start-test"])
+                .args(["logs", "rexisce-test"])
                 .current_dir(root)
                 .output()
                 .unwrap();

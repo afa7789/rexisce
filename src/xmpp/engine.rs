@@ -298,11 +298,11 @@ async fn run_session(
     presence_machine.set_status_message(config.status_message.clone());
     // C5: XEP-0115/XEP-0030 service discovery + caps
     let mut disco_mgr = DiscoManager::new(
-        "https://github.com/xmpp-start",
+        "https://github.com/rexisce",
         &[DiscoIdentity {
             category: "client".to_string(),
             kind: "pc".to_string(),
-            name: "xmpp-start".to_string(),
+            name: "rexisce".to_string(),
         }],
         &["urn:xmpp:mam:2", "urn:xmpp:carbons:2"],
     );

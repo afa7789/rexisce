@@ -3,6 +3,6 @@ services:
     build:
       context: ./docker/test
       dockerfile: Dockerfile
-    container_name: xmpp-start-test
+    container_name: rexisce-test
     ports:
       - "15222:5222"    # port 15222 to avoid colliding with the dev server on 5222

@@ -5,7 +5,7 @@
 //   apps/fluux/src/utils/keychain.ts
 //
 // Storage strategy:
-//   - JID + server: ~/.config/xmpp-start/settings.json  (serde_json + std::fs)
+//   - JID + server: ~/.config/rexisce/settings.json  (serde_json + std::fs)
 //   - Password:     OS keychain via `keyring` crate
 //   - Theme:        included in settings.json
 
@@ -169,7 +169,7 @@ impl Default for Settings {
 
 fn config_path() -> PathBuf {
     let base = std::env::var("HOME").map_or_else(|_| PathBuf::from("."), PathBuf::from);
-    base.join(".config").join("xmpp-start")
+    base.join(".config").join("rexisce")
 }
 
 /// Returns the path to the SQLite database, creating the directory if needed.
@@ -178,7 +178,7 @@ pub fn db_path() -> String {
     let dir = if cfg!(target_os = "macos") {
         base.join("Library")
             .join("Application Support")
-            .join("xmpp-start")
+            .join("rexisce")
     } else {
         base.join(".local").join("share").join("xmpp-start")
     };
@@ -216,7 +216,7 @@ pub fn save(settings: &Settings) -> Result<()> {
 // Keychain
 // ---------------------------------------------------------------------------
 
-const KEYRING_SERVICE: &str = "xmpp-start";
+const KEYRING_SERVICE: &str = "rexisce";
 
 /// Store a password in the OS keychain for the given JID.
 pub fn save_password(jid: &str, password: &str) -> Result<()> {
@@ -491,7 +491,7 @@ mod tests {
         };
 
         // Write to a temp file using the same logic as `save()`.
-        let dir = std::env::temp_dir().join("xmpp_start_test_settings");
+        let dir = std::env::temp_dir().join("rexisce_test_settings");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings_roundtrip.json");
         let json = serde_json::to_string_pretty(&original).unwrap();

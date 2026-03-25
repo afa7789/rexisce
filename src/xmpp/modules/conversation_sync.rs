@@ -9,7 +9,7 @@ use tokio_xmpp::minidom::Node;
 
 use super::{NS_CLIENT, NS_PUBSUB};
 
-const CONV_SYNC_NODE: &str = "xmpp-start:conversations";
+const CONV_SYNC_NODE: &str = "rexisce:conversations";
 
 /// A single conversation entry stored on the server.
 #[derive(Debug, Clone, PartialEq)]
@@ -33,7 +33,7 @@ impl ConversationSyncManager {
     /// ```xml
     /// <iq type='set'>
     ///   <pubsub xmlns='http://jabber.org/protocol/pubsub'>
-    ///     <publish node='xmpp-start:conversations'>
+    ///     <publish node='rexisce:conversations'>
     ///       <item id='current'>
     ///         <conversations>
     ///           <conversation jid='alice@server' archived='false'/>
@@ -45,10 +45,10 @@ impl ConversationSyncManager {
     /// ```
     pub fn build_publish_iq(&self, conversations: &[SyncedConversation]) -> Element {
         let mut conversations_el =
-            Element::builder("conversations", "xmpp-start:conversations").build();
+            Element::builder("conversations", "rexisce:conversations").build();
 
         for conv in conversations {
-            let conv_el = Element::builder("conversation", "xmpp-start:conversations")
+            let conv_el = Element::builder("conversation", "rexisce:conversations")
                 .attr("jid", conv.jid.clone())
                 .attr("archived", if conv.archived { "true" } else { "false" })
                 .build();
@@ -123,7 +123,7 @@ fn find_conversations_el(el: &Element) -> Option<&Element> {
     let pubsub = el.get_child("pubsub", NS_PUBSUB)?;
     let items = pubsub.get_child("items", NS_PUBSUB)?;
     let item = items.get_child("item", NS_PUBSUB)?;
-    item.get_child("conversations", "xmpp-start:conversations")
+    item.get_child("conversations", "rexisce:conversations")
 }
 
 impl Default for ConversationSyncManager {
@@ -175,7 +175,7 @@ mod tests {
 
         let conversations = item
             .unwrap()
-            .get_child("conversations", "xmpp-start:conversations");
+            .get_child("conversations", "rexisce:conversations");
         assert!(conversations.is_some(), "<conversations> missing");
 
         let children: Vec<_> = conversations.unwrap().children().collect();
@@ -190,15 +190,15 @@ mod tests {
         let mgr = ConversationSyncManager::new();
 
         // Build a minimal result tree
-        let mut convs_el = Element::builder("conversations", "xmpp-start:conversations").build();
+        let mut convs_el = Element::builder("conversations", "rexisce:conversations").build();
         convs_el.append_child(
-            Element::builder("conversation", "xmpp-start:conversations")
+            Element::builder("conversation", "rexisce:conversations")
                 .attr("jid", "alice@server")
                 .attr("archived", "false")
                 .build(),
         );
         convs_el.append_child(
-            Element::builder("conversation", "xmpp-start:conversations")
+            Element::builder("conversation", "rexisce:conversations")
                 .attr("jid", "room@muc.server")
                 .attr("archived", "true")
                 .build(),
@@ -242,7 +242,7 @@ mod tests {
         let publish = pubsub.get_child("publish", NS_PUBSUB).unwrap();
         let item = publish.get_child("item", NS_PUBSUB).unwrap();
         let conversations_el = item
-            .get_child("conversations", "xmpp-start:conversations")
+            .get_child("conversations", "rexisce:conversations")
             .unwrap();
 
         let result = mgr.parse_result(conversations_el);

@@ -1,8 +1,8 @@
-# xmpp-start Task Registry — Single Source of Truth
+# ReXisCe Task Registry — Single Source of Truth
 # Categories: critical, high, medium, low
 # Status: pending, in_progress, completed
 
-project: xmpp-start
+project: rexisce
 updated: "2026-03-24"
 
 implemented_xeps:

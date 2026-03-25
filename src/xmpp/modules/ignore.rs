@@ -2,7 +2,7 @@
 //
 // Pure data module — no I/O, no async.
 // Each room's ignore list is persisted as a separate PubSub node keyed by
-// `xmpp-start:ignore:{room_jid}`.
+// `rexisce:ignore:{room_jid}`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -11,8 +11,8 @@ use tokio_xmpp::minidom::Node;
 
 use super::{NS_CLIENT, NS_PUBSUB};
 
-const IGNORE_NODE_PREFIX: &str = "xmpp-start:ignore:";
-const NS_IGNORED: &str = "xmpp-start:ignored";
+const IGNORE_NODE_PREFIX: &str = "rexisce:ignore:";
+const NS_IGNORED: &str = "rexisce:ignored";
 
 /// Manages per-room ignored-user lists and their PubSub persistence stanzas.
 pub struct IgnoreManager {
@@ -66,7 +66,7 @@ impl IgnoreManager {
     /// ```xml
     /// <iq type='set'>
     ///   <pubsub xmlns='http://jabber.org/protocol/pubsub'>
-    ///     <publish node='xmpp-start:ignore:{room_jid}'>
+    ///     <publish node='rexisce:ignore:{room_jid}'>
     ///       <item id='current'>
     ///         <ignored>
     ///           <user jid='troll@server'/>
@@ -254,7 +254,7 @@ mod tests {
             .build();
 
         let items = Element::builder("items", NS_PUBSUB)
-            .attr("node", "xmpp-start:ignore:room@muc.server")
+            .attr("node", "rexisce:ignore:room@muc.server")
             .append(Node::Element(item))
             .build();
 

@@ -1,17 +1,17 @@
 [package]
-name = "xmpp-start"
+name = "rexisce"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
-description = "Native XMPP desktop messenger — Rust/iced rewrite of fluux-messenger"
+description = "ReXisCe — A Rust XMPP Client"
 license = "MIT"
 
 [lib]
-name = "xmpp_start"
+name = "rexisce"
 path = "src/lib.rs"
 
 [[bin]]
-name = "xmpp-start"
+name = "rexisce"
 path = "src/main.rs"
 
 [dependencies]
