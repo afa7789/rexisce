@@ -18,6 +18,10 @@ pub const NS_VCARD: &str = "vcard-temp";
 pub const NS_REGISTER: &str = "jabber:iq:register";
 pub const NS_DATA: &str = "jabber:x:data";
 pub const NS_PUSH: &str = "urn:xmpp:push:0";
+pub const NS_FASTEN: &str = "urn:xmpp:fasten:0";
+pub const NS_PUBSUB_EVENT: &str = "http://jabber.org/protocol/pubsub#event";
+pub const NS_GEOLOC: &str = "http://jabber.org/protocol/geoloc";
+pub const NS_RSM: &str = "http://jabber.org/protocol/rsm";
 
 /// Recursively search an element tree for a child with the given local name
 /// and namespace. Returns the first match (depth-first).
@@ -69,8 +73,7 @@ pub mod console; // Task P6.3 — XMPP console stanza log
 pub mod disco; // Task P6.1 — XEP-0115 entity capabilities + XEP-0030 service discovery
 pub mod entity_time; // Task P6.4 — XEP-0202 entity time
 pub mod ignore; // Task P6.4 — per-room ignored users via PubSub
-pub mod push; // Task K7: XEP-0357 push notifications
-pub mod push_cleanup; // Task P6.5 — XEP-0357 push-disable / WebPush VAPID unsubscribe
+pub mod push; // Task K7: XEP-0357 push notifications (includes disable/cleanup)
 pub mod registration;
 pub mod vcard_edit; // K2: XEP-0054 own vCard editing
 pub mod xmpp_uri; // Task P6.3 — XEP-0147 xmpp: URI parser

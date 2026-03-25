@@ -63,13 +63,12 @@ use super::{
     },
     modules::presence_machine::PresenceMachine,
     modules::push::PushManager,
-    modules::push_cleanup::PushCleanup,
     modules::registration::RegistrationManager,
     modules::spam_report::build_spam_report,
     modules::stickers,
     modules::stream_mgmt::StreamMgmt,
     modules::vcard_edit::VCardEditManager,
-    modules::{NS_FORWARD, NS_MAM, NS_MUC_OWNER, NS_MUC_USER, NS_X_CONFERENCE},
+    modules::{NS_FASTEN, NS_FORWARD, NS_GEOLOC, NS_MAM, NS_MUC_OWNER, NS_MUC_USER, NS_PUBSUB_EVENT, NS_X_CONFERENCE},
     IncomingMessage, RosterContact, XmppCommand, XmppEvent,
 };
 
@@ -77,7 +76,6 @@ const NS_CARBONS: &str = "urn:xmpp:carbons:2";
 const NS_RECEIPTS: &str = "urn:xmpp:receipts";
 const NS_CHAT_MARKERS: &str = "urn:xmpp:chat-markers:0";
 // L3: XEP-0425 message moderation namespaces
-const NS_FASTEN: &str = "urn:xmpp:fasten:0";
 const NS_MODERATION: &str = "urn:xmpp:message-moderate:0";
 // J9: XEP-0077 registration namespace
 
@@ -259,8 +257,6 @@ async fn run_session(
     let mut bookmark_mgr = BookmarkManager::new();
     // K7: XEP-0357 push notifications manager
     let mut push_mgr = PushManager::new();
-    // DC-7: XEP-0357 push cleanup — cleans stale push registrations on connect
-    let push_cleanup = PushCleanup::new();
     // K2: XEP-0054 own vCard editing manager
     let mut vcard_edit_mgr = VCardEditManager::new();
     // L4: XEP-0050 ad-hoc commands manager
@@ -334,7 +330,7 @@ async fn run_session(
                     }
                     Some(ev) => {
 
-                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &push_cleanup, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &mut ignore_mgr, &conv_sync_mgr, &mut account_mgr, &mut sync_orch, &config.jid, config.push_service_jid.as_deref()).await;
+                        handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &mut ignore_mgr, &conv_sync_mgr, &mut account_mgr, &mut sync_orch, &config.jid, config.push_service_jid.as_deref()).await;
                     }
                 }
             }
@@ -846,7 +842,6 @@ async fn handle_client_event(
     muc_config_mgr: &mut MucConfigManager,
     bookmark_mgr: &mut BookmarkManager,
     push_mgr: &mut PushManager,
-    push_cleanup: &PushCleanup,
     vcard_edit_mgr: &mut VCardEditManager,
     adhoc_mgr: &mut AdhocManager,
     omemo_mgr: &mut Option<OmemoManager>,
@@ -906,8 +901,8 @@ async fn handle_client_event(
             tracing::debug!("mam: requested archiving preferences");
 
             // DC-7: XEP-0357 push cleanup — disable all stale push subscriptions on connect
-            outbox.push_back(push_cleanup.build_disable_all_iq());
-            tracing::debug!("push_cleanup: sent disable-all push IQ on connect");
+            outbox.push_back(push_mgr.build_disable_all_iq());
+            tracing::debug!("push: sent disable-all push IQ on connect");
 
             // K7: XEP-0357 push notifications — enable on connect if configured
             if let Some(svc) = push_service_jid {
@@ -1185,8 +1180,6 @@ async fn dispatch_stanza(
             // L3: XEP-0080 GeoLoc PEP notification
             // <message><event xmlns="...pubsub#event"><items node="http://jabber.org/protocol/geoloc">
             {
-                const NS_GEOLOC: &str = "http://jabber.org/protocol/geoloc";
-                const NS_PUBSUB_EVENT: &str = "http://jabber.org/protocol/pubsub#event";
                 let is_geoloc_event = el.children().any(|c| {
                     c.name() == "event"
                         && c.ns() == NS_PUBSUB_EVENT
