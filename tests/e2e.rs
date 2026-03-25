@@ -42,12 +42,28 @@ impl Server {
         assert!(status.success(), "docker compose up failed");
 
         // Wait until the entrypoint prints "[test-server] ready".
-        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        let deadline = std::time::Instant::now() + Duration::from_secs(90);
         loop {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "timed out (60s) waiting for XMPP test server"
-            );
+            if std::time::Instant::now() >= deadline {
+                // Dump container logs for diagnosis before panicking.
+                let logs = Command::new("docker")
+                    .args(["logs", "xmpp-start-test"])
+                    .current_dir(root)
+                    .output()
+                    .unwrap();
+                let inspect = Command::new("docker")
+                    .args(["inspect", "--format", "{{.State.Status}} exit={{.State.ExitCode}}", "xmpp-start-test"])
+                    .current_dir(root)
+                    .output()
+                    .unwrap();
+                eprintln!(
+                    "--- XMPP test server logs ---\nstdout:\n{}\nstderr:\n{}\ncontainer state: {}",
+                    String::from_utf8_lossy(&logs.stdout),
+                    String::from_utf8_lossy(&logs.stderr),
+                    String::from_utf8_lossy(&inspect.stdout).trim(),
+                );
+                panic!("timed out (90s) waiting for XMPP test server — see logs above");
+            }
             let out = Command::new("docker")
                 .args(["logs", "xmpp-start-test"])
                 .current_dir(root)
