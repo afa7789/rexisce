@@ -18,7 +18,7 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get install -y libdbus-1-dev pkg-config libssl-dev
+      - run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config libssl-dev libasound2-dev
       - run: make fmt-check
       - run: make lint
 
@@ -34,7 +34,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install -y libdbus-1-dev pkg-config libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config libssl-dev libasound2-dev
       - run: make test
 
   e2e:
@@ -44,6 +44,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install Linux deps
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config libssl-dev libasound2-dev
       - name: Set up Docker
         run: docker compose up -d
       - name: Wait for server
