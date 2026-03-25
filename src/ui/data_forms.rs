@@ -22,6 +22,7 @@ pub struct FormField {
     pub field_type: FieldType,
     pub label: Option<String>,
     pub value: Option<String>,
+    #[allow(dead_code)]
     pub required: bool,
     pub options: Vec<(String, String)>,
 }
@@ -41,6 +42,7 @@ pub enum FieldType {
 }
 
 impl DataForm {
+    #[allow(dead_code)]
     pub fn from_element(el: &tokio_xmpp::minidom::Element) -> Option<Self> {
         if el.ns() != "jabber:x:data" {
             return None;
@@ -71,6 +73,7 @@ impl DataForm {
 }
 
 impl FormField {
+    #[allow(dead_code)]
     pub fn from_element(el: &tokio_xmpp::minidom::Element) -> Option<Self> {
         let var = el.attr("var").map(String::from);
         let field_type = match el.attr("type") {
@@ -115,6 +118,7 @@ impl FormField {
         })
     }
 
+    #[allow(dead_code)]
     pub fn to_element(&self) -> tokio_xmpp::minidom::Element {
         let type_str = match self.field_type {
             FieldType::TextSingle => "text-single",
@@ -175,6 +179,7 @@ impl FormField {
 ///
 /// Hidden fields are omitted. Text inputs are shown but not interactive.
 /// Use `render_form_interactive` when the user needs to fill in the form.
+#[allow(dead_code)]
 pub fn render_form<M: Clone + 'static>(form: DataForm) -> Element<'static, M> {
     let mut col: Column<M> = column![].spacing(12).padding(16);
 

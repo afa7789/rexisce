@@ -6,6 +6,10 @@
 //   - encryption_badge: lock/unlock badge helper
 //   - trust_color: color for each TrustState
 //   - format_fingerprint: hex fingerprint with spaces every 8 chars
+//
+// This module is complete but not yet wired into the main Screen enum;
+// items will be used when OMEMO (XEP-0384) is fully integrated.
+#![allow(dead_code)]
 
 use iced::{
     widget::{button, column, container, row, scrollable, text, Space},
