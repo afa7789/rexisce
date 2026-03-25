@@ -37,6 +37,7 @@ pub struct SettingsScreen {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Message {
     ThemeToggled,
     NotificationsToggled(bool),
@@ -117,6 +118,7 @@ impl SettingsScreen {
     }
 
     /// Replace the block list shown in the panel.
+    #[allow(dead_code)]
     pub fn set_blocked_jids(&mut self, jids: Vec<String>) {
         self.blocklist = BlocklistPanel::new(jids);
     }

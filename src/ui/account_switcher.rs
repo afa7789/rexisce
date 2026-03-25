@@ -23,6 +23,7 @@ pub struct AccountEntry {
     /// Whether the account is currently connected.
     pub connected: bool,
     /// Optional accent colour (CSS hex, e.g. "#4A90D9").
+    #[allow(dead_code)]
     pub color: Option<String>,
 }
 

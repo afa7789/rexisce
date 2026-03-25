@@ -18,6 +18,7 @@ use crate::xmpp::{AccountId, RosterContact};
 
 /// Simple online/offline flag as seen by the UI for a contact.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum PresenceStatus {
     Available,
     Unavailable,
@@ -28,6 +29,7 @@ pub enum PresenceStatus {
 // ---------------------------------------------------------------------------
 
 /// All per-account UI state.
+#[allow(dead_code)]
 pub struct AccountState {
     /// Conversation list, active conversation, composer drafts, etc.
     pub chat: ChatScreen,
@@ -113,6 +115,7 @@ impl AccountStateManager {
     /// Remove an account and its state. If the removed account was active,
     /// the active account is cleared (caller should call `switch_to` with a
     /// remaining account).
+    #[allow(dead_code)]
     pub fn remove_account(&mut self, id: &AccountId) {
         self.accounts.remove(id);
         if self.active.as_ref() == Some(id) {
@@ -131,6 +134,7 @@ impl AccountStateManager {
     }
 
     /// Returns `true` when more than one account is registered.
+    #[allow(dead_code)]
     pub fn is_multi_account(&self) -> bool {
         self.accounts.len() > 1
     }
