@@ -4,9 +4,9 @@
 
 ```bash
 git clone <repo>
-cd xmpp-start
+cd rexisce
 cargo build
-cargo test --bin xmpp-start -- --test-threads=1
+cargo test --bin rexisce -- --test-threads=1
 ```
 
 ## Code style

@@ -180,7 +180,7 @@ pub fn db_path() -> String {
             .join("Application Support")
             .join("rexisce")
     } else {
-        base.join(".local").join("share").join("xmpp-start")
+        base.join(".local").join("share").join("rexisce")
     };
     std::fs::create_dir_all(&dir).ok();
     dir.join("messages.db").to_string_lossy().into_owned()

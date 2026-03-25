@@ -38,7 +38,7 @@ pub fn notify_message(from_jid: &str, body: &str) -> Result<(), String> {
     let payload = NotificationPayload {
         title: from_jid.to_string(),
         body: body.to_string(),
-        app_name: "xmpp-start".to_string(),
+        app_name: "rexisce".to_string(),
     };
     send(&payload)
 }
@@ -56,7 +56,7 @@ mod tests {
         let p = NotificationPayload {
             title: "New message".into(),
             body: "Hello!".into(),
-            app_name: "xmpp-start".into(),
+            app_name: "rexisce".into(),
         };
         assert_eq!(p.title, "New message");
         assert_eq!(p.body, "Hello!");
@@ -67,9 +67,9 @@ mod tests {
         let p = NotificationPayload {
             title: "t".into(),
             body: "b".into(),
-            app_name: "xmpp-start".into(),
+            app_name: "rexisce".into(),
         };
-        assert_eq!(p.app_name, "xmpp-start");
+        assert_eq!(p.app_name, "rexisce");
     }
 
     #[test]
@@ -82,11 +82,11 @@ mod tests {
         let payload = NotificationPayload {
             title: from.to_string(),
             body: body.to_string(),
-            app_name: "xmpp-start".to_string(),
+            app_name: "rexisce".to_string(),
         };
 
         assert_eq!(payload.title, "alice@example.com");
         assert_eq!(payload.body, "Hey there");
-        assert_eq!(payload.app_name, "xmpp-start");
+        assert_eq!(payload.app_name, "rexisce");
     }
 }

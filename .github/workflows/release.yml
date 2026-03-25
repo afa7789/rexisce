@@ -13,16 +13,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: xmpp-start-linux-x86_64
+            artifact: rexisce-linux-x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact: xmpp-start-macos-x86_64
+            artifact: rexisce-macos-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: xmpp-start-macos-aarch64
+            artifact: rexisce-macos-aarch64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: xmpp-start-windows-x86_64.exe
+            artifact: rexisce-windows-x86_64.exe
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -32,13 +32,13 @@ jobs:
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get install -y libdbus-1-dev pkg-config libssl-dev
-      - run: cargo build --release --bin xmpp-start --target ${{ matrix.target }}
+      - run: cargo build --release --bin rexisce --target ${{ matrix.target }}
       - name: Rename binary (Unix)
         if: matrix.os != 'windows-latest'
-        run: cp target/${{ matrix.target }}/release/xmpp-start ${{ matrix.artifact }}
+        run: cp target/${{ matrix.target }}/release/rexisce ${{ matrix.artifact }}
       - name: Rename binary (Windows)
         if: matrix.os == 'windows-latest'
-        run: copy target\${{ matrix.target }}\release\xmpp-start.exe ${{ matrix.artifact }}
+        run: copy target\${{ matrix.target }}\release\rexisce.exe ${{ matrix.artifact }}
       - uses: softprops/action-gh-release@v2
         with:
           files: ${{ matrix.artifact }}
