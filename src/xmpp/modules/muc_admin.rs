@@ -12,6 +12,7 @@ use tokio_xmpp::minidom::Element;
 
 use super::{NS_CLIENT, NS_MUC_ADMIN};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum AffiliationAction {
     GrantOwner(String),

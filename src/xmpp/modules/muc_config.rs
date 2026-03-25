@@ -15,12 +15,14 @@ pub struct MucConfigManager {
     pending_queries: std::collections::HashMap<String, MucConfigQuery>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum MucConfigQuery {
     RequestConfig { room_jid: String },
     SubmitConfig { room_jid: String },
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct MucRoomConfig {
     pub room_name: Option<String>,

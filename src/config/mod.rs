@@ -260,6 +260,7 @@ pub fn delete_password(jid: &str) {
 ///
 /// Uses `account.password_key` as the keychain username so the credential can
 /// be looked up or deleted by key later.
+#[allow(dead_code)]
 pub fn save_account_password(account: &AccountConfig, password: &str) -> Result<()> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, &account.password_key)?;
     entry.set_password(password)?;
@@ -268,6 +269,7 @@ pub fn save_account_password(account: &AccountConfig, password: &str) -> Result<
 
 /// Retrieve the stored password for the given `AccountConfig`.
 /// Returns `None` if no credential is found.
+#[allow(dead_code)]
 pub fn load_account_password(account: &AccountConfig) -> Option<String> {
     keyring::Entry::new(KEYRING_SERVICE, &account.password_key)
         .ok()?
@@ -277,6 +279,7 @@ pub fn load_account_password(account: &AccountConfig) -> Option<String> {
 
 /// Remove the stored credential for the given `AccountConfig` (e.g. on
 /// account removal or explicit sign-out with `remember_me == false`).
+#[allow(dead_code)]
 pub fn delete_account_password(account: &AccountConfig) {
     if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &account.password_key) {
         let _ = entry.delete_credential();
@@ -285,6 +288,7 @@ pub fn delete_account_password(account: &AccountConfig) {
 
 impl TimeFormat {
     /// Format a unix timestamp (milliseconds) into a human-readable string.
+    #[allow(dead_code)]
     pub fn format_timestamp(&self, ts_millis: i64) -> String {
         let ts = chrono::DateTime::from_timestamp_millis(ts_millis);
         match ts {
@@ -297,6 +301,7 @@ impl TimeFormat {
     }
 
     /// Format a unix timestamp with date for date separators.
+    #[allow(dead_code)]
     pub fn format_timestamp_full(&self, ts_millis: i64) -> String {
         let ts = chrono::DateTime::from_timestamp_millis(ts_millis);
         match ts {

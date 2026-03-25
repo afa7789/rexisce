@@ -17,6 +17,7 @@ use hickory_resolver::{
 pub struct ResolvedEndpoint {
     pub host: String,
     pub port: u16,
+    #[allow(dead_code)]
     pub tls: TlsMode,
 }
 
@@ -28,6 +29,7 @@ pub enum TlsMode {
 
 /// Resolve the best connection endpoint for a domain using standard RFC 6120
 /// SRV record discovery.
+#[allow(dead_code)]
 pub async fn resolve(domain: &str) -> Result<ResolvedEndpoint> {
     resolve_with_override(domain, None).await
 }

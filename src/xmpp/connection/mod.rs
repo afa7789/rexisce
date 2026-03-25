@@ -59,6 +59,7 @@ impl ConnectConfig {
 
 /// Parsed server input from the login screen.
 /// Mirrors the existing parse_server_input() in the Rust proxy.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ServerTarget {
     /// Empty field or bare domain — perform SRV resolution
@@ -72,6 +73,7 @@ pub enum ServerTarget {
 }
 
 impl ServerTarget {
+    #[allow(dead_code)]
     pub fn parse(input: &str, jid_domain: &str) -> Self {
         let input = input.trim();
         if input.is_empty() {
@@ -98,6 +100,7 @@ impl ServerTarget {
     }
 }
 
+#[allow(dead_code)]
 fn parse_host_port(input: &str, default_port: u16) -> (String, u16) {
     match input.rsplit_once(':') {
         Some((host, port)) => {
@@ -111,6 +114,7 @@ fn parse_host_port(input: &str, default_port: u16) -> (String, u16) {
 /// Establish an XMPP connection based on the server target.
 /// Returns a connected, authenticated xmpp stream.
 /// TODO: Task P1.1 + P1.2 — implement full connect flow
+#[allow(dead_code)]
 pub async fn connect(_jid: &str, _password: &str, _target: ServerTarget) -> Result<()> {
     todo!("Task P1.1: implement TCP connect + STARTTLS + SASL")
 }

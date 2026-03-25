@@ -63,6 +63,7 @@ impl Affiliation {
 }
 
 /// A single occupant in a MUC room.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Occupant {
     pub nick: String,
@@ -74,6 +75,7 @@ pub struct Occupant {
 }
 
 /// State for a single MUC room we have joined (or are joining).
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct MucRoom {
     /// Bare JID of the room: `room@conference.server`.
@@ -110,6 +112,12 @@ impl MucManager {
         Self {
             rooms: HashMap::new(),
         }
+    }
+
+    /// Look up a joined room by bare JID.
+    #[allow(dead_code)]
+    pub fn get_room(&self, jid: &str) -> Option<&MucRoom> {
+        self.rooms.get(jid)
     }
 
     /// Build a join presence stanza and record the room.
