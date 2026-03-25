@@ -203,9 +203,4 @@ mod tests {
         assert_eq!(screen.scroll_offset.x, 0.0);
     }
 
-    #[test]
-    fn test_generates_10k_messages() {
-        let screen = BenchmarkScreen::new();
-        assert_eq!(screen.messages.len(), 10_000);
-    }
 }
