@@ -61,6 +61,7 @@ pub struct StickerPack {
 ///   </item>
 /// </pack>
 /// ```
+#[allow(dead_code)]
 pub fn parse_sticker_pack(element: &Element) -> Option<StickerPack> {
     if element.name() != "pack" || element.ns() != NS_STICKERS {
         return None;
@@ -88,6 +89,7 @@ pub fn parse_sticker_pack(element: &Element) -> Option<StickerPack> {
     Some(StickerPack { id, name, stickers })
 }
 
+#[allow(dead_code)]
 fn parse_sticker_item(item: &Element) -> Option<Sticker> {
     let id = item.attr("id")?.to_string();
 

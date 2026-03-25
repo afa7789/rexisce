@@ -61,6 +61,7 @@ impl OccupantPanel {
     }
 
     /// Returns the number of occupants currently stored.
+    #[allow(dead_code)]
     pub fn occupant_count(&self) -> usize {
         self.occupants.len()
     }

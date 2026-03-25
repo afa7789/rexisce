@@ -89,6 +89,7 @@ pub fn build_encrypted_message(
 /// Build a key-transport `<message>` (no payload — header only).
 ///
 /// Used to establish an Olm session with a device before sending real content.
+#[allow(dead_code)]
 pub fn build_key_transport(to: &str, _from_device: u32, header: &MessageHeader) -> Element {
     let transport = EncryptedMessage {
         header: header.clone(),
@@ -140,6 +141,7 @@ pub fn parse_encrypted_message(element: &Element) -> Option<EncryptedMessage> {
 }
 
 /// Returns `true` when the message carries no payload (key-transport only).
+#[allow(dead_code)]
 pub fn is_key_transport(msg: &EncryptedMessage) -> bool {
     msg.payload.is_none()
 }

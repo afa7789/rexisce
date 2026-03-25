@@ -991,6 +991,7 @@ impl ChatScreen {
         }
     }
 
+    #[allow(dead_code)]
     pub fn draft_for(&self, jid: &str) -> &str {
         self.conversations
             .get(jid)

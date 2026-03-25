@@ -18,6 +18,7 @@ pub enum StanzaDirection {
 
 /// A single logged stanza entry.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct StanzaEntry {
     pub direction: StanzaDirection,
     pub xml: String,
@@ -62,21 +63,25 @@ impl XmppConsole {
     }
 
     /// Total number of entries currently stored.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Returns `true` if no entries are stored.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Remove all entries.
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
     /// Return an iterator over entries whose XML contains `query` (case-insensitive).
+    #[allow(dead_code)]
     pub fn search<'a>(&'a self, query: &'a str) -> impl Iterator<Item = &'a StanzaEntry> {
         let query_lower = query.to_lowercase();
         self.entries

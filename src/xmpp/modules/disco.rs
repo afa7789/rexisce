@@ -170,6 +170,7 @@ impl DiscoManager {
     /// the response.
     ///
     /// Returns `(iq_id, element)`.
+    #[allow(dead_code)]
     pub fn build_info_request(&mut self, to_jid: &str) -> (String, Element) {
         let id = Uuid::new_v4().to_string();
         let query = Element::builder("query", NS_DISCO_INFO).build();
@@ -303,6 +304,7 @@ impl DiscoManager {
     /// Return `true` if the cached disco#info for `jid` lists `feature`.
     ///
     /// Returns `false` when the JID is unknown or uncached.
+    #[allow(dead_code)]
     pub fn supports(&self, jid: &str, feature: &str) -> bool {
         self.cache
             .get(jid)
@@ -310,6 +312,7 @@ impl DiscoManager {
     }
 
     /// Return a reference to the cached `DiscoInfo` for `jid`, if any.
+    #[allow(dead_code)]
     pub fn get_cached(&self, jid: &str) -> Option<&DiscoInfo> {
         self.cache.get(jid)
     }

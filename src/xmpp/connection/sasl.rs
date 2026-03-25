@@ -6,6 +6,7 @@
 
 /// SASL mechanism to use for authentication.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum SaslMechanism {
     Plain,
     ScramSha1,
@@ -15,6 +16,7 @@ pub enum SaslMechanism {
 impl SaslMechanism {
     /// Select the best mechanism from server-offered list.
     /// Prefer SCRAM-SHA-256 > SCRAM-SHA-1 > PLAIN.
+    #[allow(dead_code)]
     pub fn select(offered: &[String]) -> Option<Self> {
         if offered.iter().any(|m| m == "SCRAM-SHA-256") {
             Some(Self::ScramSha256)

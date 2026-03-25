@@ -34,6 +34,7 @@ pub const AES_KEY_LEN: usize = 32;
 /// Length of the AES-256-GCM nonce (bytes).
 pub const AES_NONCE_LEN: usize = 12;
 /// Length of the AES-256-GCM authentication tag (bytes).
+#[allow(dead_code)]
 pub const AES_TAG_LEN: usize = 16;
 
 // ---------------------------------------------------------------------------

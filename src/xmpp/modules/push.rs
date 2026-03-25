@@ -127,6 +127,7 @@ impl PushManager {
     ///
     /// If the IQ correlates with a pending enable request, marks the
     /// subscription as active and returns `Some((service_jid, node))`.
+    #[allow(dead_code)]
     pub fn on_enable_result(&mut self, el: &Element) -> Option<(String, String)> {
         let iq_type = el.attr("type")?;
         if iq_type != "result" {
@@ -153,6 +154,7 @@ impl PushManager {
     ///
     /// If the IQ correlates with a pending enable request, removes it
     /// from pending and returns the service JID.
+    #[allow(dead_code)]
     pub fn on_enable_error(&mut self, el: &Element) -> Option<String> {
         let iq_type = el.attr("type")?;
         if iq_type != "error" {
@@ -165,6 +167,7 @@ impl PushManager {
     /// Handle a disable result IQ.
     ///
     /// Marks the subscription as disabled if present.
+    #[allow(dead_code)]
     pub fn on_disable_result(&mut self, el: &Element) -> Option<String> {
         let iq_type = el.attr("type")?;
         if iq_type != "result" {
@@ -185,6 +188,7 @@ impl PushManager {
     }
 
     /// Check if push notifications are enabled for a service.
+    #[allow(dead_code)]
     pub fn is_enabled(&self, service_jid: &str) -> bool {
         self.subscriptions
             .get(service_jid)
@@ -198,6 +202,7 @@ impl PushManager {
     }
 
     /// Get the number of active subscriptions.
+    #[allow(dead_code)]
     pub fn active_count(&self) -> usize {
         self.subscriptions.values().filter(|s| s.enabled).count()
     }

@@ -132,6 +132,7 @@ impl SyncOrchestrator {
 
     /// Returns `true` when all queries initiated by `start_sync` have completed
     /// (i.e., their `<fin>` IQ has been received).
+    #[allow(dead_code)]
     pub fn is_complete(&self) -> bool {
         self.pending.is_empty()
     }
@@ -140,6 +141,7 @@ impl SyncOrchestrator {
     ///
     /// Call after each `on_fin` (or once after `is_complete`) to retrieve
     /// messages for persistence.
+    #[allow(dead_code)]
     pub fn drain_messages(&mut self) -> Vec<MamMessage> {
         std::mem::take(&mut self.received)
     }

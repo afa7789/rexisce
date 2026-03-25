@@ -3,6 +3,7 @@
 //
 // Pure state machine — no async, no I/O, no networking.
 // Models the TCP proxy lifecycle with WebSocket fallback after 3 consecutive failures.
+#![allow(dead_code)]
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProxyState {

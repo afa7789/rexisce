@@ -71,6 +71,7 @@ pub struct MamQuery {
 
 /// A single archived message unwrapped from a MAM `<result>` wrapper.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MamMessage {
     /// The archive-assigned UID from `<result id='…'>`.
     pub archive_id: String,
@@ -389,6 +390,7 @@ impl MamManager {
     }
 
     /// Returns `true` when a query with the given `query_id` is still pending.
+    #[allow(dead_code)]
     pub fn is_pending(&self, query_id: &str) -> bool {
         self.pending_queries.contains_key(query_id)
     }

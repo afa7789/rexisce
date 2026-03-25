@@ -48,6 +48,7 @@ impl TrustState {
     }
 
     /// Returns true when this state permits receiving messages from the device.
+    #[allow(dead_code)]
     pub fn is_decryptable(&self) -> bool {
         matches!(self, TrustState::Tofu | TrustState::Trusted)
     }

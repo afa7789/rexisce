@@ -27,6 +27,7 @@ pub struct EntityTime {
 }
 
 /// Manages outgoing entity-time requests and the resulting cache.
+#[allow(dead_code)]
 pub struct EntityTimeManager {
     /// jid → EntityTime cache
     cache: HashMap<String, EntityTime>,
@@ -46,6 +47,7 @@ impl EntityTimeManager {
     ///
     /// Returns `(iq_id, element)`. The caller must transmit the element and
     /// later pass the response to [`on_result`].
+    #[allow(dead_code)]
     pub fn build_request(&mut self, jid: &str) -> (String, Element) {
         let id = Uuid::new_v4().to_string();
         self.pending.insert(id.clone(), jid.to_string());
@@ -67,6 +69,7 @@ impl EntityTimeManager {
     /// Returns `Some(EntityTime)` if the stanza is a recognised time result
     /// and we had a matching pending request for it. Also inserts the result
     /// into the cache.
+    #[allow(dead_code)]
     pub fn on_result(&mut self, el: &Element) -> Option<EntityTime> {
         if el.name() != "iq" || el.attr("type") != Some("result") {
             return None;
@@ -95,6 +98,7 @@ impl EntityTimeManager {
     }
 
     /// Look up the cached `EntityTime` for a JID.
+    #[allow(dead_code)]
     pub fn get(&self, jid: &str) -> Option<&EntityTime> {
         self.cache.get(jid)
     }
@@ -136,6 +140,7 @@ impl Default for EntityTimeManager {
 /// Parse a `<tzo>` value such as `"-03:00"` or `"+05:30"` into seconds.
 ///
 /// Format: `(+|-)HH:MM`. Returns `None` if the string does not match.
+#[allow(dead_code)]
 fn parse_tzo(tzo: &str) -> Option<i32> {
     let tzo = tzo.trim();
     if tzo.is_empty() {

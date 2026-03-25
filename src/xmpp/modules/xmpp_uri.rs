@@ -100,6 +100,7 @@ pub fn parse(uri: &str) -> Option<XmppUri> {
 ///
 /// If `params` is non-empty, they are appended as `key=value` pairs separated
 /// by `;` after the action.
+#[allow(dead_code)]
 pub fn build(jid: &str, action: &XmppUriAction, params: &[(&str, &str)]) -> String {
     let action_str = match action {
         XmppUriAction::Message => "message",

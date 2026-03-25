@@ -19,6 +19,7 @@ pub struct LoginScreen {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum LoginState {
     Idle,
     Connecting,

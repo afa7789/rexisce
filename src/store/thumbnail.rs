@@ -5,6 +5,7 @@ use std::io::Cursor;
 pub const THUMBNAIL_MAX_DIM: u32 = 256;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Thumbnail {
     /// Pixel width of the generated thumbnail.
     pub width: u32,

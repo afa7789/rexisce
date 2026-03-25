@@ -43,6 +43,7 @@ pub struct BobData {
 ///   BASE64_DATA
 /// </data>
 /// ```
+#[allow(dead_code)]
 pub fn build_bob_data(bob: &BobData) -> Element {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     let encoded = STANDARD.encode(&bob.data);

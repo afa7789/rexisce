@@ -188,6 +188,7 @@ impl FileUploadManager {
     /// Parse an error IQ. Returns the IQ id if it matched a pending request.
     ///
     /// Removes the matching request from pending on error.
+    #[allow(dead_code)]
     pub fn on_slot_error(&mut self, el: &Element) -> Option<String> {
         if el.name() != "iq" {
             return None;
@@ -206,6 +207,7 @@ impl FileUploadManager {
     }
 
     /// Returns `true` if there is a pending request with this IQ id.
+    #[allow(dead_code)]
     pub fn is_pending(&self, iq_id: &str) -> bool {
         self.pending.contains_key(iq_id)
     }

@@ -18,6 +18,7 @@ use super::{engine::run_engine, AccountId, XmppCommand, XmppEvent};
 // Per-engine handle
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 struct EngineHandle {
     /// Command sender into this engine's loop.
     cmd_tx: mpsc::Sender<XmppCommand>,
@@ -117,6 +118,7 @@ impl MultiEngineManager {
     ///
     /// Sends a `Disconnect` command to the engine, then removes the handle.
     /// The engine task will exit naturally once the channel is dropped.
+    #[allow(dead_code)]
     pub fn stop_account(&mut self, id: &AccountId) {
         if let Some(handle) = self.engines.remove(id) {
             let _ = handle.cmd_tx.try_send(XmppCommand::Disconnect);
@@ -132,6 +134,7 @@ impl MultiEngineManager {
     /// Send a command to the currently active account's engine.
     ///
     /// Returns `false` when there is no engine for the active account.
+    #[allow(dead_code)]
     pub fn send_to_active(&self, cmd: XmppCommand) -> bool {
         self.send_to(&self.active_account, cmd)
     }
@@ -139,6 +142,7 @@ impl MultiEngineManager {
     /// Send a command to a specific account's engine.
     ///
     /// Returns `false` when there is no engine for `id`.
+    #[allow(dead_code)]
     pub fn send_to(&self, id: &AccountId, cmd: XmppCommand) -> bool {
         if let Some(handle) = self.engines.get(id) {
             handle.cmd_tx.try_send(cmd).is_ok()
@@ -155,11 +159,13 @@ impl MultiEngineManager {
     }
 
     /// Returns the currently active account ID.
+    #[allow(dead_code)]
     pub fn active_account(&self) -> &AccountId {
         &self.active_account
     }
 
     /// Returns `true` when an engine is running for `id`.
+    #[allow(dead_code)]
     pub fn is_running(&self, id: &AccountId) -> bool {
         self.engines.contains_key(id)
     }
