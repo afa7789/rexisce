@@ -98,7 +98,7 @@ struct StanzaRateLimiter {
 }
 
 /// Warn (once per crossing) when the outbox grows beyond this depth.
-const MAX_OUTBOX_DEPTH: usize = 50;
+const MAX_OUTBOX_DEPTH: usize = 100;
 
 impl StanzaRateLimiter {
     /// Create a new limiter allowing `capacity` burst stanzas refilling at
@@ -279,8 +279,8 @@ async fn run_session(
 
     // Outbox for stanzas that need to be sent after a select! arm.
     let mut outbox: VecDeque<Element> = VecDeque::new();
-    // Rate limiter: burst of 10 stanzas, refilling at 10 stanzas/second.
-    let mut rate_limiter = StanzaRateLimiter::new(10.0, 10.0);
+    // Rate limiter: burst of 30 stanzas (handles connect flood), refilling at 10 stanzas/second.
+    let mut rate_limiter = StanzaRateLimiter::new(30.0, 10.0);
     let mut reconnect_attempt: u32 = 0;
 
     // C1: XEP-0198 stream management tracker

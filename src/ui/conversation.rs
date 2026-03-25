@@ -1050,7 +1050,14 @@ impl ConversationView {
                         tooltip::Position::Top,
                     ));
                 }
-                quick_row.into()
+                if m.own {
+                    container(quick_row)
+                        .width(Length::Fill)
+                        .align_x(Alignment::End)
+                        .into()
+                } else {
+                    quick_row.into()
+                }
             } else {
                 row![].spacing(4).into()
             };
@@ -1137,19 +1144,43 @@ impl ConversationView {
                     if let Some(btn) = moderate_btn {
                         header_row = header_row.push(btn);
                     }
-                    let mut col = column![header_row].spacing(2).padding([0, 6]);
+                    let mut col = column![header_row].spacing(4).padding([0, 6]);
                     if let Some(preview) = m.reply_preview.as_ref() {
-                        col = col.push(
-                            container(text(format!("> {}", preview)).size(11)).padding([2, 6]),
+                        let truncated: String = preview.chars().take(100).collect();
+                        let quote = container(text(truncated).size(11)).padding([4, 8]).style(
+                            |_theme: &iced::Theme| iced::widget::container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgb(
+                                    0.18, 0.18, 0.22,
+                                ))),
+                                border: iced::Border {
+                                    color: iced::Color::from_rgb(0.5, 0.5, 0.6),
+                                    width: 0.0,
+                                    radius: 2.0.into(),
+                                },
+                                ..Default::default()
+                            },
                         );
+                        col = col.push(quote);
                     }
                     col.push(body_widget)
                 } else {
-                    let mut col = column![].spacing(2).padding([0, 6]);
+                    let mut col = column![].spacing(4).padding([0, 6]);
                     if let Some(preview) = m.reply_preview.as_ref() {
-                        col = col.push(
-                            container(text(format!("> {}", preview)).size(11)).padding([2, 6]),
+                        let truncated: String = preview.chars().take(100).collect();
+                        let quote = container(text(truncated).size(11)).padding([4, 8]).style(
+                            |_theme: &iced::Theme| iced::widget::container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgb(
+                                    0.18, 0.18, 0.22,
+                                ))),
+                                border: iced::Border {
+                                    color: iced::Color::from_rgb(0.5, 0.5, 0.6),
+                                    width: 0.0,
+                                    radius: 2.0.into(),
+                                },
+                                ..Default::default()
+                            },
                         );
+                        col = col.push(quote);
                     }
                     col.push(body_widget)
                 };
@@ -1186,13 +1217,49 @@ impl ConversationView {
                     if let Some(btn) = moderate_btn {
                         own_header = own_header.push(btn);
                     }
-                    let mut col = column![own_header, body_widget].spacing(2).padding([6, 10]);
+                    let mut col = column![own_header].spacing(4).padding([6, 10]);
+                    if let Some(preview) = m.reply_preview.as_ref() {
+                        let truncated: String = preview.chars().take(100).collect();
+                        let quote = container(text(truncated).size(11)).padding([4, 8]).style(
+                            |_theme: &iced::Theme| iced::widget::container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgb(
+                                    0.18, 0.18, 0.22,
+                                ))),
+                                border: iced::Border {
+                                    color: iced::Color::from_rgb(0.5, 0.5, 0.6),
+                                    width: 0.0,
+                                    radius: 2.0.into(),
+                                },
+                                ..Default::default()
+                            },
+                        );
+                        col = col.push(quote);
+                    }
+                    col = col.push(body_widget);
                     if let Some(lbl) = edited_label {
                         col = col.push(lbl);
                     }
                     col.push(text(own_ts_label).size(10))
                 } else {
-                    let mut col = column![body_widget].spacing(2).padding([2, 10]);
+                    let mut col = column![].spacing(4).padding([2, 10]);
+                    if let Some(preview) = m.reply_preview.as_ref() {
+                        let truncated: String = preview.chars().take(100).collect();
+                        let quote = container(text(truncated).size(11)).padding([4, 8]).style(
+                            |_theme: &iced::Theme| iced::widget::container::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgb(
+                                    0.18, 0.18, 0.22,
+                                ))),
+                                border: iced::Border {
+                                    color: iced::Color::from_rgb(0.5, 0.5, 0.6),
+                                    width: 0.0,
+                                    radius: 2.0.into(),
+                                },
+                                ..Default::default()
+                            },
+                        );
+                        col = col.push(quote);
+                    }
+                    col = col.push(body_widget);
                     if let Some(lbl) = edited_label {
                         col = col.push(lbl);
                     }
@@ -1335,17 +1402,33 @@ impl ConversationView {
         // ---- Composer ----
         // G3: reply quote strip
         let reply_strip: Option<Element<Message>> = self.reply_to.as_ref().map(|(_id, preview)| {
-            let cancel_btn = button(text("✕").size(10))
+            let truncated: String = preview.chars().take(100).collect();
+            let cancel_btn = button(text("✕").size(10).shaping(Shaping::Advanced))
                 .on_press(Message::CancelReply)
                 .padding([2, 4]);
             let strip = row![
-                text(format!("> {}", preview)).size(11).width(Length::Fill),
+                text(format!("Replying: {}", truncated))
+                    .size(11)
+                    .width(Length::Fill),
                 cancel_btn,
             ]
             .spacing(4)
             .align_y(Alignment::Center)
             .padding([4, 8]);
-            container(strip).width(Length::Fill).into()
+            container(strip)
+                .width(Length::Fill)
+                .style(|_theme: &iced::Theme| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgb(
+                        0.15, 0.15, 0.20,
+                    ))),
+                    border: iced::Border {
+                        color: iced::Color::from_rgb(0.4, 0.4, 0.6),
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into()
         });
 
         // E1: edit-mode strip above composer

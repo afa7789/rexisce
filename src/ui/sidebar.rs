@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use iced::{
     widget::text::Shaping,
-    widget::{button, column, container, row, scrollable, text, text_input, tooltip},
+    widget::{button, column, container, image, row, scrollable, text, text_input, tooltip},
     Alignment, Element, Length, Task,
 };
 
@@ -244,6 +244,7 @@ impl SidebarScreen {
         drafts: &[String],
         default_conference_service: &str,
         active_account: Option<(&AccountId, usize)>,
+        avatars: &HashMap<String, Vec<u8>>,
     ) -> Element<'_, Message> {
         // MULTI: account indicator bar — shown at the very top of the sidebar
         // when an account is active. Displays a colored dot, truncated JID,
@@ -311,7 +312,7 @@ impl SidebarScreen {
             tooltip::Position::Bottom,
         );
         let create_btn = tooltip(
-            button("⊞")
+            button("New")
                 .on_press(Message::ToggleCreateRoom)
                 .padding([2, 6]),
             "Create Room",
@@ -407,18 +408,24 @@ impl SidebarScreen {
                     format!("{} {}", indicator, display_name)
                 };
 
-                // H5: colored avatar square with JID initial (32x32)
-                let color = jid_color(&c.jid);
-                let initial = jid_initial(&c.jid).to_string();
-                let avatar = container(text(initial).size(14))
-                    .width(32)
-                    .height(32)
-                    .style(move |_theme: &iced::Theme| iced::widget::container::Style {
-                        background: Some(iced::Background::Color(color)),
-                        ..Default::default()
-                    })
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center);
+                // H5/H1: avatar image if available, otherwise colored initial (32x32)
+                let avatar: Element<Message> = if let Some(png) = avatars.get(c.jid.as_str()) {
+                    let handle = iced::widget::image::Handle::from_bytes(png.clone());
+                    image(handle).width(32).height(32).into()
+                } else {
+                    let color = jid_color(&c.jid);
+                    let initial = jid_initial(&c.jid).to_string();
+                    container(text(initial).size(14))
+                        .width(32)
+                        .height(32)
+                        .style(move |_theme: &iced::Theme| iced::widget::container::Style {
+                            background: Some(iced::Background::Color(color)),
+                            ..Default::default()
+                        })
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center)
+                        .into()
+                };
 
                 // B5: unread badge
                 let unread = self.unread_counts.get(c.jid.as_str()).copied().unwrap_or(0);
@@ -464,7 +471,7 @@ impl SidebarScreen {
                 let current_name = c.name.clone().unwrap_or_else(|| c.jid.clone());
                 let jid_for_rename = c.jid.clone();
                 let rename_btn = tooltip(
-                    button(text("✎").size(10).shaping(Shaping::Advanced))
+                    button(text("✏").size(10).shaping(Shaping::Advanced))
                         .on_press(Message::StartRename(jid_for_rename, current_name))
                         .padding([2, 4]),
                     "Rename",
@@ -474,7 +481,7 @@ impl SidebarScreen {
                 // H3: remove button
                 let jid_for_remove = c.jid.clone();
                 let remove_btn = tooltip(
-                    button(text("✕").size(10))
+                    button(text("✕").size(10).shaping(Shaping::Advanced))
                         .on_press(Message::RemoveContact(jid_for_remove))
                         .padding([2, 4]),
                     "Remove contact",
@@ -491,7 +498,7 @@ impl SidebarScreen {
                     let confirm_btn = button(text("OK").size(10))
                         .on_press(Message::SubmitRename)
                         .padding([2, 5]);
-                    let cancel_btn = button(text("✕").size(10))
+                    let cancel_btn = button(text("✕").size(10).shaping(Shaping::Advanced))
                         .on_press(Message::CancelRename)
                         .padding([2, 4]);
                     row![rename_input, confirm_btn, cancel_btn]
@@ -542,7 +549,7 @@ impl SidebarScreen {
             let name = contact
                 .and_then(|c| c.name.as_deref())
                 .unwrap_or(jid.as_str());
-            let close_btn = button(text("✕").size(10))
+            let close_btn = button(text("✕").size(10).shaping(Shaping::Advanced))
                 .on_press(Message::CloseProfile)
                 .padding([2, 4]);
 

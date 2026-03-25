@@ -52,7 +52,12 @@ impl Server {
                     .output()
                     .unwrap();
                 let inspect = Command::new("docker")
-                    .args(["inspect", "--format", "{{.State.Status}} exit={{.State.ExitCode}}", "xmpp-start-test"])
+                    .args([
+                        "inspect",
+                        "--format",
+                        "{{.State.Status}} exit={{.State.ExitCode}}",
+                        "xmpp-start-test",
+                    ])
                     .current_dir(root)
                     .output()
                     .unwrap();

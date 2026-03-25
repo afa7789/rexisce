@@ -66,6 +66,8 @@ pub struct ChatScreen {
     account_unread: usize,
     /// OMEMO Phase 2: whether OMEMO has been enabled globally (from App state)
     pub omemo_enabled: bool,
+    /// Auto-hide timer: set when connected so "Signed in as" hides after 5s.
+    connected_at: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -140,6 +142,7 @@ impl ChatScreen {
             active_account_id: None,
             account_unread: 0,
             omemo_enabled: false,
+            connected_at: Some(std::time::Instant::now()),
         }
     }
 
@@ -1043,7 +1046,7 @@ impl ChatScreen {
             .map(|id| (id, self.account_unread));
         let sidebar_view = self
             .sidebar
-            .view_with_drafts(&drafts, &conference_service, account_info)
+            .view_with_drafts(&drafts, &conference_service, account_info, &self.avatars)
             .map(Message::Sidebar);
 
         // K3: if there is a pending invite dialog, show it instead of the conversation
@@ -1214,7 +1217,8 @@ impl ChatScreen {
                 }
             };
 
-        let own_label = text(format!("Signed in as {}", self.own_jid)).size(11);
+        // Show "Signed in as" only for the first 5 seconds after connection.
+        let show_jid_label = self.connected_at.is_some_and(|t| t.elapsed().as_secs() < 5);
         let settings_btn = iced::widget::button(text("Settings").size(11))
             .on_press(Message::OpenSettings)
             .padding([2, 8]);
@@ -1229,13 +1233,24 @@ impl ChatScreen {
         let dnd_btn = iced::widget::button(text("✕ DND").size(11))
             .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
             .padding([2, 8]);
-        let status_bar = container(
-            row![own_label, available_btn, away_btn, dnd_btn, settings_btn]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
-        )
-        .padding([2, 8])
-        .width(Length::Fill);
+        let status_bar = if show_jid_label {
+            let own_label = text(format!("Signed in as {}", self.own_jid)).size(11);
+            container(
+                row![own_label, available_btn, away_btn, dnd_btn, settings_btn]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([2, 8])
+            .width(Length::Fill)
+        } else {
+            container(
+                row![available_btn, away_btn, dnd_btn, settings_btn]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([2, 8])
+            .width(Length::Fill)
+        };
 
         // D1: if active JID is a MUC room, show the occupant panel on the right
         let content_row: Element<Message> = if let Some(ref jid) = self.active_jid {

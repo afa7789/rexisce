@@ -1,7 +1,7 @@
 // Task P2: UI Foundation
 // Reference: https://github.com/squidowl/halloy (iced IRC client)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use iced::{Element, Subscription, Task};
@@ -130,6 +130,8 @@ pub struct App {
     last_connect_cfg: Option<crate::xmpp::ConnectConfig>,
     // H1: avatar cache (jid → png bytes)
     avatar_cache: HashMap<String, Vec<u8>>,
+    // H1: JIDs for which a FetchAvatar command has already been sent this session
+    avatar_fetching: HashSet<String>,
     // F1: debug console — circular buffer of raw XML stanzas and visibility flag
     xmpp_console: XmppConsole,
     show_console: bool,
@@ -279,6 +281,7 @@ impl App {
                 reconnect_attempt: 0,
                 last_connect_cfg: None,
                 avatar_cache: HashMap::new(),
+                avatar_fetching: HashSet::new(),
                 xmpp_console: XmppConsole::new(200),
                 show_console: false,
                 show_palette: false,
@@ -465,6 +468,9 @@ impl App {
             Message::MessagesLoaded(jid, rows) => {
                 if let Screen::Chat(ref mut chat) = self.screen {
                     let own_jid = chat.own_jid().to_string();
+                    // Strip resource so bare JIDs are compared; stored from_jid may
+                    // carry the resource from a previous session with a different suffix.
+                    let own_bare = own_jid.split('/').next().unwrap_or(&own_jid).to_string();
                     if let Some(convo) = chat.get_conversation_mut(&jid) {
                         let display: Vec<crate::ui::conversation::DisplayMessage> = rows
                             .into_iter()
@@ -472,7 +478,8 @@ impl App {
                                 id: r.id,
                                 from: r.from_jid.clone(),
                                 body: r.body.unwrap_or_default(),
-                                own: r.from_jid == own_jid,
+                                own: r.from_jid.split('/').next().unwrap_or(&r.from_jid)
+                                    == own_bare,
                                 timestamp: r.timestamp,
                                 reply_preview: None,
                                 edited: r.edited_body.is_some(),
@@ -1141,6 +1148,10 @@ impl App {
                     if !cmds.is_empty() {
                         // Persist outgoing messages to SQLite before forwarding to engine.
                         let own_jid = chat.own_jid().to_string();
+                        // Store the bare JID so re-login with a different resource still
+                        // matches when loading history and computing `own`.
+                        let own_bare_jid =
+                            own_jid.split('/').next().unwrap_or(&own_jid).to_string();
                         let pool = self.db.clone();
                         let send_cmds: Vec<(String, String)> = cmds
                             .iter()
@@ -1167,7 +1178,7 @@ impl App {
                                         &crate::store::message_repo::Message {
                                             id: uuid::Uuid::new_v4().to_string(),
                                             conversation_jid: to,
-                                            from_jid: own_jid.clone(),
+                                            from_jid: own_bare_jid.clone(),
                                             body: Some(body),
                                             timestamp: ts,
                                             stanza_id: None,
@@ -1388,10 +1399,17 @@ impl App {
                         let pool = self.db.clone();
                         let contacts = contacts.clone();
                         // H1: fetch avatars for all roster contacts (fire-and-forget)
+                        // Skip JIDs already cached or already being fetched to avoid duplicates.
                         if let Some(ref tx) = self.xmpp_tx {
                             let tx = tx.clone();
-                            let jids: Vec<String> =
-                                contacts.iter().map(|c| c.jid.clone()).collect();
+                            let jids: Vec<String> = contacts
+                                .iter()
+                                .map(|c| c.jid.clone())
+                                .filter(|jid| {
+                                    !self.avatar_cache.contains_key(jid.as_str())
+                                        && self.avatar_fetching.insert(jid.clone())
+                                })
+                                .collect();
                             tokio::spawn(async move {
                                 for jid in jids {
                                     let _ = tx.send(XmppCommand::FetchAvatar(jid)).await;
@@ -1500,7 +1518,10 @@ impl App {
                             chat.on_presence(jid, available);
                         }
                         // F5: fetch avatar for newly-available contacts not yet cached
-                        if available && !self.avatar_cache.contains_key(jid.as_str()) {
+                        if available
+                            && !self.avatar_cache.contains_key(jid.as_str())
+                            && self.avatar_fetching.insert(jid.clone())
+                        {
                             if let Some(ref tx) = self.xmpp_tx {
                                 let tx = tx.clone();
                                 let jid_owned = jid.clone();
