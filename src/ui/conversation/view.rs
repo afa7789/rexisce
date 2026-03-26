@@ -467,9 +467,23 @@ impl ConversationView {
             prev_ts = Some(m.timestamp);
         }
 
-        let list_col = rows
-            .into_iter()
-            .fold(column![].spacing(4).padding(8), iced::widget::Column::push);
+        let list_col = if rows.is_empty() {
+            column![
+                container(
+                    text("No messages yet — start a conversation!")
+                        .size(13)
+                        .color(iced::Color::from_rgb(0.55, 0.55, 0.55))
+                )
+                .width(Length::Fill)
+                .align_x(Alignment::Center)
+                .padding([20, 0])
+            ]
+            .spacing(4)
+            .padding(8)
+        } else {
+            rows.into_iter()
+                .fold(column![].spacing(4).padding(8), iced::widget::Column::push)
+        };
 
         let scroll_area = scrollable(list_col)
             .id(self.scroll_id.clone())

@@ -745,7 +745,8 @@ impl SettingsScreen {
         let omemo_section = self.view_omemo();
 
         // === Blocked Users section ===
-        let blocklist_section = self.blocklist.view().map(Message::Blocklist);
+        let blocklist_section =
+            settings_section("Blocked Users", self.blocklist.view().map(Message::Blocklist));
 
         // === Network section ===
         let network_section = self.view_network();
@@ -814,6 +815,15 @@ impl SettingsScreen {
     // UX-5: copyable text fields with copy-to-clipboard buttons.
     fn view_account_details(&self) -> Element<'_, Message> {
         let info = &self.account_info;
+
+        // Show a helpful empty state when no account info is available yet
+        if info.bound_jid.is_empty() {
+            let empty_msg: Element<Message> = text("No active session")
+                .size(13)
+                .color(iced::Color::from_rgb(0.55, 0.55, 0.55))
+                .into();
+            return settings_section("Account", empty_msg);
+        }
 
         let bare_jid = info.bound_jid.split('/').next().unwrap_or("").to_string();
         let server = bare_jid.split('@').nth(1).unwrap_or("").to_string();

@@ -95,8 +95,6 @@ impl BlocklistPanel {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let header = text("Blocked Users").size(16);
-
         // Search / filter input
         let filter_input = text_input("Filter list…", &self.filter)
             .on_input(Message::FilterChanged)
@@ -128,9 +126,18 @@ impl BlocklistPanel {
             })
             .collect();
 
-        let list = list_items
-            .into_iter()
-            .fold(column![].spacing(4), iced::widget::Column::push);
+        let list = if list_items.is_empty() {
+            column![
+                text("No blocked contacts")
+                    .size(13)
+                    .color(iced::Color::from_rgb(0.55, 0.55, 0.55))
+            ]
+            .spacing(4)
+        } else {
+            list_items
+                .into_iter()
+                .fold(column![].spacing(4), iced::widget::Column::push)
+        };
 
         let list_scroll = scrollable(list).height(200);
 
@@ -149,7 +156,7 @@ impl BlocklistPanel {
             .spacing(8)
             .align_y(Alignment::Center);
 
-        let content = column![header, filter_input, list_scroll, add_row].spacing(12);
+        let content = column![filter_input, list_scroll, add_row].spacing(12);
 
         container(content).padding(0).into()
     }

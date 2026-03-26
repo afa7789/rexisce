@@ -118,9 +118,18 @@ impl OmemoTrustScreen {
         let device_rows: Vec<Element<Message>> =
             self.devices.iter().map(|dev| device_row(dev)).collect();
 
-        let list = device_rows
-            .into_iter()
-            .fold(column![].spacing(12), iced::widget::Column::push);
+        let list = if device_rows.is_empty() {
+            column![
+                text("No known devices for this contact")
+                    .size(13)
+                    .color(Color::from_rgb(0.55, 0.55, 0.55))
+            ]
+            .spacing(12)
+        } else {
+            device_rows
+                .into_iter()
+                .fold(column![].spacing(12), iced::widget::Column::push)
+        };
 
         let list_scroll = scrollable(list).height(Length::Fill);
 
