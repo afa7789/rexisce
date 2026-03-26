@@ -741,4 +741,56 @@ mod tests {
         let _ = s.update(Message::SelectContact("alice@example.com".into()));
         assert_eq!(s.selected_jid(), Some("alice@example.com"));
     }
+
+    #[test]
+    fn toggle_account_menu_opens_and_closes() {
+        let mut s = SidebarScreen::new();
+        assert!(!s.show_account_menu);
+        let _ = s.update(Message::ToggleAccountMenu);
+        assert!(s.show_account_menu);
+        let _ = s.update(Message::ToggleAccountMenu);
+        assert!(!s.show_account_menu);
+    }
+
+    #[test]
+    fn open_settings_returns_action_and_closes_menu() {
+        let mut s = SidebarScreen::new();
+        s.show_account_menu = true;
+        let action = s.update(Message::OpenSettings);
+        assert!(!s.show_account_menu, "menu should close after OpenSettings");
+        assert!(
+            matches!(action, Action::OpenSettings),
+            "expected Action::OpenSettings"
+        );
+    }
+
+    #[test]
+    fn set_presence_returns_action_and_closes_menu() {
+        use crate::xmpp::modules::presence_machine::PresenceStatus;
+        let mut s = SidebarScreen::new();
+        s.show_account_menu = true;
+
+        let action = s.update(Message::SetPresence(PresenceStatus::Available));
+        assert!(!s.show_account_menu);
+        assert!(matches!(action, Action::SetPresence(PresenceStatus::Available)));
+
+        s.show_account_menu = true;
+        let action = s.update(Message::SetPresence(PresenceStatus::Away));
+        assert!(!s.show_account_menu);
+        assert!(matches!(action, Action::SetPresence(PresenceStatus::Away)));
+
+        s.show_account_menu = true;
+        let action = s.update(Message::SetPresence(PresenceStatus::DoNotDisturb));
+        assert!(!s.show_account_menu);
+        assert!(matches!(action, Action::SetPresence(PresenceStatus::DoNotDisturb)));
+    }
+
+    #[test]
+    fn open_account_switcher_returns_action_and_closes_menu() {
+        let mut s = SidebarScreen::new();
+        s.show_account_menu = true;
+        let action = s.update(Message::OpenAccountSwitcher);
+        assert!(!s.show_account_menu);
+        assert!(matches!(action, Action::OpenAccountSwitcher));
+    }
 }

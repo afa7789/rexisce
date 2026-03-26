@@ -1574,4 +1574,55 @@ mod tests {
             "expected RequestUploadSlot command after voice Send"
         );
     }
+
+    #[test]
+    fn sidebar_open_settings_returns_action() {
+        use crate::ui::sidebar;
+        let mut s = ChatScreen::new("me@example.com".into());
+        let action = s.update(Message::Sidebar(sidebar::Message::OpenSettings));
+        assert!(
+            matches!(action, Action::OpenSettings),
+            "expected Action::OpenSettings from sidebar OpenSettings"
+        );
+    }
+
+    #[test]
+    fn sidebar_set_presence_queues_command_and_returns_action() {
+        use crate::ui::sidebar;
+        let mut s = ChatScreen::new("me@example.com".into());
+        let action = s.update(Message::Sidebar(sidebar::Message::SetPresence(
+            PresenceStatus::DoNotDisturb,
+        )));
+        assert!(
+            matches!(action, Action::SetPresence(PresenceStatus::DoNotDisturb)),
+            "expected Action::SetPresence(DoNotDisturb)"
+        );
+        let cmds = s.drain_commands();
+        assert_eq!(cmds.len(), 1, "expected exactly one pending command");
+        assert!(
+            matches!(cmds[0], XmppCommand::SetPresence(PresenceStatus::DoNotDisturb)),
+            "expected XmppCommand::SetPresence(DoNotDisturb)"
+        );
+    }
+
+    #[test]
+    fn direct_set_presence_queues_command_and_returns_action() {
+        let mut s = ChatScreen::new("me@example.com".into());
+        let action = s.update(Message::SetPresence(PresenceStatus::Away));
+        assert!(matches!(action, Action::SetPresence(PresenceStatus::Away)));
+        let cmds = s.drain_commands();
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            XmppCommand::SetPresence(PresenceStatus::Away)
+        ));
+    }
+
+    #[test]
+    fn sidebar_open_account_switcher_returns_action() {
+        use crate::ui::sidebar;
+        let mut s = ChatScreen::new("me@example.com".into());
+        let action = s.update(Message::Sidebar(sidebar::Message::OpenAccountSwitcher));
+        assert!(matches!(action, Action::OpenAccountSwitcher));
+    }
 }
