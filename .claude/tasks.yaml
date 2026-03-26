@@ -15,8 +15,8 @@
   - wire
   - multi-account
   metadata:
-    started_at: '2026-03-26T17:36:35.446897+00:00'
     agent: afa
+    started_at: '2026-03-26T17:36:35.446897+00:00'
   created_at: '2026-03-26T17:26:47.629486Z'
   updated_at: '2026-03-26T17:40:46.909747Z'
 - id: cleanup-dead-code-proxy
@@ -139,7 +139,7 @@
     settings_section_with_desc(title, None, content). No callers remain — all sections now use
     settings_section_with_desc directly with descriptions.
     FIX: Delete fn settings_section and its #[allow(dead_code)]. 3 lines removed.
-  status: InProgress
+  status: Done
   priority: 6
   deps: []
   files:
@@ -147,10 +147,10 @@
   tags:
   - dead-code
   metadata:
-    agent: afa
     started_at: '2026-03-26T17:36:16.577831+00:00'
+    agent: afa
   created_at: '2026-03-26T17:26:47.629488Z'
-  updated_at: '2026-03-26T17:26:47.629488Z'
+  updated_at: '2026-03-26T17:42:39.607045Z'
 - id: cleanup-settings-hardcoded-colors
   title: 'P5: Replace 3 remaining hardcoded colors in settings.rs with palette constants'
   description: |
@@ -159,7 +159,7 @@
     settings.rs:111 Color::from_rgba(0.45, 0.45, 0.45, 0.9) in category_heading.
     FIX: Add MUTED_DESC (or reuse MUTED_TEXT), SHADOW_COLOR, CATEGORY_TEXT to palette.rs. Replace
     the 3 hardcoded values. This completes the palette-unify goal.
-  status: Done
+  status: Pending
   priority: 5
   deps: []
   files:
@@ -168,10 +168,10 @@
   tags:
   - palette
   metadata:
-    started_at: '2026-03-26T17:36:29.206570+00:00'
     agent: afa
+    started_at: '2026-03-26T17:36:29.206570+00:00'
   created_at: '2026-03-26T17:26:47.629482Z'
-  updated_at: '2026-03-26T17:39:31.465707Z'
+  updated_at: '2026-03-26T17:41:44.536420Z'
 - id: fix-footer-presence
   title: 'P2 BUG: Move presence buttons (Available/Away/DND/Settings) from chat footer to sidebar'
   description: |
@@ -182,7 +182,7 @@
     FIX: Remove the entire status_bar from chat.rs view(). Move presence picker buttons into
     sidebar.rs account menu popover (line 599+). Wire Settings button to existing OpenSettings
     action in the sidebar. The "Signed in as" toast can be a temporary overlay instead.
-  status: InProgress
+  status: Done
   priority: 2
   deps: []
   files:
@@ -192,10 +192,10 @@
   - bug
   - ux
   metadata:
-    agent: afa
     started_at: '2026-03-26T17:36:10.335468+00:00'
+    agent: afa
   created_at: '2026-03-26T17:26:47.629477Z'
-  updated_at: '2026-03-26T17:26:47.629477Z'
+  updated_at: '2026-03-26T17:42:33.383386Z'
 - id: fix-omemo-encrypted-flag
   title: 'P1 BUG: Add is_encrypted field to IncomingMessage so OMEMO-decrypted messages show encryption badge'
   description: |
