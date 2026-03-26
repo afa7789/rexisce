@@ -53,19 +53,27 @@ pub enum Message {
 // Update + View
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
+pub enum Action {
+    None,
+    SwitchTo(AccountId),
+    AddAccount,
+    Close,
+}
+
 impl AccountSwitcherScreen {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn update(&mut self, msg: Message) {
+    pub fn update(&mut self, msg: Message) -> Action {
         match msg {
             Message::SwitchTo(id) => {
-                self.active = Some(id);
+                self.active = Some(id.clone());
+                Action::SwitchTo(id)
             }
-            Message::AddAccount | Message::Close => {
-                // Handled by the parent app; no local state change needed.
-            }
+            Message::AddAccount => Action::AddAccount,
+            Message::Close => Action::Close,
         }
     }
 
@@ -178,7 +186,7 @@ mod tests {
             "alice@example.com"
         );
 
-        screen.update(Message::SwitchTo(AccountId::new("bob@example.com")));
+        let _ = screen.update(Message::SwitchTo(AccountId::new("bob@example.com")));
         assert_eq!(screen.active.as_ref().unwrap().as_str(), "bob@example.com");
     }
 

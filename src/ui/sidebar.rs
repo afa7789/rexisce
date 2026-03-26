@@ -75,6 +75,31 @@ pub enum Message {
     OpenSettings,
 }
 
+#[allow(dead_code)]
+pub enum Action {
+    None,
+    Task(Task<Message>),
+    SelectContact(String),
+    AddContact(String),
+    RemoveContact(String),
+    JoinRoom {
+        jid: String,
+        nick: String,
+    },
+    CreateRoom {
+        local: String,
+        service: String,
+        nick: String,
+    },
+    RenameContact {
+        jid: String,
+        name: String,
+    },
+    SetPresence(PresenceStatus),
+    OpenSettings,
+    OpenAccountSwitcher,
+}
+
 impl Default for SidebarScreen {
     fn default() -> Self {
         Self::new()
@@ -126,45 +151,12 @@ impl SidebarScreen {
         self.selected_jid.as_deref()
     }
 
-    /// H3: Get the current add-contact input value.
-    pub fn add_contact_jid(&self) -> &str {
-        &self.add_contact_input
-    }
-
-    /// D3: Get the current join-room JID and nick inputs.
-    pub fn join_room_jid(&self) -> &str {
-        &self.join_room_jid
-    }
-
-    pub fn join_room_nick(&self) -> &str {
-        &self.join_room_nick
-    }
-
-    /// K1: Get the create-room form fields.
-    pub fn create_room_local(&self) -> &str {
-        &self.create_room_local
-    }
-
-    pub fn create_room_service(&self) -> &str {
-        &self.create_room_service
-    }
-
-    pub fn create_room_nick(&self) -> &str {
-        &self.create_room_nick
-    }
-
-    /// H3: Returns the pending rename (jid, new_name) if SubmitRename was triggered.
-    pub fn pending_rename(&self) -> Option<(&str, &str)> {
-        self.rename_state
-            .as_ref()
-            .map(|(jid, name)| (jid.as_str(), name.as_str()))
-    }
-
-    pub fn update(&mut self, msg: Message) -> Task<Message> {
+    pub fn update(&mut self, msg: Message) -> Action {
         match msg {
             Message::SelectContact(jid) => {
-                self.selected_jid = Some(jid);
+                self.selected_jid = Some(jid.clone());
                 self.selected_profile = None;
+                return Action::SelectContact(jid);
             }
             Message::ToggleAddContact => {
                 self.show_add_contact = !self.show_add_contact;
@@ -174,12 +166,14 @@ impl SidebarScreen {
                 self.add_contact_input = v;
             }
             Message::SubmitAddContact => {
-                // ChatScreen will intercept this
+                let jid = std::mem::take(&mut self.add_contact_input);
                 self.show_add_contact = false;
-                self.add_contact_input.clear();
+                if !jid.trim().is_empty() {
+                    return Action::AddContact(jid);
+                }
             }
-            Message::RemoveContact(_jid) => {
-                // ChatScreen intercepts this to send command to engine
+            Message::RemoveContact(jid) => {
+                return Action::RemoveContact(jid);
             }
             Message::StartRename(jid, current_name) => {
                 self.rename_state = Some((jid, current_name));
@@ -190,8 +184,11 @@ impl SidebarScreen {
                 }
             }
             Message::SubmitRename => {
-                // ChatScreen will intercept this; clear state after
-                self.rename_state = None;
+                if let Some((jid, name)) = self.rename_state.take() {
+                    if !name.trim().is_empty() {
+                        return Action::RenameContact { jid, name };
+                    }
+                }
             }
             Message::CancelRename => {
                 self.rename_state = None;
@@ -214,10 +211,12 @@ impl SidebarScreen {
                 self.join_room_nick = v;
             }
             Message::SubmitJoinRoom => {
-                // ChatScreen intercepts this to send JoinRoom command to engine
+                let jid = std::mem::take(&mut self.join_room_jid);
+                let nick = std::mem::take(&mut self.join_room_nick);
                 self.show_join_room = false;
-                self.join_room_jid.clear();
-                self.join_room_nick.clear();
+                if !jid.trim().is_empty() && !nick.trim().is_empty() {
+                    return Action::JoinRoom { jid, nick };
+                }
             }
             // K1: create room
             Message::ToggleCreateRoom => {
@@ -230,30 +229,37 @@ impl SidebarScreen {
             Message::CreateRoomServiceChanged(v) => self.create_room_service = v,
             Message::CreateRoomNickChanged(v) => self.create_room_nick = v,
             Message::SubmitCreateRoom => {
-                // ChatScreen intercepts this
+                let local = std::mem::take(&mut self.create_room_local);
+                let service = std::mem::take(&mut self.create_room_service);
+                let nick = std::mem::take(&mut self.create_room_nick);
                 self.show_create_room = false;
-                self.create_room_local.clear();
-                self.create_room_service.clear();
-                self.create_room_nick.clear();
+                if !local.trim().is_empty() && !service.trim().is_empty() && !nick.trim().is_empty()
+                {
+                    return Action::CreateRoom {
+                        local,
+                        service,
+                        nick,
+                    };
+                }
             }
             Message::OpenAccountSwitcher => {
-                // Handled by the parent (ChatScreen / App); close menu.
                 self.show_account_menu = false;
+                return Action::OpenAccountSwitcher;
             }
             // UX-2: account menu popover
             Message::ToggleAccountMenu => {
                 self.show_account_menu = !self.show_account_menu;
             }
-            Message::SetPresence(_) => {
-                // Handled by ChatScreen / App; close menu after selection.
+            Message::SetPresence(status) => {
                 self.show_account_menu = false;
+                return Action::SetPresence(status);
             }
             Message::OpenSettings => {
-                // Handled by ChatScreen / App; close menu after selection.
                 self.show_account_menu = false;
+                return Action::OpenSettings;
             }
         }
-        Task::none()
+        Action::None
     }
 
     /// G6: render sidebar with optional draft indicators.
@@ -262,12 +268,14 @@ impl SidebarScreen {
     /// `active_account` is the currently active account for the indicator bar
     /// (pass `None` when operating in single-account mode or before login).
     /// `unread_total` is the aggregate unread count shown on the indicator badge.
+    /// `muc_rooms` is the set of JIDs that are MUC rooms (shown with a # prefix).
     pub fn view_with_drafts(
         &self,
         drafts: &[String],
         default_conference_service: &str,
         active_account: Option<(&AccountId, usize)>,
-        avatars: &HashMap<String, Vec<u8>>,
+        vctx: &super::ViewContext<'_>,
+        muc_rooms: &std::collections::HashSet<String>,
     ) -> Element<'_, Message> {
         // MULTI: account indicator bar — shown at the very top of the sidebar
         // when an account is active. Displays a colored dot, truncated JID,
@@ -423,16 +431,18 @@ impl SidebarScreen {
                 let available = self.presence.get(c.jid.as_str()).copied().unwrap_or(false);
                 let indicator = if available { "●" } else { "○" };
                 let display_name = c.name.as_deref().unwrap_or(&c.jid);
+                let is_muc = muc_rooms.contains(&c.jid);
+                let muc_prefix = if is_muc { "# " } else { "" };
                 // G6: append [draft] if this JID has a non-empty draft
                 let has_draft = drafts.iter().any(|d| d == &c.jid);
                 let name_label = if has_draft {
-                    format!("{} {} [draft]", indicator, display_name)
+                    format!("{}{} {} [draft]", indicator, muc_prefix, display_name)
                 } else {
-                    format!("{} {}", indicator, display_name)
+                    format!("{}{} {}", indicator, muc_prefix, display_name)
                 };
 
                 // H5/H1: avatar image if available, otherwise colored initial (32x32)
-                let avatar: Element<Message> = if let Some(png) = avatars.get(c.jid.as_str()) {
+                let avatar: Element<Message> = if let Some(png) = vctx.avatars.get(c.jid.as_str()) {
                     let handle = iced::widget::image::Handle::from_bytes(png.clone());
                     image(handle).width(32).height(32).into()
                 } else {
@@ -549,36 +559,26 @@ impl SidebarScreen {
         }
         // UX-2: account menu popover — presence options + settings
         if self.show_account_menu {
-            let available_btn = button(
-                text("● Available").size(12).shaping(Shaping::Advanced),
-            )
-            .on_press(Message::SetPresence(PresenceStatus::Available))
-            .width(Length::Fill)
-            .padding([4, 8]);
-            let away_btn = button(
-                text("◐ Away").size(12).shaping(Shaping::Advanced),
-            )
-            .on_press(Message::SetPresence(PresenceStatus::Away))
-            .width(Length::Fill)
-            .padding([4, 8]);
-            let dnd_btn = button(
-                text("⛔ DND").size(12).shaping(Shaping::Advanced),
-            )
-            .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
-            .width(Length::Fill)
-            .padding([4, 8]);
-            let settings_btn = button(
-                text("⚙ Settings").size(12).shaping(Shaping::Advanced),
-            )
-            .on_press(Message::OpenSettings)
-            .width(Length::Fill)
-            .padding([4, 8]);
-            let switch_btn = button(
-                text("Switch Account").size(12),
-            )
-            .on_press(Message::OpenAccountSwitcher)
-            .width(Length::Fill)
-            .padding([4, 8]);
+            let available_btn = button(text("● Available").size(12).shaping(Shaping::Advanced))
+                .on_press(Message::SetPresence(PresenceStatus::Available))
+                .width(Length::Fill)
+                .padding([4, 8]);
+            let away_btn = button(text("◐ Away").size(12).shaping(Shaping::Advanced))
+                .on_press(Message::SetPresence(PresenceStatus::Away))
+                .width(Length::Fill)
+                .padding([4, 8]);
+            let dnd_btn = button(text("⛔ DND").size(12).shaping(Shaping::Advanced))
+                .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
+                .width(Length::Fill)
+                .padding([4, 8]);
+            let settings_btn = button(text("⚙ Settings").size(12).shaping(Shaping::Advanced))
+                .on_press(Message::OpenSettings)
+                .width(Length::Fill)
+                .padding([4, 8]);
+            let switch_btn = button(text("Switch Account").size(12))
+                .on_press(Message::OpenAccountSwitcher)
+                .width(Length::Fill)
+                .padding([4, 8]);
             let menu_col = column![
                 available_btn,
                 away_btn,

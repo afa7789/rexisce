@@ -20,6 +20,26 @@ use super::{
     sidebar::{self, SidebarScreen},
 };
 
+/// Actions returned by `ChatScreen::update()` to signal the parent (App).
+pub enum Action {
+    /// No parent action needed.
+    None,
+    /// An async task that produces further Messages for this chat screen.
+    Task(Task<Message>),
+    /// Navigate to the settings screen.
+    OpenSettings,
+    /// Open the account switcher overlay.
+    OpenAccountSwitcher,
+    /// Open the OMEMO trust dialog for a peer JID.
+    OpenOmemoTrust(String),
+    /// User changed their presence status (App needs to track own_presence).
+    SetPresence(PresenceStatus),
+    /// User toggled mute on a JID (App needs to persist muted_jids).
+    ToggleMute(String),
+    /// A conversation was selected — App needs to fire history load + mark-read.
+    ContactSelected(String),
+}
+
 /// K3: An incoming room invitation pending user action.
 #[derive(Debug, Clone)]
 struct PendingInvitation {
@@ -40,8 +60,6 @@ pub struct ChatScreen {
     pending_commands: Vec<XmppCommand>,
     /// G2: peers currently typing: JID → instant they last sent composing
     typing_peers: HashMap<String, std::time::Instant>,
-    /// H1: avatar cache (bare JID → PNG bytes)
-    avatars: HashMap<String, Vec<u8>>,
     /// E4: pending upload targets (target_jid, file_path) to be consumed by App
     pending_upload_targets: Vec<(String, std::path::PathBuf)>,
     /// D1: occupant panels for MUC rooms (room JID → panel)
@@ -78,6 +96,7 @@ pub enum Message {
     CloseConversation(String),        // G1: close a conversation by JID
     PeerTyping(String, bool),         // G2: (jid, composing)
     OpenSettings,                     // F3: open settings panel
+    OpenAccountSwitcher,              // MULTI: open account switcher panel
     ToggleMute(String),               // J3: toggle mute for a JID
     SetPresence(PresenceStatus),      // C2: user changed their presence status
     MessageDelivered(String, String), // M2: (jid, msg_id) — K4 delivery receipt
@@ -129,7 +148,6 @@ impl ChatScreen {
             active_jid: None,
             pending_commands: vec![],
             typing_peers: HashMap::new(),
-            avatars: HashMap::new(),
             pending_upload_targets: vec![],
             muc_panels: HashMap::new(),
             muc_jids: std::collections::HashSet::new(),
@@ -152,11 +170,6 @@ impl ChatScreen {
     pub fn set_active_account(&mut self, id: Option<AccountId>, unread: usize) {
         self.active_account_id = id;
         self.account_unread = unread;
-    }
-
-    /// H1: store a received avatar PNG for a JID.
-    pub fn on_avatar_received(&mut self, jid: String, png_bytes: Vec<u8>) {
-        self.avatars.insert(jid, png_bytes);
     }
 
     /// E4: drain pending upload targets (target_jid, file_path) queued by Send with attachments.
@@ -403,56 +416,50 @@ impl ChatScreen {
             .map(|m| m.id.clone())
     }
 
-    pub fn update(&mut self, msg: Message) -> Task<Message> {
+    pub fn update(&mut self, msg: Message) -> Action {
         match msg {
             Message::Sidebar(smsg) => {
-                // H3: intercept SubmitAddContact before routing
-                if let sidebar::Message::SubmitAddContact = smsg {
-                    let jid = self.sidebar.add_contact_jid().to_owned();
-                    if !jid.trim().is_empty() {
+                match self.sidebar.update(smsg) {
+                    sidebar::Action::None => Action::None,
+                    sidebar::Action::Task(t) => Action::Task(t.map(Message::Sidebar)),
+                    sidebar::Action::SelectContact(jid) => {
+                        let own_jid = self.own_jid.clone();
+                        self.conversations
+                            .entry(jid.clone())
+                            .or_insert_with(|| ConversationView::new(jid.clone(), own_jid));
+                        self.active_jid = Some(jid.clone());
+                        // B5: clear unread count when conversation is opened
+                        self.sidebar.clear_unread(&jid);
+                        // L1: record seen count so new messages can be highlighted
+                        if let Some(convo) = self.conversations.get_mut(&jid) {
+                            convo.mark_seen();
+                        }
+                        Action::ContactSelected(jid)
+                    }
+                    sidebar::Action::AddContact(jid) => {
                         self.pending_commands
                             .push(crate::xmpp::XmppCommand::AddContact(jid));
+                        Action::None
                     }
-                    let _ = self.sidebar.update(smsg);
-                    return Task::none();
-                }
-
-                // H3: intercept RemoveContact
-                if let sidebar::Message::RemoveContact(ref jid) = smsg {
-                    let jid = jid.clone();
-                    self.pending_commands
-                        .push(crate::xmpp::XmppCommand::RemoveContact(jid));
-                    return Task::none();
-                }
-
-                // D3: intercept SubmitJoinRoom
-                if let sidebar::Message::SubmitJoinRoom = smsg {
-                    let jid = self.sidebar.join_room_jid().to_owned();
-                    let nick = self.sidebar.join_room_nick().to_owned();
-                    if !jid.trim().is_empty() && !nick.trim().is_empty() {
-                        // D1: register the room so the occupant panel is shown
+                    sidebar::Action::RemoveContact(jid) => {
+                        self.pending_commands
+                            .push(crate::xmpp::XmppCommand::RemoveContact(jid));
+                        Action::None
+                    }
+                    sidebar::Action::JoinRoom { jid, nick } => {
                         self.on_join_room(&jid);
-                        // L2: record own nick for this room
                         self.muc_own_nicks.insert(jid.clone(), nick.clone());
                         self.pending_commands
                             .push(crate::xmpp::XmppCommand::JoinRoom { jid, nick });
+                        Action::None
                     }
-                    let _ = self.sidebar.update(smsg);
-                    return Task::none();
-                }
-
-                // K1: intercept SubmitCreateRoom
-                if let sidebar::Message::SubmitCreateRoom = smsg {
-                    let local = self.sidebar.create_room_local().to_owned();
-                    let service = self.sidebar.create_room_service().to_owned();
-                    let nick = self.sidebar.create_room_nick().to_owned();
-                    if !local.trim().is_empty()
-                        && !service.trim().is_empty()
-                        && !nick.trim().is_empty()
-                    {
+                    sidebar::Action::CreateRoom {
+                        local,
+                        service,
+                        nick,
+                    } => {
                         let room_jid = format!("{}@{}", local, service);
                         self.on_join_room(&room_jid);
-                        // L2: record own nick for this room
                         self.muc_own_nicks.insert(room_jid.clone(), nick.clone());
                         self.pending_commands
                             .push(crate::xmpp::XmppCommand::CreateRoom {
@@ -460,55 +467,21 @@ impl ChatScreen {
                                 service,
                                 nick,
                             });
+                        Action::None
                     }
-                    let _ = self.sidebar.update(smsg);
-                    return Task::none();
-                }
-
-                // H3: intercept SubmitRename
-                if let sidebar::Message::SubmitRename = smsg {
-                    if let Some((jid, name)) = self.sidebar.pending_rename() {
-                        let jid = jid.to_owned();
-                        let name = name.to_owned();
-                        if !name.trim().is_empty() {
-                            self.pending_commands
-                                .push(crate::xmpp::XmppCommand::RenameContact { jid, name });
-                        }
+                    sidebar::Action::RenameContact { jid, name } => {
+                        self.pending_commands
+                            .push(crate::xmpp::XmppCommand::RenameContact { jid, name });
+                        Action::None
                     }
-                    let _ = self.sidebar.update(smsg);
-                    return Task::none();
-                }
-
-                // When user selects a contact, open (or switch to) that conversation.
-                if let sidebar::Message::SelectContact(ref jid) = smsg {
-                    let jid = jid.clone();
-                    let own_jid = self.own_jid.clone();
-                    self.conversations
-                        .entry(jid.clone())
-                        .or_insert_with(|| ConversationView::new(jid.clone(), own_jid));
-                    self.active_jid = Some(jid.clone());
-                    // B5: clear unread count when conversation is opened
-                    self.sidebar.clear_unread(&jid);
-                    // L1: record seen count so new messages can be highlighted
-                    if let Some(convo) = self.conversations.get_mut(&jid) {
-                        convo.mark_seen();
+                    sidebar::Action::SetPresence(status) => {
+                        self.pending_commands
+                            .push(XmppCommand::SetPresence(status.clone()));
+                        Action::SetPresence(status)
                     }
+                    sidebar::Action::OpenSettings => Action::OpenSettings,
+                    sidebar::Action::OpenAccountSwitcher => Action::OpenAccountSwitcher,
                 }
-
-                // UX-2: intercept SetPresence from account menu popover
-                if let sidebar::Message::SetPresence(ref status) = smsg {
-                    let status = status.clone();
-                    let _ = self.sidebar.update(smsg);
-                    return self.update(Message::SetPresence(status));
-                }
-
-                // UX-2: intercept OpenSettings from account menu popover
-                if let sidebar::Message::OpenSettings = smsg {
-                    let _ = self.sidebar.update(smsg);
-                    return self.update(Message::OpenSettings);
-                }
-
-                self.sidebar.update(smsg).map(Message::Sidebar)
             }
 
             Message::CloseConversation(jid) => {
@@ -516,9 +489,10 @@ impl ChatScreen {
                 if self.active_jid.as_deref() == Some(jid.as_str()) {
                     self.active_jid = None;
                 }
-                Task::none()
+                Action::None
             }
-            Message::OpenSettings => Task::none(), // handled by App
+            Message::OpenSettings => Action::OpenSettings,
+            Message::OpenAccountSwitcher => Action::OpenAccountSwitcher,
 
             Message::PeerTyping(jid, composing) => {
                 if composing {
@@ -526,23 +500,21 @@ impl ChatScreen {
                 } else {
                     self.typing_peers.remove(&jid);
                 }
-                Task::none()
+                Action::None
             }
 
             Message::ToggleMute(jid) => {
                 if let Some(convo) = self.conversations.get_mut(&jid) {
                     convo.is_muted = !convo.is_muted;
-                    let is_now_muted = convo.is_muted;
-                    // Store mute state; App intercepts this message to persist
-                    let _ = is_now_muted;
                 }
-                Task::none()
+                Action::ToggleMute(jid)
             }
 
             Message::SetPresence(status) => {
                 // C2: queue SetPresence command for the engine (App drains pending_commands)
-                self.pending_commands.push(XmppCommand::SetPresence(status));
-                Task::none()
+                self.pending_commands
+                    .push(XmppCommand::SetPresence(status.clone()));
+                Action::SetPresence(status)
             }
 
             // M2: K4 delivery receipt — update message state
@@ -550,7 +522,7 @@ impl ChatScreen {
                 if let Some(convo) = self.conversations.get_mut(&jid) {
                     let _ = convo.update(conversation::Message::MessageDelivered(msg_id));
                 }
-                Task::none()
+                Action::None
             }
 
             // M2: K5 read marker — update message state
@@ -558,13 +530,13 @@ impl ChatScreen {
                 if let Some(convo) = self.conversations.get_mut(&jid) {
                     let _ = convo.update(conversation::Message::MessageRead(msg_id));
                 }
-                Task::none()
+                Action::None
             }
 
             // K1: room config form received from server
             Message::RoomConfigFormReceived(room_jid, config) => {
                 self.pending_room_config = Some((room_jid, config));
-                Task::none()
+                Action::None
             }
             // K1: room configuration accepted — room is now live
             Message::RoomConfigured(room_jid) => {
@@ -574,36 +546,36 @@ impl ChatScreen {
                     .entry(room_jid.clone())
                     .or_insert_with(|| ConversationView::new(room_jid.clone(), own));
                 self.active_jid = Some(room_jid);
-                Task::none()
+                Action::None
             }
             Message::RoomConfigNameChanged(v) => {
                 if let Some((_, ref mut cfg)) = self.pending_room_config {
                     cfg.room_name = Some(v);
                 }
-                Task::none()
+                Action::None
             }
             Message::RoomConfigPublicChanged(v) => {
                 if let Some((_, ref mut cfg)) = self.pending_room_config {
                     cfg.public = Some(v);
                 }
-                Task::none()
+                Action::None
             }
             Message::RoomConfigPersistentChanged(v) => {
                 if let Some((_, ref mut cfg)) = self.pending_room_config {
                     cfg.persistent_room = Some(v);
                 }
-                Task::none()
+                Action::None
             }
             Message::SubmitRoomConfig => {
                 if let Some((room_jid, config)) = self.pending_room_config.take() {
                     self.pending_commands
                         .push(crate::xmpp::XmppCommand::ConfigureRoom { room_jid, config });
                 }
-                Task::none()
+                Action::None
             }
             Message::DismissRoomConfig => {
                 self.pending_room_config = None;
-                Task::none()
+                Action::None
             }
 
             // K3: incoming invitation received from engine event
@@ -619,7 +591,7 @@ impl ChatScreen {
                     from_jid,
                     reason,
                 });
-                Task::none()
+                Action::None
             }
 
             // K3: user accepted an incoming invitation — join the room
@@ -632,33 +604,33 @@ impl ChatScreen {
                     jid: room_jid,
                     nick,
                 });
-                Task::none()
+                Action::None
             }
 
             // K3: user declined an incoming invitation — just remove it, no XMPP stanza needed
             Message::DeclineInvitation(room_jid) => {
                 self.pending_invitations.retain(|i| i.room_jid != room_jid);
-                Task::none()
+                Action::None
             }
 
             // K3: open the outgoing invite dialog for a given room
             Message::OpenInviteDialog(room_jid) => {
                 self.pending_invite_dialog = Some((room_jid, String::new(), String::new()));
-                Task::none()
+                Action::None
             }
 
             Message::InviteJidChanged(v) => {
                 if let Some((_, ref mut invitee, _)) = self.pending_invite_dialog {
                     *invitee = v;
                 }
-                Task::none()
+                Action::None
             }
 
             Message::InviteReasonChanged(v) => {
                 if let Some((_, _, ref mut reason)) = self.pending_invite_dialog {
                     *reason = v;
                 }
-                Task::none()
+                Action::None
             }
 
             // K3: send the invitation and close the dialog
@@ -677,36 +649,47 @@ impl ChatScreen {
                         });
                     }
                 }
-                Task::none()
+                Action::None
             }
 
             Message::DismissInviteDialog => {
                 self.pending_invite_dialog = None;
-                Task::none()
+                Action::None
             }
 
             // K2: room list received from MUC service — store for browse dialog
             Message::RoomListReceived(rooms) => {
                 self.public_rooms = rooms;
-                Task::none()
+                Action::None
             }
 
             Message::Conversation(jid, cmsg) => {
                 // J3: intercept ToggleMute to bubble up to App
                 if let super::conversation::Message::ToggleMute = cmsg {
-                    return self.update(Message::ToggleMute(jid));
+                    if let Some(convo) = self.conversations.get_mut(&jid) {
+                        convo.is_muted = !convo.is_muted;
+                    }
+                    return Action::ToggleMute(jid);
                 }
 
                 // G1: intercept Close to remove the conversation
                 if let super::conversation::Message::Close = cmsg {
-                    return self.update(Message::CloseConversation(jid));
+                    self.conversations.remove(&jid);
+                    if self.active_jid.as_deref() == Some(jid.as_str()) {
+                        self.active_jid = None;
+                    }
+                    return Action::None;
                 }
 
                 // C4: intercept BlockPeer to queue a block command for the engine
                 if let super::conversation::Message::BlockPeer = cmsg {
                     self.pending_commands
                         .push(crate::xmpp::XmppCommand::BlockJid(jid.clone()));
-                    return self.update(Message::CloseConversation(jid));
+                    self.conversations.remove(&jid);
+                    if self.active_jid.as_deref() == Some(jid.as_str()) {
+                        self.active_jid = None;
+                    }
+                    return Action::None;
                 }
 
                 // C4: intercept UnblockPeer to queue an unblock command
@@ -716,7 +699,7 @@ impl ChatScreen {
                     if let Some(convo) = self.conversations.get_mut(&jid) {
                         convo.peer_blocked = false;
                     }
-                    return Task::none();
+                    return Action::None;
                 }
 
                 // G2: intercept ComposingStarted/Paused to send chat state to server
@@ -725,14 +708,14 @@ impl ChatScreen {
                         to: jid.clone(),
                         composing: true,
                     });
-                    return Task::none();
+                    return Action::None;
                 }
                 if let super::conversation::Message::ComposingPaused = cmsg {
                     self.pending_commands.push(XmppCommand::SendChatState {
                         to: jid.clone(),
                         composing: false,
                     });
-                    return Task::none();
+                    return Action::None;
                 }
 
                 // E3: intercept SendReaction to queue a reaction command for the engine.
@@ -752,12 +735,11 @@ impl ChatScreen {
                             msg_id: msg_id.clone(),
                             emojis: vec![emoji.clone()],
                         });
-                    return Task::none();
+                    return Action::None;
                 }
 
                 // R1: intercept RetractReaction — update local state + send empty reaction set
                 if let super::conversation::Message::RetractReaction(ref msg_id, ref emoji) = cmsg {
-                    // Remove emoji locally and collect remaining own reactions
                     let remaining: Vec<String> =
                         if let Some(convo) = self.conversations.get_mut(&jid) {
                             let own = &self.own_jid;
@@ -774,14 +756,13 @@ impl ChatScreen {
                         } else {
                             vec![]
                         };
-                    // Send the new (reduced) emoji set to the server
                     self.pending_commands
                         .push(crate::xmpp::XmppCommand::SendReaction {
                             to: jid.clone(),
                             msg_id: msg_id.clone(),
                             emojis: remaining,
                         });
-                    return Task::none();
+                    return Action::None;
                 }
 
                 // E2: intercept RetractMessage to send retraction to engine and apply tombstone
@@ -795,7 +776,7 @@ impl ChatScreen {
                             to: jid.clone(),
                             origin_id: mid,
                         });
-                    return Task::none();
+                    return Action::None;
                 }
 
                 // L3: intercept ModerateMessage — apply local tombstone + send moderation stanza
@@ -812,186 +793,38 @@ impl ChatScreen {
                             message_id: mid,
                             reason: rsn,
                         });
-                    return Task::none();
+                    return Action::None;
+                }
+
+                // OMEMO: intercept OpenOmemoTrust to bubble up to App
+                if let super::conversation::Message::OpenOmemoTrust(ref peer_jid) = cmsg {
+                    return Action::OpenOmemoTrust(peer_jid.clone());
                 }
 
                 // E4/I3: intercept OpenFilePicker to spawn picker task
                 if let super::conversation::Message::OpenFilePicker = cmsg {
                     if let Some(convo) = self.conversations.get_mut(&jid) {
-                        return convo
+                        let task = convo
                             .update(super::conversation::Message::OpenFilePicker)
                             .map(move |m| Message::Conversation(jid.clone(), m));
+                        return Action::Task(task);
                     }
-                    return Task::none();
+                    return Action::None;
                 }
 
                 // Intercept Send to queue a command for the engine.
                 if let super::conversation::Message::Send = cmsg {
-                    if let Some(convo) = self.conversations.get_mut(&jid) {
-                        // E4/I3: if there are pending attachments, request upload slots first
-                        if !convo.pending_attachments.is_empty() {
-                            let attachments = std::mem::take(&mut convo.pending_attachments);
-                            for att in attachments {
-                                let mime = if att.name.ends_with(".png") {
-                                    "image/png"
-                                } else if att.name.ends_with(".jpg") || att.name.ends_with(".jpeg")
-                                {
-                                    "image/jpeg"
-                                } else if att.name.ends_with(".gif") {
-                                    "image/gif"
-                                } else if att.name.ends_with(".wav") {
-                                    // M4: voice message WAV file
-                                    "audio/wav"
-                                } else {
-                                    "application/octet-stream"
-                                };
-                                self.pending_upload_targets.push((jid.clone(), att.path));
-                                self.pending_commands.push(
-                                    crate::xmpp::XmppCommand::RequestUploadSlot {
-                                        filename: att.name,
-                                        size: att.size,
-                                        mime: mime.to_string(),
-                                    },
-                                );
-                            }
-                            // BUG-6: reset the conversation's voice state machine so the
-                            // composer reappears after a voice note is queued for upload.
-                            // Without this call the conversation stays in VoiceState::Uploading
-                            // forever and the text input remains hidden.
-                            let _ = convo.update(super::conversation::Message::Send);
-                            return Task::none();
-                        }
-
-                        // E1: if in edit mode, send correction instead
-                        if let Some((original_id, _)) = convo.take_edit_mode() {
-                            let new_body = convo.take_draft();
-                            if !new_body.trim().is_empty() {
-                                convo.apply_correction(&original_id, &new_body);
-                                self.pending_commands.push(
-                                    crate::xmpp::XmppCommand::SendCorrection {
-                                        to: jid.clone(),
-                                        original_id,
-                                        new_body,
-                                    },
-                                );
-                            }
-                            return Task::none();
-                        }
-
-                        let body = convo.take_draft();
-                        if !body.trim().is_empty() {
-                            // Generate the message ID once so the stanza ID
-                            // matches the local DisplayMessage — reactions and
-                            // corrections reference this ID.
-                            let msg_id = uuid::Uuid::new_v4().to_string();
-                            // Also push the message to our own view optimistically.
-                            let own_jid = self.own_jid.clone();
-                            convo.push_message(DisplayMessage {
-                                id: msg_id.clone(),
-                                from: own_jid.clone(),
-                                body: body.clone(),
-                                own: true,
-                                timestamp: chrono::Utc::now().timestamp_millis(),
-                                reply_preview: None,
-                                edited: false,
-                                retracted: false,
-                                is_encrypted: false,
-                            });
-
-                            // E5: spawn link preview fetch tasks for any URLs in the message
-                            let pending = convo.take_pending_previews();
-                            if !pending.is_empty() {
-                                let jid_for_preview = jid.clone();
-                                let jid_for_cmd = jid.clone();
-                                let body_clone = body.clone();
-                                let preview_task: Task<Message> = Task::future(async move {
-                                    for (msg_id, url) in pending {
-                                        let client = reqwest::Client::new();
-                                        match client
-                                            .get(&url)
-                                            .timeout(std::time::Duration::from_secs(10))
-                                            .send()
-                                            .await
-                                        {
-                                            Ok(resp) => {
-                                                if let Ok(html) = resp.text().await {
-                                                    let preview = crate::xmpp::modules::link_preview::parse_preview(&url, &html);
-                                                    if preview.title.is_some()
-                                                        || preview.description.is_some()
-                                                        || preview.image_url.is_some()
-                                                    {
-                                                        return Message::Conversation(
-                                                                jid_for_preview.clone(),
-                                                                super::conversation::Message::LinkPreviewReady(msg_id, preview),
-                                                            );
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                tracing::debug!(
-                                                    "E5: failed to fetch link preview for {}: {}",
-                                                    url,
-                                                    e
-                                                );
-                                            }
-                                        }
-                                    }
-                                    Message::Conversation(
-                                        jid_for_preview,
-                                        super::conversation::Message::Send,
-                                    )
-                                });
-                                // OMEMO Phase 2: encrypt if per-conversation toggle is on
-                                let use_omemo = self
-                                    .conversations
-                                    .get(&jid_for_cmd)
-                                    .is_some_and(|cv| cv.is_encryption_enabled);
-                                if use_omemo {
-                                    self.pending_commands
-                                        .push(XmppCommand::OmemoEncryptMessage {
-                                            to: jid_for_cmd,
-                                            body: body_clone,
-                                        });
-                                } else {
-                                    self.pending_commands.push(XmppCommand::SendMessage {
-                                        to: jid_for_cmd,
-                                        body: body_clone,
-                                        id: msg_id.clone(),
-                                    });
-                                }
-                                return preview_task;
-                            }
-
-                            // OMEMO Phase 2: encrypt if per-conversation toggle is on
-                            let use_omemo = self
-                                .conversations
-                                .get(&jid)
-                                .is_some_and(|cv| cv.is_encryption_enabled);
-                            if use_omemo {
-                                self.pending_commands
-                                    .push(XmppCommand::OmemoEncryptMessage {
-                                        to: jid.clone(),
-                                        body,
-                                    });
-                            } else {
-                                self.pending_commands.push(XmppCommand::SendMessage {
-                                    to: jid.clone(),
-                                    body,
-                                    id: msg_id,
-                                });
-                            }
-                        }
-                    }
-                    return Task::none();
+                    return Action::Task(self.handle_send(jid));
                 }
 
                 if let Some(convo) = self.conversations.get_mut(&jid) {
                     let jid2 = jid.clone();
-                    convo
+                    let task = convo
                         .update(cmsg)
-                        .map(move |m| Message::Conversation(jid2.clone(), m))
+                        .map(move |m| Message::Conversation(jid2.clone(), m));
+                    Action::Task(task)
                 } else {
-                    Task::none()
+                    Action::None
                 }
             }
 
@@ -999,12 +832,13 @@ impl ChatScreen {
             Message::VoiceTick => {
                 if let Some(jid) = self.active_jid.clone() {
                     if let Some(convo) = self.conversations.get_mut(&jid) {
-                        return convo
+                        let task = convo
                             .update(super::conversation::Message::VoiceTick)
                             .map(move |m| Message::Conversation(jid.clone(), m));
+                        return Action::Task(task);
                     }
                 }
-                Task::none()
+                Action::None
             }
 
             // R3: Ctrl+B — wrap composer text in bold markers (**text**)
@@ -1012,12 +846,13 @@ impl ChatScreen {
                 if let Some(jid) = self.active_jid.clone() {
                     if let Some(convo) = self.conversations.get_mut(&jid) {
                         let new_text = apply_markdown_wrap(&convo.composer, "**");
-                        return convo
+                        let task = convo
                             .update(super::conversation::Message::ComposerChanged(new_text))
                             .map(move |m| Message::Conversation(jid.clone(), m));
+                        return Action::Task(task);
                     }
                 }
-                Task::none()
+                Action::None
             }
 
             // R3: Ctrl+I — wrap composer text in italic markers (*text*)
@@ -1025,16 +860,170 @@ impl ChatScreen {
                 if let Some(jid) = self.active_jid.clone() {
                     if let Some(convo) = self.conversations.get_mut(&jid) {
                         let new_text = apply_markdown_wrap(&convo.composer, "*");
-                        return convo
+                        let task = convo
                             .update(super::conversation::Message::ComposerChanged(new_text))
                             .map(move |m| Message::Conversation(jid.clone(), m));
+                        return Action::Task(task);
                     }
                 }
-                Task::none()
+                Action::None
             }
             // OMEMO: bubbled from conversation — handled by App
-            Message::OpenOmemoTrust(_) => Task::none(),
+            Message::OpenOmemoTrust(peer_jid) => Action::OpenOmemoTrust(peer_jid),
         }
+    }
+
+    /// Handle Send — process attachments, edits, or plain text sends.
+    fn handle_send(&mut self, jid: String) -> Task<Message> {
+        if let Some(convo) = self.conversations.get_mut(&jid) {
+            // E4/I3: if there are pending attachments, request upload slots first
+            if !convo.pending_attachments.is_empty() {
+                let attachments = std::mem::take(&mut convo.pending_attachments);
+                for att in attachments {
+                    let mime = if att.name.ends_with(".png") {
+                        "image/png"
+                    } else if att.name.ends_with(".jpg") || att.name.ends_with(".jpeg") {
+                        "image/jpeg"
+                    } else if att.name.ends_with(".gif") {
+                        "image/gif"
+                    } else if att.name.ends_with(".wav") {
+                        "audio/wav"
+                    } else {
+                        "application/octet-stream"
+                    };
+                    self.pending_upload_targets.push((jid.clone(), att.path));
+                    self.pending_commands
+                        .push(crate::xmpp::XmppCommand::RequestUploadSlot {
+                            filename: att.name,
+                            size: att.size,
+                            mime: mime.to_string(),
+                        });
+                }
+                // BUG-6: reset the conversation's voice state machine so the
+                // composer reappears after a voice note is queued for upload.
+                let _ = convo.update(super::conversation::Message::Send);
+                return Task::none();
+            }
+
+            // E1: if in edit mode, send correction instead
+            if let Some((original_id, _)) = convo.take_edit_mode() {
+                let new_body = convo.take_draft();
+                if !new_body.trim().is_empty() {
+                    convo.apply_correction(&original_id, &new_body);
+                    self.pending_commands
+                        .push(crate::xmpp::XmppCommand::SendCorrection {
+                            to: jid.clone(),
+                            original_id,
+                            new_body,
+                        });
+                }
+                return Task::none();
+            }
+
+            let body = convo.take_draft();
+            if !body.trim().is_empty() {
+                let msg_id = uuid::Uuid::new_v4().to_string();
+                let own_jid = self.own_jid.clone();
+                convo.push_message(DisplayMessage {
+                    id: msg_id.clone(),
+                    from: own_jid.clone(),
+                    body: body.clone(),
+                    own: true,
+                    timestamp: chrono::Utc::now().timestamp_millis(),
+                    reply_preview: None,
+                    edited: false,
+                    retracted: false,
+                    is_encrypted: false,
+                });
+
+                // E5: spawn link preview fetch tasks for any URLs in the message
+                let pending = convo.take_pending_previews();
+                if !pending.is_empty() {
+                    let jid_for_preview = jid.clone();
+                    let jid_for_cmd = jid.clone();
+                    let body_clone = body.clone();
+                    let preview_task: Task<Message> = Task::future(async move {
+                        for (msg_id, url) in pending {
+                            let client = reqwest::Client::new();
+                            match client
+                                .get(&url)
+                                .timeout(std::time::Duration::from_secs(10))
+                                .send()
+                                .await
+                            {
+                                Ok(resp) => {
+                                    if let Ok(html) = resp.text().await {
+                                        let preview =
+                                            crate::xmpp::modules::link_preview::parse_preview(
+                                                &url, &html,
+                                            );
+                                        if preview.title.is_some()
+                                            || preview.description.is_some()
+                                            || preview.image_url.is_some()
+                                        {
+                                            return Message::Conversation(
+                                                jid_for_preview.clone(),
+                                                super::conversation::Message::LinkPreviewReady(
+                                                    msg_id, preview,
+                                                ),
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::debug!(
+                                        "E5: failed to fetch link preview for {}: {}",
+                                        url,
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        Message::Conversation(
+                            jid_for_preview,
+                            super::conversation::Message::Send,
+                        )
+                    });
+                    let use_omemo = self
+                        .conversations
+                        .get(&jid_for_cmd)
+                        .is_some_and(|cv| cv.is_encryption_enabled);
+                    if use_omemo {
+                        self.pending_commands
+                            .push(XmppCommand::OmemoEncryptMessage {
+                                to: jid_for_cmd,
+                                body: body_clone,
+                            });
+                    } else {
+                        self.pending_commands.push(XmppCommand::SendMessage {
+                            to: jid_for_cmd,
+                            body: body_clone,
+                            id: msg_id.clone(),
+                        });
+                    }
+                    return preview_task;
+                }
+
+                let use_omemo = self
+                    .conversations
+                    .get(&jid)
+                    .is_some_and(|cv| cv.is_encryption_enabled);
+                if use_omemo {
+                    self.pending_commands
+                        .push(XmppCommand::OmemoEncryptMessage {
+                            to: jid.clone(),
+                            body,
+                        });
+                } else {
+                    self.pending_commands.push(XmppCommand::SendMessage {
+                        to: jid.clone(),
+                        body,
+                        id: msg_id,
+                    });
+                }
+            }
+        }
+        Task::none()
     }
 
     #[allow(dead_code)]
@@ -1044,7 +1033,7 @@ impl ChatScreen {
             .map_or("", |cv| cv.composer.as_str())
     }
 
-    pub fn view(&self, time_format: crate::config::TimeFormat) -> Element<'_, Message> {
+    pub fn view(&self, vctx: &super::ViewContext<'_>) -> Element<'_, Message> {
         // G6: collect JIDs that have a non-empty draft
         let drafts: Vec<String> = self
             .conversations
@@ -1066,7 +1055,13 @@ impl ChatScreen {
             .map(|id| (id, self.account_unread));
         let sidebar_view = self
             .sidebar
-            .view_with_drafts(&drafts, &conference_service, account_info, &self.avatars)
+            .view_with_drafts(
+                &drafts,
+                &conference_service,
+                account_info,
+                vctx,
+                &self.muc_jids,
+            )
             .map(Message::Sidebar);
 
         // K3: if there is a pending invite dialog, show it instead of the conversation
@@ -1201,11 +1196,9 @@ impl ChatScreen {
                                 .map_or("", String::as_str);
                             let conv_view = convo
                                 .view(
-                                    &self.avatars,
-                                    time_format,
+                                    vctx,
                                     occupants,
                                     own_nick,
-                                    self.omemo_enabled,
                                 )
                                 .map(move |m| Message::Conversation(jid2.clone(), m));
                             if is_typing {

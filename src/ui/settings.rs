@@ -1,7 +1,9 @@
 // F3: Settings panel screen
 
 use iced::{
-    widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, toggler},
+    widget::{
+        button, column, container, horizontal_space, row, scrollable, text, text_input, toggler,
+    },
     Alignment, Element, Length, Task,
 };
 
@@ -13,37 +15,28 @@ use crate::config::{self, Settings, Theme};
 // Section card helper — wraps grouped settings in a themed card container
 // ---------------------------------------------------------------------------
 
-fn settings_section<'a>(
-    title: &str,
-    content: Element<'a, Message>,
-) -> Element<'a, Message> {
-    let heading = text(title.to_string())
-        .size(18)
-        .font(iced::Font {
-            weight: iced::font::Weight::Bold,
-            ..Default::default()
-        });
+fn settings_section<'a>(title: &str, content: Element<'a, Message>) -> Element<'a, Message> {
+    let heading = text(title.to_string()).size(18).font(iced::Font {
+        weight: iced::font::Weight::Bold,
+        ..Default::default()
+    });
 
-    container(
-        column![heading, content].spacing(10),
-    )
-    .padding(15)
-    .width(Length::Fill)
-    .style(|theme: &iced::Theme| {
-        let palette = theme.extended_palette();
-        iced::widget::container::Style {
-            background: Some(iced::Background::Color(
-                palette.background.weak.color,
-            )),
-            border: iced::Border {
-                color: palette.background.strong.color,
-                width: 1.0,
-                radius: 10.0.into(),
-            },
-            ..Default::default()
-        }
-    })
-    .into()
+    container(column![heading, content].spacing(10))
+        .padding(15)
+        .width(Length::Fill)
+        .style(|theme: &iced::Theme| {
+            let palette = theme.extended_palette();
+            iced::widget::container::Style {
+                background: Some(iced::Background::Color(palette.background.weak.color)),
+                border: iced::Border {
+                    color: palette.background.strong.color,
+                    width: 1.0,
+                    radius: 10.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .into()
 }
 
 /// Build a segmented-control button: highlighted when active, transparent when inactive.
@@ -57,9 +50,7 @@ fn segmented_btn(
         b.style(|theme: &iced::Theme, status| {
             let palette = theme.extended_palette();
             let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    palette.primary.strong.color
-                }
+                button::Status::Hovered | button::Status::Pressed => palette.primary.strong.color,
                 _ => palette.primary.base.color,
             };
             button::Style {
@@ -184,6 +175,28 @@ pub enum Message {
     CopyToClipboard(String),
 }
 
+/// Actions emitted by `SettingsScreen::update()` for the parent App to handle.
+pub enum Action {
+    /// No parent action needed.
+    None,
+    /// An async task that produces further Messages for this settings screen.
+    Task(Task<Message>),
+    /// Navigate back to the previous screen.
+    GoBack,
+    /// User requested logout.
+    Logout,
+    /// Open the About screen.
+    OpenAbout,
+    /// Open the vCard editor.
+    OpenVCardEditor,
+    /// Enable OMEMO encryption.
+    EnableOmemo,
+    /// Avatar data ready for upload (data, mime_type).
+    AvatarSelected(Vec<u8>, String),
+    /// Clear all chat history from the database.
+    ClearHistory,
+}
+
 impl SettingsScreen {
     pub fn new(settings: Settings) -> Self {
         let mam_fetch_limit_input = settings.mam_fetch_limit.to_string();
@@ -231,7 +244,7 @@ impl SettingsScreen {
         std::mem::take(&mut self.pending_commands)
     }
 
-    pub fn update(&mut self, msg: Message) -> Task<Message> {
+    pub fn update(&mut self, msg: Message) -> Action {
         match msg {
             Message::ThemeToggled => {
                 self.settings.theme = match self.settings.theme {
@@ -239,31 +252,31 @@ impl SettingsScreen {
                     Theme::Light => Theme::Dark,
                 };
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::NotificationsToggled(enabled) => {
                 self.settings.notifications_enabled = enabled;
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::SoundToggled(enabled) => {
                 self.settings.sound_enabled = enabled;
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::FontSizeIncreased => {
                 if self.settings.font_size < 20 {
                     self.settings.font_size += 1;
                     let _ = config::save(&self.settings);
                 }
-                Task::none()
+                Action::None
             }
             Message::FontSizeDecreased => {
                 if self.settings.font_size > 12 {
                     self.settings.font_size -= 1;
                     let _ = config::save(&self.settings);
                 }
-                Task::none()
+                Action::None
             }
             Message::StatusInputChanged(value) => {
                 self.status_input = value.clone();
@@ -273,32 +286,32 @@ impl SettingsScreen {
                     Some(self.status_input.trim().to_string())
                 };
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::SendReceiptsToggled(enabled) => {
                 self.settings.send_receipts = enabled;
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::SendTypingToggled(enabled) => {
                 self.settings.send_typing = enabled;
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::SendReadMarkersToggled(enabled) => {
                 self.settings.send_read_markers = enabled;
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::MamModeSelected(mode) => {
                 self.settings.mam_default_mode = Some(mode.clone());
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::SystemThemeToggled(enabled) => {
                 self.settings.use_system_theme = enabled;
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::TimeFormatToggled(fmt) => {
                 self.settings.time_format = if fmt == "12h" {
@@ -307,9 +320,9 @@ impl SettingsScreen {
                     crate::config::TimeFormat::TwentyFourHour
                 };
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
-            Message::OpenAvatarPicker => Task::future(async {
+            Message::OpenAvatarPicker => Action::Task(Task::future(async {
                 let path = rfd::AsyncFileDialog::new()
                     .set_title("Select Avatar")
                     .add_filter("Images", &["png", "jpg", "jpeg", "gif"])
@@ -317,7 +330,7 @@ impl SettingsScreen {
                     .await
                     .map(|f| f.path().to_path_buf());
                 Message::AvatarFilePicked(path)
-            }),
+            })),
             Message::AvatarFilePicked(Some(path)) => {
                 let mime = if path
                     .extension()
@@ -347,7 +360,7 @@ impl SettingsScreen {
                             );
                             self.crop_state = Some(state);
                             self.crop_raw = Some((bytes, mime.to_string()));
-                            return Task::done(Message::AvatarCropApply);
+                            return Action::Task(Task::done(Message::AvatarCropApply));
                         } else {
                             tracing::warn!("Failed to decode avatar image");
                         }
@@ -356,27 +369,27 @@ impl SettingsScreen {
                         tracing::warn!("Failed to read avatar file: {e}");
                     }
                 }
-                Task::none()
+                Action::None
             }
-            Message::AvatarFilePicked(None) => Task::none(),
+            Message::AvatarFilePicked(None) => Action::None,
             // DC-17: interactive crop — adjust state then re-apply.
             Message::AvatarCropPan(dx, dy) => {
                 if let Some(ref mut state) = self.crop_state {
                     state.pan(dx, dy);
                 }
-                Task::done(Message::AvatarCropApply)
+                Action::Task(Task::done(Message::AvatarCropApply))
             }
             Message::AvatarCropZoom(zoom) => {
                 if let Some(ref mut state) = self.crop_state {
                     state.set_zoom(zoom);
                 }
-                Task::done(Message::AvatarCropApply)
+                Action::Task(Task::done(Message::AvatarCropApply))
             }
             Message::AvatarCropRadius(radius) => {
                 if let Some(ref mut state) = self.crop_state {
                     state.set_radius(radius);
                 }
-                Task::done(Message::AvatarCropApply)
+                Action::Task(Task::done(Message::AvatarCropApply))
             }
             Message::AvatarCropApply => {
                 if let (Some(ref state), Some((ref bytes, ref mime))) =
@@ -384,40 +397,40 @@ impl SettingsScreen {
                 {
                     match crate::store::avatar_crop::crop_to_avatar(bytes, state, 256) {
                         Ok(cropped) => {
-                            return Task::done(Message::AvatarSelected(cropped, mime.clone()));
+                            return Action::Task(Task::done(Message::AvatarSelected(cropped, mime.clone())));
                         }
                         Err(e) => {
                             tracing::warn!("Avatar crop failed: {e}");
                         }
                     }
                 }
-                Task::none()
+                Action::None
             }
-            Message::AvatarSelected(data, _mime_type) => {
-                self.settings.avatar_data = Some(data);
+            Message::AvatarSelected(data, mime_type) => {
+                self.settings.avatar_data = Some(data.clone());
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::AvatarSelected(data, mime_type)
             }
             Message::SortContactsSelected(sort) => {
                 self.settings.contact_sort = sort.clone();
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             // K6: chat preferences
             Message::ShowJoinLeaveToggled(v) => {
                 self.settings.show_join_leave = v;
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::ShowTypingIndicatorsToggled(v) => {
                 self.settings.show_typing_indicators = v;
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::CompactLayoutToggled(v) => {
                 self.settings.compact_layout = v;
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
 
             // M3: blocklist
@@ -434,13 +447,13 @@ impl SettingsScreen {
                         }
                     }
                 }
-                Task::none()
+                Action::None
             }
 
             // M6: MAM fetch limit
             Message::MamFetchLimitChanged(v) => {
                 self.mam_fetch_limit_input = v;
-                Task::none()
+                Action::None
             }
             Message::MamFetchLimitConfirm => {
                 if let Ok(n) = self.mam_fetch_limit_input.trim().parse::<u32>() {
@@ -449,35 +462,32 @@ impl SettingsScreen {
                         let _ = config::save(&self.settings);
                     }
                 }
-                Task::none()
+                Action::None
             }
             // M6: clear history confirmation flow
             Message::ClearHistoryRequest => {
                 self.clear_history_confirm = true;
-                Task::none()
+                Action::None
             }
             Message::ClearHistoryConfirm => {
                 self.clear_history_confirm = false;
-                Task::none()
+                Action::ClearHistory
             }
             Message::ClearHistoryCancel => {
                 self.clear_history_confirm = false;
-                Task::none()
+                Action::None
             }
 
-            // AUTH-2: logout is handled by App::update intercepting this message.
-            Message::Logout => Task::none(),
-            // M7: OpenAbout is handled by App::update intercepting this message.
-            Message::OpenAbout => Task::none(),
-            // K2: OpenVCardEditor is handled by App::update intercepting this message.
-            Message::OpenVCardEditor => Task::none(),
-            Message::Back => Task::none(),
+            Message::Logout => Action::Logout,
+            Message::OpenAbout => Action::OpenAbout,
+            Message::OpenVCardEditor => Action::OpenVCardEditor,
+            Message::Back => Action::GoBack,
 
             // M5: network settings
             Message::ProxyTypeSelected(kind) => {
                 self.settings.proxy_type = if kind == "none" { None } else { Some(kind) };
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::ProxyHostChanged(v) => {
                 self.proxy_host_input = v.clone();
@@ -487,13 +497,13 @@ impl SettingsScreen {
                     Some(v.trim().to_string())
                 };
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::ProxyPortChanged(v) => {
                 self.proxy_port_input = v.clone();
                 self.settings.proxy_port = v.trim().parse::<u16>().ok();
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::ManualSrvChanged(v) => {
                 self.manual_srv_input = v.clone();
@@ -503,17 +513,16 @@ impl SettingsScreen {
                     Some(v.trim().to_string())
                 };
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
             Message::ForceTlsToggled(v) => {
                 self.settings.force_tls = v;
                 let _ = config::save(&self.settings);
-                Task::none()
+                Action::None
             }
-            // MEMO: EnableOmemo is intercepted by App::update before reaching here.
-            Message::EnableOmemo => Task::none(),
+            Message::EnableOmemo => Action::EnableOmemo,
             // UX-5: copy account detail to clipboard
-            Message::CopyToClipboard(content) => iced::clipboard::write::<Message>(content),
+            Message::CopyToClipboard(content) => Action::Task(iced::clipboard::write::<Message>(content)),
         }
     }
 
@@ -576,14 +585,10 @@ impl SettingsScreen {
         .spacing(10)
         .align_y(Alignment::Center);
 
-        let appearance_content: Element<Message> = column![
-            theme_row,
-            system_theme_row,
-            time_format_row,
-            font_row,
-        ]
-        .spacing(15)
-        .into();
+        let appearance_content: Element<Message> =
+            column![theme_row, system_theme_row, time_format_row, font_row,]
+                .spacing(15)
+                .into();
         let appearance_section = settings_section("Appearance", appearance_content);
 
         // === Notifications section ===
@@ -603,9 +608,8 @@ impl SettingsScreen {
         .spacing(10)
         .align_y(Alignment::Center);
 
-        let notifications_content: Element<Message> = column![notif_row, sound_row]
-            .spacing(15)
-            .into();
+        let notifications_content: Element<Message> =
+            column![notif_row, sound_row].spacing(15).into();
         let notifications_section = settings_section("Notifications", notifications_content);
 
         // === Messages section ===
@@ -652,14 +656,10 @@ impl SettingsScreen {
         .align_y(Alignment::Center)
         .into();
 
-        let messages_content: Element<Message> = column![
-            receipts_row,
-            typing_row,
-            read_markers_row,
-            mam_mode_row,
-        ]
-        .spacing(15)
-        .into();
+        let messages_content: Element<Message> =
+            column![receipts_row, typing_row, read_markers_row, mam_mode_row,]
+                .spacing(15)
+                .into();
         let messages_section = settings_section("Messages", messages_content);
 
         // === Chat Preferences section ===
@@ -836,7 +836,10 @@ impl SettingsScreen {
                 let val: String = $value.clone();
                 let e: Element<'_, Message> = row![
                     text($label).size(13).width(Length::Fixed(140.0)),
-                    text_input("", &val).size(13).width(Length::Fill).padding([3, 5]),
+                    text_input("", &val)
+                        .size(13)
+                        .width(Length::Fill)
+                        .padding([3, 5]),
                     button(text("cp").size(10))
                         .on_press(Message::CopyToClipboard(val))
                         .padding([2, 6]),
@@ -971,12 +974,10 @@ impl SettingsScreen {
         let proxy_type_row: Element<Message> = row![
             text("Proxy type").size(14),
             horizontal_space(),
-            segmented_btn("None", is_none)
-                .on_press(Message::ProxyTypeSelected("none".into())),
+            segmented_btn("None", is_none).on_press(Message::ProxyTypeSelected("none".into())),
             segmented_btn("SOCKS5", is_socks5)
                 .on_press(Message::ProxyTypeSelected("socks5".into())),
-            segmented_btn("HTTP", is_http)
-                .on_press(Message::ProxyTypeSelected("http".into())),
+            segmented_btn("HTTP", is_http).on_press(Message::ProxyTypeSelected("http".into())),
         ]
         .spacing(4)
         .align_y(Alignment::Center)

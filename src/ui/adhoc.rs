@@ -12,7 +12,7 @@
 
 use iced::{
     widget::{button, column, container, row, scrollable, text, text_input},
-    Alignment, Element, Length, Task,
+    Alignment, Element, Length,
 };
 
 use crate::ui::data_forms::{render_form_interactive, DataForm, FieldType, FormField};
@@ -80,6 +80,28 @@ pub enum Message {
     Close,
     /// User clicked "Back to list" after a command completes.
     BackToList,
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+pub enum Action {
+    None,
+    Close,
+    Discover { target_jid: String },
+    Execute { target_jid: String, node: String },
+    Submit {
+        target_jid: String,
+        node: String,
+        session_id: String,
+        fields: Vec<DataField>,
+    },
+    Cancel {
+        target_jid: String,
+        node: String,
+        session_id: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -172,15 +194,17 @@ impl AdhocScreen {
         }
     }
 
-    pub fn update(&mut self, msg: Message) -> Task<Message> {
+    pub fn update(&mut self, msg: Message) -> Action {
         match msg {
             Message::TargetJidChanged(v) => {
                 self.target_jid = v;
+                Action::None
             }
             Message::DiscoverRequested => {
+                let target = self.target_jid.clone();
                 self.step = AdhocStep::Discovering;
                 self.commands.clear();
-                // Caller intercepts to send XmppCommand::DiscoverAdhocCommands.
+                Action::Discover { target_jid: target }
             }
             Message::CommandsDiscovered {
                 _from_jid: _,
@@ -188,56 +212,87 @@ impl AdhocScreen {
             } => {
                 self.commands = commands;
                 self.step = AdhocStep::CommandList;
+                Action::None
             }
-            Message::CommandSelected(_node) => {
+            Message::CommandSelected(node) => {
+                let target = self.target_jid.clone();
                 self.step = AdhocStep::Executing;
                 self.field_values.clear();
-                // Caller intercepts to send XmppCommand::ExecuteAdhocCommand.
+                Action::Execute {
+                    target_jid: target,
+                    node,
+                }
             }
-            Message::CommandResponseReceived(resp) => match resp.status {
-                CommandStatus::Completed => {
-                    let notes = resp.notes.join("; ");
-                    let summary = if notes.is_empty() {
-                        "Command completed.".into()
-                    } else {
-                        notes
-                    };
-                    self.step = AdhocStep::Done(summary);
-                }
-                CommandStatus::Canceled => {
-                    self.step = AdhocStep::CommandList;
-                }
-                CommandStatus::Executing => {
-                    // Pre-populate field_values from server defaults.
-                    self.field_values.clear();
-                    for f in &resp.fields {
-                        if let Some(ref v) = f.value {
-                            self.field_values.insert(f.var.clone(), v.clone());
-                        }
+            Message::CommandResponseReceived(resp) => {
+                match resp.status {
+                    CommandStatus::Completed => {
+                        let notes = resp.notes.join("; ");
+                        let summary = if notes.is_empty() {
+                            "Command completed.".into()
+                        } else {
+                            notes
+                        };
+                        self.step = AdhocStep::Done(summary);
                     }
-                    self.step = AdhocStep::ShowingForm(resp);
+                    CommandStatus::Canceled => {
+                        self.step = AdhocStep::CommandList;
+                    }
+                    CommandStatus::Executing => {
+                        self.field_values.clear();
+                        for f in &resp.fields {
+                            if let Some(ref v) = f.value {
+                                self.field_values.insert(f.var.clone(), v.clone());
+                            }
+                        }
+                        self.step = AdhocStep::ShowingForm(resp);
+                    }
                 }
-            },
+                Action::None
+            }
             Message::FieldChanged(var, val) => {
                 self.field_values.insert(var, val);
+                Action::None
             }
             Message::SubmitForm => {
-                // Caller intercepts to send XmppCommand::ContinueAdhocCommand.
+                if let Some(node) = self.active_node().map(str::to_owned) {
+                    if let Some(session_id) = self.active_session_id().map(str::to_owned) {
+                        let fields = self.collect_fields();
+                        return Action::Submit {
+                            target_jid: self.target_jid.clone(),
+                            node,
+                            session_id,
+                            fields,
+                        };
+                    }
+                }
+                Action::None
             }
             Message::CancelCommand => {
-                // Caller intercepts to send XmppCommand::CancelAdhocCommand.
+                let action =
+                    if let Some(node) = self.active_node().map(str::to_owned) {
+                        if let Some(session_id) = self.active_session_id().map(str::to_owned) {
+                            Action::Cancel {
+                                target_jid: self.target_jid.clone(),
+                                node,
+                                session_id,
+                            }
+                        } else {
+                            Action::None
+                        }
+                    } else {
+                        Action::None
+                    };
                 self.step = AdhocStep::CommandList;
                 self.field_values.clear();
+                action
             }
-            Message::Close => {
-                // Caller handles navigation.
-            }
+            Message::Close => Action::Close,
             Message::BackToList => {
                 self.step = AdhocStep::CommandList;
                 self.field_values.clear();
+                Action::None
             }
         }
-        Task::none()
     }
 
     pub fn view(&self) -> Element<'_, Message> {

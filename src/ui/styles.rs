@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Link-style button: looks like a hyperlink (blue text, no background/border).
 //
 // Usage: `button(text("Click")).style(link_style)`

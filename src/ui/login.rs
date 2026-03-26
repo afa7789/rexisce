@@ -3,7 +3,7 @@
 
 use iced::{
     widget::{button, checkbox, column, container, mouse_area, text, text_input},
-    Alignment, Color, Element, Length, Task,
+    Alignment, Element, Length,
 };
 
 mod field_ids {
@@ -12,6 +12,7 @@ mod field_ids {
     pub const SERVER: &str = "login_server";
 }
 
+use crate::ui::palette;
 use crate::xmpp::ConnectConfig;
 
 #[derive(Debug, Clone)]
@@ -46,10 +47,14 @@ pub enum Message {
     GoToBenchmark,
     /// AUTH-1: toggled by the Remember Me checkbox.
     RememberMeToggled(bool),
-    /// Tab-advance: JID → Password
-    FocusPassword,
-    /// Tab-advance: Password → Server
-    FocusServer,
+}
+
+pub enum Action {
+    None,
+    AttemptConnect(ConnectConfig),
+    AttemptRegister(ConnectConfig),
+    GoToBenchmark,
+    RememberMeToggled(bool),
 }
 
 impl Default for LoginScreen {
@@ -104,18 +109,18 @@ impl LoginScreen {
         self.state = LoginState::Error(reason);
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message) -> Action {
         match message {
             Message::JidChanged(v) => self.jid = v,
             Message::PasswordChanged(v) => self.password = v,
             Message::ServerChanged(v) => self.server = v,
             Message::Connect => {
-                // App::update handles sending the command; we just show spinner.
                 self.state = LoginState::Connecting;
+                return Action::AttemptConnect(self.connect_config());
             }
             Message::Register => {
-                // App::update handles sending the command; we just show spinner.
                 self.state = LoginState::Registering;
+                return Action::AttemptRegister(self.connect_config());
             }
             Message::Connecting => {
                 self.state = LoginState::Connecting;
@@ -124,19 +129,14 @@ impl LoginScreen {
                 self.state = LoginState::Registering;
             }
             Message::GoToBenchmark => {
-                // Handled by App::update; nothing to mutate here.
+                return Action::GoToBenchmark;
             }
             Message::RememberMeToggled(v) => {
                 self.remember_me = v;
-            }
-            Message::FocusPassword => {
-                return text_input::focus(text_input::Id::new(field_ids::PASSWORD));
-            }
-            Message::FocusServer => {
-                return text_input::focus(text_input::Id::new(field_ids::SERVER));
+                return Action::RememberMeToggled(v);
             }
         }
-        Task::none()
+        Action::None
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -168,13 +168,13 @@ impl LoginScreen {
             text_input("JID (user@server.tld)", &self.jid)
                 .id(text_input::Id::new(field_ids::JID))
                 .on_input(Message::JidChanged)
-                .on_submit(Message::FocusPassword)
+                .on_submit(Message::Connect)
                 .padding(10),
             text_input("Password", &self.password)
                 .id(text_input::Id::new(field_ids::PASSWORD))
                 .secure(true)
                 .on_input(Message::PasswordChanged)
-                .on_submit(Message::FocusServer)
+                .on_submit(Message::Connect)
                 .padding(10),
             text_input("Server (optional)", &self.server)
                 .id(text_input::Id::new(field_ids::SERVER))
@@ -192,7 +192,7 @@ impl LoginScreen {
             mouse_area(
                 text("Benchmark →")
                     .size(11)
-                    .color(Color::from_rgb(0.5, 0.5, 0.5)),
+                    .color(palette::MUTED_TEXT),
             )
             .on_press(Message::GoToBenchmark),
         ]

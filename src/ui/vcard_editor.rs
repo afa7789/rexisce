@@ -11,7 +11,7 @@
 
 use iced::{
     widget::{button, column, container, row, text, text_input},
-    Alignment, Element, Length, Task,
+    Alignment, Element, Length,
 };
 
 use crate::xmpp::modules::vcard_edit::VCardFields;
@@ -57,6 +57,16 @@ pub enum Message {
 }
 
 // ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+pub enum Action {
+    None,
+    Save(VCardFields),
+    Close,
+}
+
+// ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
@@ -76,40 +86,50 @@ impl VCardEditorScreen {
         }
     }
 
-    /// Return the current field snapshot (used by the caller to build SetOwnVCard).
-    pub fn current_fields(&self) -> VCardFields {
-        self.fields.clone()
-    }
-
-    pub fn update(&mut self, msg: Message) -> Task<Message> {
+    pub fn update(&mut self, msg: Message) -> Action {
         match msg {
             Message::FetchRequested => {
                 self.loading = true;
                 self.status_msg = None;
+                Action::None
             }
             Message::VCardLoaded(fields) => {
                 self.loading = false;
                 self.fields = fields;
+                Action::None
             }
             Message::VCardSaved => {
                 self.saving = false;
                 self.status_msg = Some("Saved successfully.".into());
+                Action::None
             }
-            Message::NicknameChanged(v) => self.fields.nickname = v,
-            Message::FullNameChanged(v) => self.fields.full_name = v,
-            Message::OrgChanged(v) => self.fields.organisation = v,
-            Message::EmailChanged(v) => self.fields.email = v,
-            Message::PhoneChanged(v) => self.fields.phone = v,
+            Message::NicknameChanged(v) => {
+                self.fields.nickname = v;
+                Action::None
+            }
+            Message::FullNameChanged(v) => {
+                self.fields.full_name = v;
+                Action::None
+            }
+            Message::OrgChanged(v) => {
+                self.fields.organisation = v;
+                Action::None
+            }
+            Message::EmailChanged(v) => {
+                self.fields.email = v;
+                Action::None
+            }
+            Message::PhoneChanged(v) => {
+                self.fields.phone = v;
+                Action::None
+            }
             Message::SaveRequested => {
                 self.saving = true;
                 self.status_msg = None;
-                // Caller intercepts this to send XmppCommand::SetOwnVCard.
+                Action::Save(self.fields.clone())
             }
-            Message::Close => {
-                // Caller handles navigation.
-            }
+            Message::Close => Action::Close,
         }
-        Task::none()
     }
 
     pub fn view(&self) -> Element<'_, Message> {

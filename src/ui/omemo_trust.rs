@@ -69,6 +69,16 @@ pub enum Message {
 }
 
 // ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+pub enum Action {
+    None,
+    TrustDevice { jid: String, device_id: u32 },
+    Close,
+}
+
+// ---------------------------------------------------------------------------
 // Impl
 // ---------------------------------------------------------------------------
 
@@ -81,19 +91,24 @@ impl OmemoTrustScreen {
     }
 
     /// Update trust state optimistically in local state.
-    pub fn update(&mut self, msg: &Message) {
+    pub fn update(&mut self, msg: Message) -> Action {
         match msg {
             Message::TrustDevice(id) => {
-                if let Some(dev) = self.devices.iter_mut().find(|d| d.device_id == *id) {
+                if let Some(dev) = self.devices.iter_mut().find(|d| d.device_id == id) {
                     dev.trust = TrustState::Trusted;
+                }
+                Action::TrustDevice {
+                    jid: self.contact_jid.clone(),
+                    device_id: id,
                 }
             }
             Message::UntrustDevice(id) => {
-                if let Some(dev) = self.devices.iter_mut().find(|d| d.device_id == *id) {
+                if let Some(dev) = self.devices.iter_mut().find(|d| d.device_id == id) {
                     dev.trust = TrustState::Untrusted;
                 }
+                Action::None
             }
-            Message::Close => {}
+            Message::Close => Action::Close,
         }
     }
 

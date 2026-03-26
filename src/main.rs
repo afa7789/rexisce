@@ -7,6 +7,26 @@ mod xmpp;
 
 use std::sync::Arc;
 
+fn create_default_icon() -> Option<iced::window::Icon> {
+    const SIZE: u32 = 64;
+    let mut rgba = vec![0u8; (SIZE * SIZE * 4) as usize];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let idx = ((y * SIZE + x) * 4) as usize;
+            let in_circle = ((x as i32 - 32).pow(2) + (y as i32 - 32).pow(2)) <= 20_i32.pow(2);
+            if in_circle {
+                rgba[idx] = 0x2B;
+                rgba[idx + 1] = 0x6D;
+                rgba[idx + 2] = 0xA5;
+                rgba[idx + 3] = 255;
+            } else {
+                rgba[idx + 3] = 0;
+            }
+        }
+    }
+    iced::window::icon::from_rgba(rgba, SIZE, SIZE).ok()
+}
+
 fn main() -> iced::Result {
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -51,6 +71,10 @@ fn main() -> iced::Result {
     };
 
     iced::application("XMPP Messenger", ui::App::update, ui::App::view)
+        .window(iced::window::Settings {
+            icon: create_default_icon(),
+            ..iced::window::Settings::default()
+        })
         .subscription(|state: &ui::App| state.subscription())
         .theme(ui::App::iced_theme)
         .run_with(move || ui::App::new_with_settings(settings, pool))

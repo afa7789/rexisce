@@ -21,6 +21,12 @@ impl Default for AboutScreen {
     }
 }
 
+#[allow(dead_code)]
+pub enum Action {
+    None,
+    GoBack,
+}
+
 impl AboutScreen {
     pub fn new() -> Self {
         Self {
@@ -28,8 +34,10 @@ impl AboutScreen {
         }
     }
 
-    pub fn update(&mut self, _msg: Message) {
-        // No state changes needed
+    pub fn update(&mut self, msg: Message) -> Action {
+        match msg {
+            Message::Back => Action::GoBack,
+        }
     }
 
     pub fn view(&self) -> Element<'static, Message> {

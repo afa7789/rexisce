@@ -61,13 +61,7 @@ fn is_after_close(ch: char) -> bool {
 }
 
 /// URL schemes recognised by `split_urls`.
-const URL_SCHEMES: &[&str] = &[
-    "https://",
-    "http://",
-    "xmpp:",
-    "mailto:",
-    "magnet:",
-];
+const URL_SCHEMES: &[&str] = &["https://", "http://", "xmpp:", "mailto:", "magnet:"];
 
 /// Characters that close a URL when they appear without a matching opener inside the URL.
 const TRAILING_PUNCT: &[char] = &['.', ',', ')', ']', '>'];
@@ -421,34 +415,53 @@ mod tests {
 
     #[test]
     fn bare_https_url_becomes_link() {
-        assert_eq!(parse("https://example.com"), vec![link("https://example.com")]);
+        assert_eq!(
+            parse("https://example.com"),
+            vec![link("https://example.com")]
+        );
     }
 
     #[test]
     fn bare_http_url_becomes_link() {
-        assert_eq!(parse("http://example.com"), vec![link("http://example.com")]);
+        assert_eq!(
+            parse("http://example.com"),
+            vec![link("http://example.com")]
+        );
     }
 
     #[test]
     fn xmpp_uri_becomes_link() {
-        assert_eq!(parse("xmpp:user@example.com"), vec![link("xmpp:user@example.com")]);
+        assert_eq!(
+            parse("xmpp:user@example.com"),
+            vec![link("xmpp:user@example.com")]
+        );
     }
 
     #[test]
     fn mailto_uri_becomes_link() {
-        assert_eq!(parse("mailto:user@example.com"), vec![link("mailto:user@example.com")]);
+        assert_eq!(
+            parse("mailto:user@example.com"),
+            vec![link("mailto:user@example.com")]
+        );
     }
 
     #[test]
     fn magnet_uri_becomes_link() {
-        assert_eq!(parse("magnet:?xt=urn:btih:abc123"), vec![link("magnet:?xt=urn:btih:abc123")]);
+        assert_eq!(
+            parse("magnet:?xt=urn:btih:abc123"),
+            vec![link("magnet:?xt=urn:btih:abc123")]
+        );
     }
 
     #[test]
     fn url_embedded_in_text() {
         assert_eq!(
             parse("visit https://example.com today"),
-            vec![plain("visit "), link("https://example.com"), plain(" today")]
+            vec![
+                plain("visit "),
+                link("https://example.com"),
+                plain(" today")
+            ]
         );
     }
 
@@ -506,7 +519,11 @@ mod tests {
         // Bold markers outside the URL should still work.
         assert_eq!(
             parse("*bold* https://example.com"),
-            vec![s("bold", SpanStyle::Bold), plain(" "), link("https://example.com")]
+            vec![
+                s("bold", SpanStyle::Bold),
+                plain(" "),
+                link("https://example.com")
+            ]
         );
     }
 
