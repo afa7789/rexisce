@@ -1397,7 +1397,13 @@ async fn dispatch_stanza(
                     }
                 }
             }
-            handle_presence(el, event_tx).await;
+            // bug-14: skip broadcasting MUC presences as regular contact presences
+            let is_muc_presence = el
+                .children()
+                .any(|c| c.name() == "x" && c.ns() == NS_MUC_USER);
+            if !is_muc_presence {
+                handle_presence(el, event_tx).await;
+            }
         }
         _ => {}
     }

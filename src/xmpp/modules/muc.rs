@@ -388,6 +388,26 @@ mod tests {
     }
 
     #[test]
+    fn on_presence_ignores_unjoined_rooms() {
+        let mut mgr = MucManager::new();
+        let presence = make_available_presence(ROOM_JID, "bob", "participant", "member");
+        mgr.on_presence(&presence);
+        assert!(mgr.rooms.is_empty());
+    }
+
+    #[test]
+    fn on_presence_ignores_left_rooms() {
+        let mut mgr = MucManager::new();
+        mgr.join_room(ROOM_JID, NICK);
+        mgr.on_presence(&make_available_presence(ROOM_JID, "bob", "participant", "member"));
+        assert!(mgr.rooms[ROOM_JID].occupants.contains_key("bob"));
+        mgr.leave_room(ROOM_JID);
+        let presence = make_available_presence(ROOM_JID, "carol", "participant", "member");
+        mgr.on_presence(&presence);
+        assert!(!mgr.rooms.contains_key(ROOM_JID));
+    }
+
+    #[test]
     fn on_groupchat_message_parses_correctly() {
         let mgr = MucManager::new();
         let el = make_groupchat_message(ROOM_JID, "bob", "Hello, world!", "msg-001");
