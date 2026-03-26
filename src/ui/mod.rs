@@ -58,6 +58,7 @@ use crate::xmpp::{
 };
 use account_state::AccountStateManager;
 use toast::{Toast, ToastKind};
+use palette as pal;
 
 // F2: command palette entries — built once and searched via command_palette::search().
 fn palette_commands() -> Vec<command_palette::Command> {
@@ -1155,9 +1156,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.0, 0.0, 0.0, 0.5,
-                    ))),
+                    background: Some(iced::Background::Color(pal::BACKDROP_DIM)),
                     ..Default::default()
                 });
             let trust_view = trust_screen.view().map(Message::OmemoTrust);
@@ -1200,9 +1199,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.0, 0.0, 0.0, 0.5,
-                    ))),
+                    background: Some(iced::Background::Color(pal::BACKDROP_DIM)),
                     ..Default::default()
                 });
             let modal_view = modal.view().map(Message::SpamReport);
@@ -1230,7 +1227,7 @@ impl App {
                 .width(Length::Fill)
                 .padding([4, 12])
                 .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb(0.8, 0.4, 0.0))),
+                    background: Some(iced::Background::Color(pal::WARNING_AMBER)),
                     ..Default::default()
                 });
             let banner_overlay = container(column![banner])
@@ -1288,7 +1285,7 @@ impl App {
                                 radius: 8.0.into(),
                             },
                             shadow: iced::Shadow {
-                                color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                                color: pal::BACKDROP_DIM,
                                 offset: iced::Vector::new(0.0, 4.0),
                                 blur_radius: 16.0,
                             },
@@ -1301,9 +1298,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.0, 0.0, 0.0, 0.5,
-                    ))),
+                    background: Some(iced::Background::Color(pal::BACKDROP_DIM)),
                     ..Default::default()
                 });
 
@@ -1344,9 +1339,9 @@ impl App {
             .iter()
             .map(|t| {
                 let bg = match t.kind {
-                    ToastKind::Error => Color::from_rgb(0.8, 0.2, 0.2),
-                    ToastKind::Success => Color::from_rgb(0.2, 0.7, 0.3),
-                    ToastKind::Info => Color::from_rgb(0.2, 0.4, 0.8),
+                    ToastKind::Error => pal::DANGER_RED,
+                    ToastKind::Success => pal::SUCCESS_GREEN,
+                    ToastKind::Info => pal::INFO_BLUE,
                 };
                 let dismiss_btn = button(text("x").size(10))
                     .on_press(Message::DismissToast(t.id))
@@ -1412,9 +1407,7 @@ impl App {
                 .height(300)
                 .width(Length::Fill)
                 .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.0, 0.0, 0.0, 0.85,
-                    ))),
+                    background: Some(iced::Background::Color(pal::CONSOLE_BG)),
                     ..Default::default()
                 })
                 .padding([4, 8]);

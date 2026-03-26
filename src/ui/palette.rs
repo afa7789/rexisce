@@ -21,3 +21,5 @@ pub const BACKDROP_DIM: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.5);
 pub const BACKDROP_DARK: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.7);
 pub const CONSOLE_BG: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.85);
 pub const PROGRESS_TRACK: Color = Color::from_rgb(0.3, 0.3, 0.3);
+pub const TOFU_AMBER: Color = Color::from_rgb(0.90, 0.70, 0.10);
+pub const UNDECIDED_GREY: Color = Color::from_rgb(0.55, 0.55, 0.55);
