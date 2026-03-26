@@ -70,7 +70,7 @@ fn main() -> iced::Result {
         )
     };
 
-    iced::application("XMPP Messenger", ui::App::update, ui::App::view)
+    iced::application(ui::App::window_title, ui::App::update, ui::App::view)
         .window(iced::window::Settings {
             icon: create_default_icon(),
             ..iced::window::Settings::default()

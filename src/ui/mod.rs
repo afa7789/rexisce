@@ -338,6 +338,31 @@ impl App {
         }
     }
 
+    /// Returns a dynamic window title based on the current app state.
+    pub fn window_title(&self) -> String {
+        match &self.screen {
+            Screen::Chat(chat) => {
+                if let Some(active_jid) = chat.active_jid() {
+                    // Show the chat partner (bare JID local part or full JID)
+                    let display = active_jid
+                        .split('/')
+                        .next()
+                        .unwrap_or(active_jid);
+                    format!("ReXisCe \u{2014} {display}")
+                } else {
+                    // Connected but no conversation selected — show own JID
+                    let own = chat.own_jid();
+                    if own.is_empty() {
+                        "ReXisCe".to_string()
+                    } else {
+                        format!("ReXisCe \u{2014} {own}")
+                    }
+                }
+            }
+            _ => "ReXisCe".to_string(),
+        }
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             // F2: command palette
