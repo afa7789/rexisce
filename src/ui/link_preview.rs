@@ -48,11 +48,7 @@ pub fn render_preview_card(
     let mut card_col: iced::widget::Column<Message> = column![].spacing(4).padding([8, 10]);
 
     if let Some(ref site_name) = preview.site_name {
-        card_col = card_col.push(
-            text(site_name.clone())
-                .size(10)
-                .color(palette::MUTED_TEXT),
-        );
+        card_col = card_col.push(text(site_name.clone()).size(10).color(palette::MUTED_TEXT));
     }
 
     if let Some(ref title) = preview.title {
@@ -78,11 +74,7 @@ pub fn render_preview_card(
         card_col = card_col.push(img_widget);
     } else if let Some(ref image_url) = preview.image_url {
         // Fallback: show URL as link-coloured text if the image hasn't loaded yet.
-        card_col = card_col.push(
-            text(image_url.clone())
-                .size(10)
-                .color(palette::LINK_BLUE),
-        );
+        card_col = card_col.push(text(image_url.clone()).size(10).color(palette::LINK_BLUE));
     }
 
     let card = container(card_col)
@@ -109,10 +101,7 @@ pub fn render_preview_card(
 /// This is a small helper that can be composed into other widgets.
 pub fn domain_label(url: &str) -> Element<'static, Message> {
     let domain = extract_domain(url).unwrap_or(url);
-    row![text(domain.to_string())
-        .size(10)
-        .color(palette::MUTED_TEXT)]
-    .into()
+    row![text(domain.to_string()).size(10).color(palette::MUTED_TEXT)].into()
 }
 
 fn extract_domain(url: &str) -> Option<&str> {

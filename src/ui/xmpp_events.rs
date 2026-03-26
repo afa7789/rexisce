@@ -6,13 +6,13 @@
 
 use iced::Task;
 
+use super::toast::ToastKind;
 use super::{
     adhoc, chat, config, login::LoginScreen, omemo_trust, vcard_editor, App, ChatScreen, Message,
     Screen,
 };
 use crate::xmpp::modules::presence_machine::PresenceStatus;
 use crate::xmpp::{AccountId, XmppCommand, XmppEvent};
-use super::toast::ToastKind;
 
 pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
     match event {
@@ -21,12 +21,8 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
             if let Screen::Login(ref login) = app.screen {
                 let cfg = login.connect_config();
                 if !cfg.password.is_empty() && login.remember_me {
-                    if let Err(e) =
-                        config::save_password(&cfg.jid, &cfg.password)
-                    {
-                        tracing::error!(
-                            "failed to save password to keychain: {e}"
-                        );
+                    if let Err(e) = config::save_password(&cfg.jid, &cfg.password) {
+                        tracing::error!("failed to save password to keychain: {e}");
                     }
                 }
             }
@@ -87,13 +83,12 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
             // Also pre-populate known conversations from DB cache.
             let pool2 = app.db.clone();
             let conv_prefill = Task::future(async move {
-                let jids: Vec<String> =
-                    crate::store::conversation_repo::get_all(&pool2)
-                        .await
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|c| c.jid)
-                        .collect();
+                let jids: Vec<String> = crate::store::conversation_repo::get_all(&pool2)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|c| c.jid)
+                    .collect();
                 Message::ConversationsPrefill(jids)
             });
             let toast = app.update(Message::ShowToast(
@@ -136,8 +131,7 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
             }
             if matches!(app.screen, Screen::Chat(_)) {
                 let pw = if app.settings.remember_me {
-                    config::load_password(&app.settings.last_jid)
-                        .unwrap_or_default()
+                    config::load_password(&app.settings.last_jid).unwrap_or_default()
                 } else {
                     String::new()
                 };
@@ -149,10 +143,7 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
                 ));
             }
             // J1: show disconnect toast
-            let msg = Message::ShowToast(
-                format!("Disconnected: {}", reason),
-                ToastKind::Error,
-            );
+            let msg = Message::ShowToast(format!("Disconnected: {}", reason), ToastKind::Error);
             return app.update(msg);
         }
         XmppEvent::Reconnecting { attempt } => {
@@ -164,12 +155,9 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
                 tracing::info!("XMPP: on Login screen, skipping auto-reconnect");
             } else {
                 let delay_secs = 2u64.pow(attempt.min(6));
-                if let (Some(cfg), Some(tx)) =
-                    (app.last_connect_cfg.clone(), app.xmpp_tx.clone())
-                {
+                if let (Some(cfg), Some(tx)) = (app.last_connect_cfg.clone(), app.xmpp_tx.clone()) {
                     return Task::future(async move {
-                        tokio::time::sleep(std::time::Duration::from_secs(delay_secs))
-                            .await;
+                        tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
                         let _ = tx.send(XmppCommand::Connect(cfg)).await;
                         Message::XmppEvent(XmppEvent::Reconnecting { attempt: 0 })
                     })
@@ -243,8 +231,7 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
                 let notif_from = bare_from.clone();
                 let notif_body: String = msg.body.chars().take(100).collect();
                 tokio::spawn(async move {
-                    let _ =
-                        crate::notifications::notify_message(&notif_from, &notif_body);
+                    let _ = crate::notifications::notify_message(&notif_from, &notif_body);
                 });
                 Task::none()
             } else {
@@ -259,10 +246,8 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
             let ts = chrono::Utc::now().timestamp_millis();
             tokio::spawn(async move {
                 let _ = crate::store::conversation_repo::upsert(&pool, &bare_jid).await;
-                let _ = crate::store::conversation_repo::update_last_activity(
-                    &pool, &bare_jid, ts,
-                )
-                .await;
+                let _ = crate::store::conversation_repo::update_last_activity(&pool, &bare_jid, ts)
+                    .await;
                 let _ = crate::store::message_repo::insert(
                     &pool,
                     &crate::store::message_repo::Message {
@@ -332,19 +317,12 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
             ref jid,
             ref png_bytes,
         } => {
-            tracing::debug!(
-                "H1: avatar received for {jid} ({} bytes)",
-                png_bytes.len()
-            );
+            tracing::debug!("H1: avatar received for {jid} ({} bytes)", png_bytes.len());
             app.avatar_cache.insert(jid.clone(), png_bytes.clone());
             if let Screen::Chat(ref mut chat) = app.screen {
                 // H2: persist own avatar to settings for instant
                 // restore on next login.
-                let own_bare = chat
-                    .own_jid()
-                    .split('/')
-                    .next()
-                    .unwrap_or(chat.own_jid());
+                let own_bare = chat.own_jid().split('/').next().unwrap_or(chat.own_jid());
                 if jid == own_bare {
                     app.settings.avatar_data = Some(png_bytes.clone());
                     let _ = config::save(&app.settings);
@@ -389,10 +367,7 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
                                             .await;
                                     }
                                     Ok(resp) => {
-                                        tracing::warn!(
-                                            "E4: PUT failed: {}",
-                                            resp.status()
-                                        );
+                                        tracing::warn!("E4: PUT failed: {}", resp.status());
                                     }
                                     Err(e) => {
                                         tracing::warn!("E4: PUT error: {e}");
@@ -400,10 +375,7 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
                                 }
                             }
                             Err(e) => {
-                                tracing::warn!(
-                                    "E4: failed to read file {:?}: {e}",
-                                    file_path
-                                );
+                                tracing::warn!("E4: failed to read file {:?}: {e}", file_path);
                             }
                         }
                     });
@@ -436,19 +408,12 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
         }
         // J6: XEP-0084 PubSub avatar — store alongside vCard avatar
         XmppEvent::AvatarUpdated { ref jid, ref data } => {
-            tracing::debug!(
-                "J6: PubSub avatar updated for {jid} ({} bytes)",
-                data.len()
-            );
+            tracing::debug!("J6: PubSub avatar updated for {jid} ({} bytes)", data.len());
             app.avatar_cache.insert(jid.clone(), data.clone());
             if let Screen::Chat(ref mut chat) = app.screen {
                 // H2: persist own avatar to settings for instant
                 // restore on next login.
-                let own_bare = chat
-                    .own_jid()
-                    .split('/')
-                    .next()
-                    .unwrap_or(chat.own_jid());
+                let own_bare = chat.own_jid().split('/').next().unwrap_or(chat.own_jid());
                 if jid == own_bare {
                     app.settings.avatar_data = Some(data.clone());
                     let _ = config::save(&app.settings);
@@ -477,8 +442,7 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
         // K1: room config form received from server
         XmppEvent::RoomConfigFormReceived { room_jid, config } => {
             if let Screen::Chat(ref mut chat) = app.screen {
-                let action = chat
-                    .update(chat::Message::RoomConfigFormReceived(room_jid, config));
+                let action = chat.update(chat::Message::RoomConfigFormReceived(room_jid, config));
                 return app.handle_chat_action(action);
             }
         }
@@ -633,10 +597,7 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
         }
         // MEMO: cache peer device list so the trust dialog can populate itself.
         XmppEvent::OmemoDeviceListReceived { jid, devices } => {
-            tracing::debug!(
-                "OMEMO: device list for {jid}: {} device(s)",
-                devices.len()
-            );
+            tracing::debug!("OMEMO: device list for {jid}: {} device(s)", devices.len());
             app.omemo_peer_devices.insert(jid.clone(), devices.clone());
             // If the trust dialog for this JID is open, refresh its device list.
             if let Some(ref mut modal) = app.omemo_trust_modal {

@@ -22,17 +22,17 @@ pub mod data_forms;
 pub mod link_preview;
 mod login;
 pub mod muc_panel;
+pub(crate) mod navigation;
 pub mod omemo_trust;
+pub mod palette;
 pub mod settings;
 pub mod sidebar;
 pub mod spam_report;
 pub mod styles;
-pub(crate) mod subscriptions;
-pub mod palette;
 pub mod styling;
+pub(crate) mod subscriptions;
 pub mod toast;
 pub mod vcard_editor;
-pub(crate) mod navigation;
 pub(crate) mod xmpp_events;
 
 pub use benchmark::BenchmarkScreen;
@@ -710,12 +710,7 @@ impl App {
                         if let Some(ref tx) = self.xmpp_tx {
                             let tx = tx.clone();
                             Task::future(async move {
-                                let _ = tx
-                                    .send(XmppCommand::SetAvatar {
-                                        data,
-                                        mime_type,
-                                    })
-                                    .await;
+                                let _ = tx.send(XmppCommand::SetAvatar { data, mime_type }).await;
                                 Message::ShowToast("Uploading avatar…".into(), ToastKind::Info)
                             })
                         } else {
@@ -745,7 +740,9 @@ impl App {
                     login::Action::AttemptConnect(cfg) => {
                         if let Screen::Login(ref mut login) = self.screen {
                             if !config::is_valid_jid(&cfg.jid) {
-                                login.on_error("Invalid JID: must be in the form user@domain".into());
+                                login.on_error(
+                                    "Invalid JID: must be in the form user@domain".into(),
+                                );
                                 return Task::none();
                             }
                         }
@@ -954,8 +951,7 @@ impl App {
                         active: true,
                     })
                     .collect();
-                self.omemo_trust_modal =
-                    Some(omemo_trust::OmemoTrustScreen::new(jid, devices));
+                self.omemo_trust_modal = Some(omemo_trust::OmemoTrustScreen::new(jid, devices));
                 Task::none()
             }
             chat::Action::SetPresence(status) => {
@@ -976,11 +972,10 @@ impl App {
                     let jid = jid.clone();
                     let pool = self.db.clone();
                     Task::future(async move {
-                        let rows = crate::store::message_repo::find_by_conversation(
-                            &pool, &jid, 50,
-                        )
-                        .await
-                        .unwrap_or_default();
+                        let rows =
+                            crate::store::message_repo::find_by_conversation(&pool, &jid, 50)
+                                .await
+                                .unwrap_or_default();
                         Message::MessagesLoaded(jid, rows)
                     })
                 };
@@ -988,10 +983,9 @@ impl App {
                     if let Some(last_id) = chat.last_message_id(&jid) {
                         let pool = self.db.clone();
                         tokio::spawn(async move {
-                            let _ = crate::store::conversation_repo::mark_read(
-                                &pool, &jid, &last_id,
-                            )
-                            .await;
+                            let _ =
+                                crate::store::conversation_repo::mark_read(&pool, &jid, &last_id)
+                                    .await;
                         });
                     }
                 }

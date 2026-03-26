@@ -7,9 +7,9 @@
 mod update;
 mod view;
 
+use crate::xmpp::modules::link_preview::LinkPreview;
 use iced::widget::image as iced_image;
 use iced::widget::scrollable::{AbsoluteOffset, Id};
-use crate::xmpp::modules::link_preview::LinkPreview;
 
 // G4: /me action message prefix (XEP-0245)
 pub(crate) const ME_PREFIX: &str = "/me ";

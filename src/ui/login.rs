@@ -189,12 +189,8 @@ impl LoginScreen {
             .spacing(10),
             status,
             iced::widget::Space::with_height(8),
-            mouse_area(
-                text("Benchmark →")
-                    .size(11)
-                    .color(palette::MUTED_TEXT),
-            )
-            .on_press(Message::GoToBenchmark),
+            mouse_area(text("Benchmark →").size(11).color(palette::MUTED_TEXT),)
+                .on_press(Message::GoToBenchmark),
         ]
         .spacing(12)
         .max_width(400)

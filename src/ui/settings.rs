@@ -397,7 +397,10 @@ impl SettingsScreen {
                 {
                     match crate::store::avatar_crop::crop_to_avatar(bytes, state, 256) {
                         Ok(cropped) => {
-                            return Action::Task(Task::done(Message::AvatarSelected(cropped, mime.clone())));
+                            return Action::Task(Task::done(Message::AvatarSelected(
+                                cropped,
+                                mime.clone(),
+                            )));
                         }
                         Err(e) => {
                             tracing::warn!("Avatar crop failed: {e}");
@@ -522,7 +525,9 @@ impl SettingsScreen {
             }
             Message::EnableOmemo => Action::EnableOmemo,
             // UX-5: copy account detail to clipboard
-            Message::CopyToClipboard(content) => Action::Task(iced::clipboard::write::<Message>(content)),
+            Message::CopyToClipboard(content) => {
+                Action::Task(iced::clipboard::write::<Message>(content))
+            }
         }
     }
 

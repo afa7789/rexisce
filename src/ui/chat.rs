@@ -979,10 +979,7 @@ impl ChatScreen {
                                 }
                             }
                         }
-                        Message::Conversation(
-                            jid_for_preview,
-                            super::conversation::Message::Send,
-                        )
+                        Message::Conversation(jid_for_preview, super::conversation::Message::Send)
                     });
                     let use_omemo = self
                         .conversations
@@ -1195,11 +1192,7 @@ impl ChatScreen {
                                 .get(jid.as_str())
                                 .map_or("", String::as_str);
                             let conv_view = convo
-                                .view(
-                                    vctx,
-                                    occupants,
-                                    own_nick,
-                                )
+                                .view(vctx, occupants, own_nick)
                                 .map(move |m| Message::Conversation(jid2.clone(), m));
                             if is_typing {
                                 let indicator = container(
@@ -1240,14 +1233,12 @@ impl ChatScreen {
             iced::widget::button(text("● Available").size(11).shaping(Shaping::Advanced))
                 .on_press(Message::SetPresence(PresenceStatus::Available))
                 .padding([2, 8]);
-        let away_btn =
-            iced::widget::button(text("○ Away").size(11).shaping(Shaping::Advanced))
-                .on_press(Message::SetPresence(PresenceStatus::Away))
-                .padding([2, 8]);
-        let dnd_btn =
-            iced::widget::button(text("⛔ DND").size(11).shaping(Shaping::Advanced))
-                .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
-                .padding([2, 8]);
+        let away_btn = iced::widget::button(text("○ Away").size(11).shaping(Shaping::Advanced))
+            .on_press(Message::SetPresence(PresenceStatus::Away))
+            .padding([2, 8]);
+        let dnd_btn = iced::widget::button(text("⛔ DND").size(11).shaping(Shaping::Advanced))
+            .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
+            .padding([2, 8]);
         let status_bar = if show_jid_label {
             let own_label = text(format!("Signed in as {}", self.own_jid)).size(11);
             container(
@@ -1483,13 +1474,15 @@ mod tests {
         // Simulate VoiceEncodingDone by manually staging the attachment
         // and setting voice state, then sending Send.
         if let Some(convo) = s.conversations.get_mut("alice@example.com") {
-            convo.pending_attachments.push(super::conversation::Attachment {
-                name: "voice_message.wav".into(),
-                path: std::path::PathBuf::from("/tmp/voice_test.wav"),
-                size: 44100,
-                progress: 0,
-                thumbnail: None,
-            });
+            convo
+                .pending_attachments
+                .push(super::conversation::Attachment {
+                    name: "voice_message.wav".into(),
+                    path: std::path::PathBuf::from("/tmp/voice_test.wav"),
+                    size: 44100,
+                    progress: 0,
+                    thumbnail: None,
+                });
         }
         // Dispatch Send — this should be intercepted by ChatScreen,
         // which should take the pending_attachments and queue an upload.
@@ -1499,12 +1492,17 @@ mod tests {
         ));
         // Verify: upload target should be queued
         let targets = s.drain_upload_targets();
-        assert_eq!(targets.len(), 1, "expected 1 upload target for voice message");
+        assert_eq!(
+            targets.len(),
+            1,
+            "expected 1 upload target for voice message"
+        );
         assert_eq!(targets[0].0, "alice@example.com");
         // Verify: RequestUploadSlot command should be queued
         let cmds = s.drain_commands();
         assert!(
-            cmds.iter().any(|c| matches!(c, XmppCommand::RequestUploadSlot { .. })),
+            cmds.iter()
+                .any(|c| matches!(c, XmppCommand::RequestUploadSlot { .. })),
             "expected RequestUploadSlot command"
         );
     }

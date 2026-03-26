@@ -89,8 +89,13 @@ pub enum Message {
 pub enum Action {
     None,
     Close,
-    Discover { target_jid: String },
-    Execute { target_jid: String, node: String },
+    Discover {
+        target_jid: String,
+    },
+    Execute {
+        target_jid: String,
+        node: String,
+    },
     Submit {
         target_jid: String,
         node: String,
@@ -268,20 +273,19 @@ impl AdhocScreen {
                 Action::None
             }
             Message::CancelCommand => {
-                let action =
-                    if let Some(node) = self.active_node().map(str::to_owned) {
-                        if let Some(session_id) = self.active_session_id().map(str::to_owned) {
-                            Action::Cancel {
-                                target_jid: self.target_jid.clone(),
-                                node,
-                                session_id,
-                            }
-                        } else {
-                            Action::None
+                let action = if let Some(node) = self.active_node().map(str::to_owned) {
+                    if let Some(session_id) = self.active_session_id().map(str::to_owned) {
+                        Action::Cancel {
+                            target_jid: self.target_jid.clone(),
+                            node,
+                            session_id,
                         }
                     } else {
                         Action::None
-                    };
+                    }
+                } else {
+                    Action::None
+                };
                 self.step = AdhocStep::CommandList;
                 self.field_values.clear();
                 action

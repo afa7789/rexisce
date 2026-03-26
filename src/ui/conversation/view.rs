@@ -19,7 +19,9 @@ use crate::ui::omemo_trust::encryption_badge;
 use crate::ui::palette;
 use crate::ui::styling::{self, SpanStyle};
 
-use super::{ConversationView, Message, MessageState, VoiceState, EMOJI_LIST, ME_PREFIX, is_me_action};
+use super::{
+    is_me_action, ConversationView, Message, MessageState, VoiceState, EMOJI_LIST, ME_PREFIX,
+};
 
 impl ConversationView {
     pub fn view(
@@ -946,9 +948,7 @@ fn build_styled_text(spans: &[styling::Span]) -> Element<'static, Message> {
                     style: font::Style::Italic,
                     ..Font::DEFAULT
                 }),
-                SpanStyle::Code => t
-                    .font(Font::MONOSPACE)
-                    .color(palette::CODE_GREEN),
+                SpanStyle::Code => t.font(Font::MONOSPACE).color(palette::CODE_GREEN),
                 SpanStyle::Strike => t.strikethrough(true),
                 SpanStyle::Quote => t.color(palette::QUOTE_TEXT).font(Font {
                     style: font::Style::Italic,

@@ -2,8 +2,8 @@ use iced::widget::scrollable::{self, AbsoluteOffset};
 use iced::Task;
 
 use super::{
-    Attachment, ConversationView, Message, RecordingHandle, VoiceState, VOICE_MAX_SECS,
-    thumbnail_for_path,
+    thumbnail_for_path, Attachment, ConversationView, Message, RecordingHandle, VoiceState,
+    VOICE_MAX_SECS,
 };
 
 impl ConversationView {
