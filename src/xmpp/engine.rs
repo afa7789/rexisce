@@ -1350,10 +1350,20 @@ async fn dispatch_stanza(
                 if has_omemo_encrypted(&el) {
                     if let Some(ref mut mgr) = omemo_mgr {
                         let from = el.attr("from").unwrap_or("").to_string();
+                        let msg_id =
+                            el.attr("id").unwrap_or("").to_string();
                         match omemo_try_decrypt(mgr, account_jid, &el).await {
                             Ok(Some(body)) => {
+                                // Route decrypted message through the normal
+                                // MessageReceived path so it appears in
+                                // notifications and sidebar preview.
                                 let _ = event_tx
-                                    .send(XmppEvent::OmemoMessageDecrypted { from, body })
+                                    .send(XmppEvent::MessageReceived(IncomingMessage {
+                                        id: msg_id,
+                                        from,
+                                        body,
+                                        is_historical: false,
+                                    }))
                                     .await;
                                 // Check pre-key stock and replenish if below threshold.
                                 omemo_check_prekey_rotation(mgr, account_jid, outbox).await;
