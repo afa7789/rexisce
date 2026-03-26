@@ -445,14 +445,16 @@ impl SidebarScreen {
             None
         };
 
-        let contact_rows: Vec<Element<Message>> = self
+        // task-09: separate contacts into 1:1 and MUC room lists
+        let (direct_contacts, muc_contacts): (Vec<_>, Vec<_>) = self
             .contacts
             .iter()
-            .map(|c| {
+            .partition(|c| !muc_rooms.contains(&c.jid));
+
+        let build_contact_row = |c: &RosterContact, is_muc: bool| -> Element<'_, Message> {
                 let available = self.presence.get(c.jid.as_str()).copied().unwrap_or(false);
                 let indicator = if available { "●" } else { "○" };
                 let display_name = c.name.as_deref().unwrap_or(&c.jid);
-                let is_muc = muc_rooms.contains(&c.jid);
                 let muc_prefix = if is_muc { "# " } else { "" };
                 // G6: append [draft] if this JID has a non-empty draft
                 let has_draft = drafts.iter().any(|d| d == &c.jid);
@@ -582,7 +584,15 @@ impl SidebarScreen {
                         .align_y(Alignment::Center)
                         .into()
                 }
-            })
+        };
+
+        let direct_rows: Vec<Element<Message>> = direct_contacts
+            .iter()
+            .map(|c| build_contact_row(c, false))
+            .collect();
+        let room_rows: Vec<Element<Message>> = muc_contacts
+            .iter()
+            .map(|c| build_contact_row(c, true))
             .collect();
 
         let empty_note = if self.contacts.is_empty() {
@@ -654,12 +664,24 @@ impl SidebarScreen {
             col = col.push(cr_row);
         }
 
-        for row in contact_rows {
-            col = col.push(row);
-        }
+        // task-09: 1:1 contacts section
+        if direct_rows.is_empty() && room_rows.is_empty() {
+            if let Some(note) = empty_note {
+                col = col.push(note);
+            }
+        } else {
+            for row in direct_rows {
+                col = col.push(row);
+            }
 
-        if let Some(note) = empty_note {
-            col = col.push(note);
+            // task-09: Rooms section header + MUC list
+            if !room_rows.is_empty() {
+                col = col.push(horizontal_rule(1));
+                col = col.push(text("Rooms").size(14));
+                for row in room_rows {
+                    col = col.push(row);
+                }
+            }
         }
 
         // H4: profile popover — shown below contact list when a profile is selected
