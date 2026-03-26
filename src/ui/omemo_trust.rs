@@ -14,6 +14,8 @@ use iced::{
     Alignment, Color, Element, Length,
 };
 
+use crate::ui::palette;
+
 use crate::xmpp::modules::omemo::store::TrustState;
 
 // ---------------------------------------------------------------------------
@@ -255,19 +257,19 @@ pub fn format_fingerprint(key_bytes: &[u8]) -> String {
 /// Return the color associated with a trust state for UI badges/indicators.
 pub fn trust_color(state: &TrustState) -> Color {
     match state {
-        TrustState::Trusted => Color::from_rgb(0.20, 0.75, 0.35), // green
-        TrustState::Tofu => Color::from_rgb(0.90, 0.70, 0.10),    // yellow/amber
-        TrustState::Untrusted => Color::from_rgb(0.85, 0.25, 0.25), // red
-        TrustState::Undecided => Color::from_rgb(0.55, 0.55, 0.55), // gray
+        TrustState::Trusted => palette::SUCCESS_GREEN,
+        TrustState::Tofu => palette::TOFU_AMBER,
+        TrustState::Untrusted => palette::DANGER_RED,
+        TrustState::Undecided => palette::UNDECIDED_GREY,
     }
 }
 
 /// Returns a small lock or unlock text badge indicating encryption state.
 pub fn encryption_badge<'a, M: 'a + Clone>(is_encrypted: bool) -> Element<'a, M> {
     let (label, _color) = if is_encrypted {
-        ("Encrypted", Color::from_rgb(0.20, 0.75, 0.35))
+        ("Encrypted", palette::SUCCESS_GREEN)
     } else {
-        ("Unencrypted", Color::from_rgb(0.85, 0.25, 0.25))
+        ("Unencrypted", palette::DANGER_RED)
     };
     text(label).size(11).into()
 }

@@ -15,6 +15,7 @@ use iced::{
 
 use crate::ui::account_state::account_color;
 use crate::ui::avatar::{jid_color, jid_initial};
+use crate::ui::palette;
 
 use crate::xmpp::{modules::presence_machine::PresenceStatus, AccountId, RosterContact};
 
@@ -508,7 +509,7 @@ impl SidebarScreen {
                             name_row,
                             text(preview.as_str())
                                 .size(11)
-                                .color(iced::Color::from_rgb(0.55, 0.55, 0.55))
+                                .color(palette::MUTED_TEXT)
                                 .shaping(Shaping::Advanced),
                         ]
                         .spacing(1)
@@ -631,11 +632,9 @@ impl SidebarScreen {
                 container(menu_col)
                     .width(Length::Fill)
                     .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgb(
-                            0.13, 0.13, 0.16,
-                        ))),
+                        background: Some(iced::Background::Color(palette::SURFACE_DARK)),
                         border: iced::Border {
-                            color: iced::Color::from_rgb(0.3, 0.3, 0.35),
+                            color: palette::BORDER_SUBTLE,
                             width: 1.0,
                             radius: 6.0.into(),
                         },
@@ -699,11 +698,9 @@ impl SidebarScreen {
                 container(profile_col)
                     .width(Length::Fill)
                     .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgb(
-                            0.13, 0.13, 0.16,
-                        ))),
+                        background: Some(iced::Background::Color(palette::SURFACE_DARK)),
                         border: iced::Border {
-                            color: iced::Color::from_rgb(0.3, 0.3, 0.35),
+                            color: palette::BORDER_SUBTLE,
                             width: 1.0,
                             radius: 6.0.into(),
                         },
