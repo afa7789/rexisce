@@ -247,6 +247,7 @@ pub(crate) async fn handle_message(
             from,
             body,
             is_historical: false,
+            is_encrypted: false,
         }))
         .await;
 }

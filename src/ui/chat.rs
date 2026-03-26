@@ -260,7 +260,7 @@ impl ChatScreen {
             reply_preview: None,
             edited: false,
             retracted: false,
-            is_encrypted: false,
+            is_encrypted: msg.is_encrypted,
             is_trusted: false,
         });
 
@@ -1344,6 +1344,7 @@ mod tests {
             from: "alice@example.com/res".into(),
             body: "Hello!".into(),
             is_historical: false,
+            is_encrypted: false,
         });
 
         assert!(s.conversations.contains_key("alice@example.com"));

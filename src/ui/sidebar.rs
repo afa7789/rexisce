@@ -672,17 +672,24 @@ impl SidebarScreen {
                 .padding([2, 4]);
 
             // H5: large avatar for profile popover (64x64)
-            let avatar_color = jid_color(jid.as_str());
-            let avatar_initial = jid_initial(jid.as_str()).to_string();
-            let profile_avatar = container(text(avatar_initial).size(28))
-                .width(64)
-                .height(64)
-                .style(move |_theme: &iced::Theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(avatar_color)),
-                    ..Default::default()
-                })
-                .align_x(Alignment::Center)
-                .align_y(Alignment::Center);
+            let profile_avatar: Element<'_, Message> =
+                if let Some(png) = vctx.avatars.get(jid.as_str()) {
+                    let handle = iced::widget::image::Handle::from_bytes(png.clone());
+                    iced::widget::image(handle).width(64).height(64).into()
+                } else {
+                    let avatar_color = jid_color(jid.as_str());
+                    let avatar_initial = jid_initial(jid.as_str()).to_string();
+                    container(text(avatar_initial).size(28))
+                        .width(64)
+                        .height(64)
+                        .style(move |_theme: &iced::Theme| iced::widget::container::Style {
+                            background: Some(iced::Background::Color(avatar_color)),
+                            ..Default::default()
+                        })
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center)
+                        .into()
+                };
 
             let profile_col = column![
                 row![text("Profile").size(12).width(Length::Fill), close_btn,]

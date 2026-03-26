@@ -1203,6 +1203,7 @@ async fn dispatch_stanza(
                         from: format!("{}/{}", muc_msg.room_jid, muc_msg.from_nick),
                         body: muc_msg.body,
                         is_historical: false,
+                        is_encrypted: false,
                     }))
                     .await;
                 return;
@@ -1225,6 +1226,7 @@ async fn dispatch_stanza(
                                 from: mam_msg.forwarded_from,
                                 body: mam_msg.body,
                                 is_historical: true,
+                                is_encrypted: false,
                             }))
                             .await;
                     }
@@ -1245,6 +1247,7 @@ async fn dispatch_stanza(
                             from: own_jid_str.to_string(),
                             body,
                             is_historical: false,
+                            is_encrypted: false,
                         }))
                         .await;
                 }
@@ -1363,6 +1366,7 @@ async fn dispatch_stanza(
                                         from,
                                         body,
                                         is_historical: false,
+                                        is_encrypted: true,
                                     }))
                                     .await;
                                 // Check pre-key stock and replenish if below threshold.
@@ -1782,6 +1786,7 @@ mod tests {
             from: "alice@example.com".into(),
             body: "Hello!".into(),
             is_historical: false,
+            is_encrypted: false,
         });
         let _ = format!("{e:?}");
     }

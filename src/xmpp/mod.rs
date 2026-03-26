@@ -61,6 +61,8 @@ pub struct IncomingMessage {
     /// True when this message was retrieved from MAM archive history.
     /// Notifications and sounds should be suppressed for historical messages.
     pub is_historical: bool,
+    /// True when this message was decrypted via OMEMO.
+    pub is_encrypted: bool,
 }
 
 /// Events emitted by the XMPP engine to the UI layer.
