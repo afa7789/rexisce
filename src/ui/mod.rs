@@ -1171,7 +1171,7 @@ impl App {
                         border: iced::Border {
                             color: palette.primary.base.color,
                             width: 1.0,
-                            radius: 8.0.into(),
+                            radius: 2.0.into(),
                         },
                         ..Default::default()
                     }
@@ -1285,7 +1285,7 @@ impl App {
                             border: iced::Border {
                                 color: palette.primary.base.color,
                                 width: 1.0,
-                                radius: 8.0.into(),
+                                radius: 2.0.into(),
                             },
                             shadow: iced::Shadow {
                                 color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),

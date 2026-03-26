@@ -637,7 +637,7 @@ impl SidebarScreen {
                         border: iced::Border {
                             color: iced::Color::from_rgb(0.3, 0.3, 0.35),
                             width: 1.0,
-                            radius: 6.0.into(),
+                            radius: 2.0.into(),
                         },
                         ..Default::default()
                     });
@@ -705,7 +705,7 @@ impl SidebarScreen {
                         border: iced::Border {
                             color: iced::Color::from_rgb(0.3, 0.3, 0.35),
                             width: 1.0,
-                            radius: 6.0.into(),
+                            radius: 2.0.into(),
                         },
                         ..Default::default()
                     });
