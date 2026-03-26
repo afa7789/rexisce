@@ -25,6 +25,11 @@ pub enum TrustState {
     Trusted,
     /// User has explicitly rejected this device.
     Untrusted,
+    /// BTBV: automatically trusted because no device for this JID
+    /// has been manually verified yet. Permits encryption until the
+    /// user verifies any device, at which point unverified devices
+    /// should be reviewed.
+    BlindTrust,
 }
 
 impl TrustState {
@@ -34,18 +39,25 @@ impl TrustState {
             TrustState::Tofu => "tofu",
             TrustState::Trusted => "trusted",
             TrustState::Untrusted => "untrusted",
+            TrustState::BlindTrust => "blind_trust",
         }
     }
 
     /// Returns true when this state permits receiving messages from the device.
     #[allow(dead_code)]
     pub fn is_decryptable(&self) -> bool {
-        matches!(self, TrustState::Tofu | TrustState::Trusted)
+        matches!(
+            self,
+            TrustState::Tofu | TrustState::Trusted | TrustState::BlindTrust
+        )
     }
 
     /// Returns true when this state permits encrypting outbound messages to the device.
     pub fn is_encryptable(&self) -> bool {
-        matches!(self, TrustState::Tofu | TrustState::Trusted)
+        matches!(
+            self,
+            TrustState::Tofu | TrustState::Trusted | TrustState::BlindTrust
+        )
     }
 }
 
@@ -57,6 +69,7 @@ impl std::str::FromStr for TrustState {
             "tofu" => TrustState::Tofu,
             "trusted" => TrustState::Trusted,
             "untrusted" => TrustState::Untrusted,
+            "blind_trust" => TrustState::BlindTrust,
             _ => TrustState::Undecided,
         })
     }
@@ -94,6 +107,9 @@ pub struct PeerDevice {
     pub trust: TrustState,
     pub _label: Option<String>,
     pub _active: bool,
+    /// Hex-encoded identity key fingerprint (Curve25519 public key).
+    #[allow(dead_code)]
+    pub fingerprint: Option<String>,
 }
 
 /// An Olm session row from `omemo_sessions`.
@@ -283,7 +299,7 @@ impl OmemoStore {
     /// Load all known devices for a peer JID.
     pub async fn load_devices(&self, account_jid: &str, peer_jid: &str) -> Result<Vec<PeerDevice>> {
         let rows = sqlx::query(
-            "SELECT peer_jid, device_id, trust, label, active
+            "SELECT peer_jid, device_id, trust, label, active, fingerprint
              FROM omemo_devices WHERE account_jid = ? AND peer_jid = ?",
         )
         .bind(account_jid)
@@ -302,6 +318,7 @@ impl OmemoStore {
                     .unwrap_or(TrustState::Undecided),
                 _label: r.get("label"),
                 _active: r.get::<i64, _>("active") != 0,
+                fingerprint: r.get("fingerprint"),
             })
             .collect())
     }
@@ -373,19 +390,149 @@ impl OmemoStore {
             .await?;
 
         // Re-activate the reported ones (insert if unknown).
+        // Determine whether BTBV applies: if no device for this peer has been
+        // manually verified, new devices get BlindTrust; otherwise Undecided.
+        let default_trust = if self
+            .has_manually_trusted_device(account_jid, peer_jid)
+            .await?
+        {
+            TrustState::Undecided
+        } else {
+            TrustState::BlindTrust
+        };
+
         for &id in active_device_ids {
             sqlx::query(
                 "INSERT INTO omemo_devices (account_jid, peer_jid, device_id, trust, active)
-                 VALUES (?, ?, ?, 'undecided', 1)
+                 VALUES (?, ?, ?, ?, 1)
                  ON CONFLICT(account_jid, peer_jid, device_id)
                  DO UPDATE SET active = 1",
             )
             .bind(account_jid)
             .bind(peer_jid)
             .bind(id as i64)
+            .bind(default_trust.as_str())
             .execute(&self.pool)
             .await?;
         }
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // BTBV trust management (XEP-0384)
+    // -----------------------------------------------------------------------
+
+    /// Check whether any device for `peer_jid` has been manually verified
+    /// (trust = 'trusted'). This is the pivot for BTBV: once a user verifies
+    /// any device, all other devices for that JID must be explicitly decided.
+    pub async fn has_manually_trusted_device(
+        &self,
+        account_jid: &str,
+        peer_jid: &str,
+    ) -> Result<bool> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS cnt FROM omemo_devices
+             WHERE account_jid = ? AND peer_jid = ? AND trust = 'trusted'",
+        )
+        .bind(account_jid)
+        .bind(peer_jid)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>("cnt") > 0)
+    }
+
+    /// Store (or update) the identity key fingerprint for a device.
+    ///
+    /// `fingerprint` is the hex-encoded Curve25519 public identity key.
+    #[allow(dead_code)]
+    pub async fn save_fingerprint(
+        &self,
+        account_jid: &str,
+        peer_jid: &str,
+        device_id: u32,
+        fingerprint: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE omemo_devices SET fingerprint = ?
+             WHERE account_jid = ? AND peer_jid = ? AND device_id = ?",
+        )
+        .bind(fingerprint)
+        .bind(account_jid)
+        .bind(peer_jid)
+        .bind(device_id as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Retrieve the stored fingerprint for a specific device, if any.
+    #[allow(dead_code)]
+    pub async fn get_fingerprint(
+        &self,
+        account_jid: &str,
+        peer_jid: &str,
+        device_id: u32,
+    ) -> Result<Option<String>> {
+        let row = sqlx::query(
+            "SELECT fingerprint FROM omemo_devices
+             WHERE account_jid = ? AND peer_jid = ? AND device_id = ?",
+        )
+        .bind(account_jid)
+        .bind(peer_jid)
+        .bind(device_id as i64)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|r| r.get("fingerprint")))
+    }
+
+    /// Determine the initial trust state for a newly-seen device using BTBV.
+    ///
+    /// If no device for `peer_jid` has been manually verified yet, the new
+    /// device gets `BlindTrust` (messages are encrypted to it automatically).
+    /// Once any device has been verified, new devices default to `Undecided`
+    /// and the user must explicitly decide.
+    #[allow(dead_code)]
+    pub async fn resolve_initial_trust(
+        &self,
+        account_jid: &str,
+        peer_jid: &str,
+    ) -> Result<TrustState> {
+        if self
+            .has_manually_trusted_device(account_jid, peer_jid)
+            .await?
+        {
+            Ok(TrustState::Undecided)
+        } else {
+            Ok(TrustState::BlindTrust)
+        }
+    }
+
+    /// Promote a device from `BlindTrust` to `Trusted` after the user verifies
+    /// the fingerprint. Also downgrades any remaining `BlindTrust` devices for
+    /// the same JID to `Undecided`, since BTBV no longer applies once manual
+    /// verification has occurred.
+    #[allow(dead_code)]
+    pub async fn verify_device(
+        &self,
+        account_jid: &str,
+        peer_jid: &str,
+        device_id: u32,
+    ) -> Result<()> {
+        // Mark the verified device as Trusted.
+        self.set_trust(account_jid, peer_jid, device_id, TrustState::Trusted)
+            .await?;
+
+        // Downgrade remaining BlindTrust devices to Undecided.
+        sqlx::query(
+            "UPDATE omemo_devices SET trust = 'undecided'
+             WHERE account_jid = ? AND peer_jid = ? AND device_id != ? AND trust = 'blind_trust'",
+        )
+        .bind(account_jid)
+        .bind(peer_jid)
+        .bind(device_id as i64)
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 }
@@ -405,6 +552,7 @@ mod tests {
             TrustState::Tofu,
             TrustState::Trusted,
             TrustState::Untrusted,
+            TrustState::BlindTrust,
         ] {
             assert_eq!(state.as_str().parse::<TrustState>().unwrap(), *state);
         }
@@ -414,6 +562,7 @@ mod tests {
     fn trust_state_encryptable() {
         assert!(TrustState::Tofu.is_encryptable());
         assert!(TrustState::Trusted.is_encryptable());
+        assert!(TrustState::BlindTrust.is_encryptable());
         assert!(!TrustState::Undecided.is_encryptable());
         assert!(!TrustState::Untrusted.is_encryptable());
     }
@@ -422,7 +571,232 @@ mod tests {
     fn trust_state_decryptable() {
         assert!(TrustState::Tofu.is_decryptable());
         assert!(TrustState::Trusted.is_decryptable());
+        assert!(TrustState::BlindTrust.is_decryptable());
         assert!(!TrustState::Undecided.is_decryptable());
         assert!(!TrustState::Untrusted.is_decryptable());
+    }
+
+    #[test]
+    fn blind_trust_as_str() {
+        assert_eq!(TrustState::BlindTrust.as_str(), "blind_trust");
+    }
+
+    #[test]
+    fn blind_trust_from_str() {
+        assert_eq!(
+            "blind_trust".parse::<TrustState>().unwrap(),
+            TrustState::BlindTrust
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Async tests requiring a database
+    // -----------------------------------------------------------------------
+
+    /// Helper: create an in-memory database with migrations applied.
+    async fn test_db() -> SqlitePool {
+        let db = crate::store::Database::connect(":memory:")
+            .await
+            .expect("open in-memory db");
+        db.pool
+    }
+
+    #[tokio::test]
+    async fn resolve_initial_trust_blind_when_no_verified() {
+        let pool = test_db().await;
+        let store = OmemoStore::new(pool);
+
+        // No devices at all => BlindTrust
+        let trust = store
+            .resolve_initial_trust("me@example.com", "alice@example.com")
+            .await
+            .unwrap();
+        assert_eq!(trust, TrustState::BlindTrust);
+    }
+
+    #[tokio::test]
+    async fn resolve_initial_trust_undecided_after_verification() {
+        let pool = test_db().await;
+        let store = OmemoStore::new(pool);
+
+        // Insert a device and mark it trusted.
+        store
+            .upsert_device(
+                "me@example.com",
+                "alice@example.com",
+                100,
+                TrustState::Trusted,
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+
+        let trust = store
+            .resolve_initial_trust("me@example.com", "alice@example.com")
+            .await
+            .unwrap();
+        assert_eq!(trust, TrustState::Undecided);
+    }
+
+    #[tokio::test]
+    async fn verify_device_downgrades_blind_trust() {
+        let pool = test_db().await;
+        let store = OmemoStore::new(pool);
+
+        // Two devices, both BlindTrust.
+        store
+            .upsert_device(
+                "me@example.com",
+                "bob@example.com",
+                1,
+                TrustState::BlindTrust,
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+        store
+            .upsert_device(
+                "me@example.com",
+                "bob@example.com",
+                2,
+                TrustState::BlindTrust,
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+
+        // Verify device 1.
+        store
+            .verify_device("me@example.com", "bob@example.com", 1)
+            .await
+            .unwrap();
+
+        let devices = store
+            .load_devices("me@example.com", "bob@example.com")
+            .await
+            .unwrap();
+
+        let dev1 = devices.iter().find(|d| d.device_id == 1).unwrap();
+        let dev2 = devices.iter().find(|d| d.device_id == 2).unwrap();
+
+        assert_eq!(dev1.trust, TrustState::Trusted);
+        assert_eq!(dev2.trust, TrustState::Undecided);
+    }
+
+    #[tokio::test]
+    async fn sync_device_list_uses_btbv() {
+        let pool = test_db().await;
+        let store = OmemoStore::new(pool);
+
+        // First sync: no verified devices => new devices get BlindTrust.
+        store
+            .sync_device_list("me@example.com", "carol@example.com", &[10, 20])
+            .await
+            .unwrap();
+
+        let devices = store
+            .load_devices("me@example.com", "carol@example.com")
+            .await
+            .unwrap();
+        for d in &devices {
+            assert_eq!(d.trust, TrustState::BlindTrust);
+        }
+
+        // Manually trust device 10.
+        store
+            .set_trust(
+                "me@example.com",
+                "carol@example.com",
+                10,
+                TrustState::Trusted,
+            )
+            .await
+            .unwrap();
+
+        // Sync again with a new device 30 => should get Undecided.
+        store
+            .sync_device_list("me@example.com", "carol@example.com", &[10, 20, 30])
+            .await
+            .unwrap();
+
+        let devices = store
+            .load_devices("me@example.com", "carol@example.com")
+            .await
+            .unwrap();
+        let dev30 = devices.iter().find(|d| d.device_id == 30).unwrap();
+        assert_eq!(dev30.trust, TrustState::Undecided);
+
+        // Device 10 should still be trusted (conflict clause only updates active).
+        let dev10 = devices.iter().find(|d| d.device_id == 10).unwrap();
+        assert_eq!(dev10.trust, TrustState::Trusted);
+    }
+
+    #[tokio::test]
+    async fn save_and_get_fingerprint() {
+        let pool = test_db().await;
+        let store = OmemoStore::new(pool);
+
+        store
+            .upsert_device(
+                "me@example.com",
+                "dave@example.com",
+                42,
+                TrustState::BlindTrust,
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+
+        // No fingerprint yet.
+        let fp = store
+            .get_fingerprint("me@example.com", "dave@example.com", 42)
+            .await
+            .unwrap();
+        assert!(fp.is_none());
+
+        // Save a fingerprint.
+        store
+            .save_fingerprint(
+                "me@example.com",
+                "dave@example.com",
+                42,
+                "aabbccdd11223344",
+            )
+            .await
+            .unwrap();
+
+        let fp = store
+            .get_fingerprint("me@example.com", "dave@example.com", 42)
+            .await
+            .unwrap();
+        assert_eq!(fp.as_deref(), Some("aabbccdd11223344"));
+    }
+
+    #[tokio::test]
+    async fn has_manually_trusted_device_false_for_blind_trust() {
+        let pool = test_db().await;
+        let store = OmemoStore::new(pool);
+
+        store
+            .upsert_device(
+                "me@example.com",
+                "eve@example.com",
+                1,
+                TrustState::BlindTrust,
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+
+        let has = store
+            .has_manually_trusted_device("me@example.com", "eve@example.com")
+            .await
+            .unwrap();
+        assert!(!has);
     }
 }

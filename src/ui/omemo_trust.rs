@@ -211,10 +211,12 @@ fn device_row(dev: &DeviceEntry) -> Element<'_, Message> {
 
     // Trust toggle button depends on current state.
     let toggle_btn: Element<Message> = match dev.trust {
-        TrustState::Trusted | TrustState::Tofu => button(text("Untrust").size(12))
-            .on_press(Message::UntrustDevice(dev.device_id))
-            .padding([4, 10])
-            .into(),
+        TrustState::Trusted | TrustState::Tofu | TrustState::BlindTrust => {
+            button(text("Untrust").size(12))
+                .on_press(Message::UntrustDevice(dev.device_id))
+                .padding([4, 10])
+                .into()
+        }
         TrustState::Untrusted | TrustState::Undecided => button(text("Trust").size(12))
             .on_press(Message::TrustDevice(dev.device_id))
             .padding([4, 10])
@@ -255,10 +257,11 @@ pub fn format_fingerprint(key_bytes: &[u8]) -> String {
 /// Return the color associated with a trust state for UI badges/indicators.
 pub fn trust_color(state: &TrustState) -> Color {
     match state {
-        TrustState::Trusted => Color::from_rgb(0.20, 0.75, 0.35), // green
-        TrustState::Tofu => Color::from_rgb(0.90, 0.70, 0.10),    // yellow/amber
-        TrustState::Untrusted => Color::from_rgb(0.85, 0.25, 0.25), // red
-        TrustState::Undecided => Color::from_rgb(0.55, 0.55, 0.55), // gray
+        TrustState::Trusted => Color::from_rgb(0.20, 0.75, 0.35),    // green
+        TrustState::Tofu => Color::from_rgb(0.90, 0.70, 0.10),       // yellow/amber
+        TrustState::BlindTrust => Color::from_rgb(0.40, 0.70, 0.90), // blue
+        TrustState::Untrusted => Color::from_rgb(0.85, 0.25, 0.25),  // red
+        TrustState::Undecided => Color::from_rgb(0.55, 0.55, 0.55),  // gray
     }
 }
 
@@ -280,6 +283,7 @@ fn trust_badge(state: &TrustState) -> Element<'_, Message> {
     let (label, color) = match state {
         TrustState::Trusted => ("Trusted", trust_color(state)),
         TrustState::Tofu => ("TOFU", trust_color(state)),
+        TrustState::BlindTrust => ("Blind Trust", trust_color(state)),
         TrustState::Untrusted => ("Untrusted", trust_color(state)),
         TrustState::Undecided => ("Undecided", trust_color(state)),
     };
