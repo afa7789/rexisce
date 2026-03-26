@@ -15,27 +15,100 @@ use crate::config::{self, Settings, Theme};
 // Section card helper — wraps grouped settings in a themed card container
 // ---------------------------------------------------------------------------
 
+/// Build a card container for a settings section with title and optional description.
+#[allow(dead_code)]
 fn settings_section<'a>(title: &str, content: Element<'a, Message>) -> Element<'a, Message> {
-    let heading = text(title.to_string()).size(18).font(iced::Font {
+    settings_section_with_desc(title, None, content)
+}
+
+/// Build a card container with title, optional description, and content.
+fn settings_section_with_desc<'a>(
+    title: &str,
+    description: Option<&str>,
+    content: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let heading = text(title.to_string()).size(17).font(iced::Font {
         weight: iced::font::Weight::Bold,
         ..Default::default()
     });
 
-    container(column![heading, content].spacing(10))
-        .padding(15)
+    let mut header_col = column![heading].spacing(2);
+    if let Some(desc) = description {
+        header_col = header_col.push(
+            text(desc.to_string())
+                .size(12)
+                .color(iced::Color::from_rgba(0.5, 0.5, 0.5, 0.8)),
+        );
+    }
+
+    // Thin divider between header and content
+    let divider = container(horizontal_space())
+        .height(1)
+        .width(Length::Fill)
+        .style(|theme: &iced::Theme| {
+            let palette = theme.extended_palette();
+            iced::widget::container::Style {
+                background: Some(iced::Background::Color(iced::Color {
+                    a: 0.12,
+                    ..palette.background.strong.color
+                })),
+                ..Default::default()
+            }
+        });
+
+    container(column![header_col, divider, content].spacing(12))
+        .padding([18, 20])
         .width(Length::Fill)
         .style(|theme: &iced::Theme| {
             let palette = theme.extended_palette();
             iced::widget::container::Style {
                 background: Some(iced::Background::Color(palette.background.weak.color)),
                 border: iced::Border {
-                    color: palette.background.strong.color,
+                    color: iced::Color {
+                        a: 0.25,
+                        ..palette.background.strong.color
+                    },
                     width: 1.0,
-                    radius: 10.0.into(),
+                    radius: 12.0.into(),
+                },
+                shadow: iced::Shadow {
+                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.06),
+                    offset: iced::Vector::new(0.0, 2.0),
+                    blur_radius: 8.0,
                 },
                 ..Default::default()
             }
         })
+        .into()
+}
+
+/// A subtle horizontal divider used between individual setting rows within a card.
+fn setting_divider<'a>() -> Element<'a, Message> {
+    container(horizontal_space())
+        .height(1)
+        .width(Length::Fill)
+        .style(|theme: &iced::Theme| {
+            let palette = theme.extended_palette();
+            iced::widget::container::Style {
+                background: Some(iced::Background::Color(iced::Color {
+                    a: 0.08,
+                    ..palette.background.strong.color
+                })),
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
+/// Category group heading displayed above related sections.
+fn category_heading<'a>(label: &str) -> Element<'a, Message> {
+    text(label.to_string())
+        .size(13)
+        .font(iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..Default::default()
+        })
+        .color(iced::Color::from_rgba(0.45, 0.45, 0.45, 0.9))
         .into()
 }
 
@@ -589,11 +662,22 @@ impl SettingsScreen {
         .spacing(10)
         .align_y(Alignment::Center);
 
-        let appearance_content: Element<Message> =
-            column![theme_row, system_theme_row, time_format_row, font_row,]
-                .spacing(15)
-                .into();
-        let appearance_section = settings_section("Appearance", appearance_content);
+        let appearance_content: Element<Message> = column![
+            theme_row,
+            setting_divider(),
+            system_theme_row,
+            setting_divider(),
+            time_format_row,
+            setting_divider(),
+            font_row,
+        ]
+        .spacing(10)
+        .into();
+        let appearance_section = settings_section_with_desc(
+            "Appearance",
+            Some("Theme, fonts, and display preferences"),
+            appearance_content,
+        );
 
         // === Notifications section ===
         let notif_row = row![
@@ -613,8 +697,14 @@ impl SettingsScreen {
         .align_y(Alignment::Center);
 
         let notifications_content: Element<Message> =
-            column![notif_row, sound_row].spacing(15).into();
-        let notifications_section = settings_section("Notifications", notifications_content);
+            column![notif_row, setting_divider(), sound_row]
+                .spacing(10)
+                .into();
+        let notifications_section = settings_section_with_desc(
+            "Notifications",
+            Some("Alerts and sound preferences"),
+            notifications_content,
+        );
 
         // === Messages section ===
         let receipts_row = row![
@@ -660,11 +750,22 @@ impl SettingsScreen {
         .align_y(Alignment::Center)
         .into();
 
-        let messages_content: Element<Message> =
-            column![receipts_row, typing_row, read_markers_row, mam_mode_row,]
-                .spacing(15)
-                .into();
-        let messages_section = settings_section("Messages", messages_content);
+        let messages_content: Element<Message> = column![
+            receipts_row,
+            setting_divider(),
+            typing_row,
+            setting_divider(),
+            read_markers_row,
+            setting_divider(),
+            mam_mode_row,
+        ]
+        .spacing(10)
+        .into();
+        let messages_section = settings_section_with_desc(
+            "Messages",
+            Some("Delivery receipts and archive settings"),
+            messages_content,
+        );
 
         // === Chat Preferences section ===
         let join_leave_row = row![
@@ -703,13 +804,20 @@ impl SettingsScreen {
         .into();
         let chat_prefs_content: Element<Message> = column![
             join_leave_row,
+            setting_divider(),
             typing_indicators_row,
+            setting_divider(),
             compact_layout_row,
+            setting_divider(),
             sort_row,
         ]
-        .spacing(15)
+        .spacing(10)
         .into();
-        let chat_prefs_section = settings_section("Chat Preferences", chat_prefs_content);
+        let chat_prefs_section = settings_section_with_desc(
+            "Chat Preferences",
+            Some("Room events, layout, and contact sorting"),
+            chat_prefs_content,
+        );
 
         // === Profile section ===
         let avatar_row = row![
@@ -733,10 +841,17 @@ impl SettingsScreen {
         let edit_profile_btn = button("Edit Profile")
             .on_press(Message::OpenVCardEditor)
             .padding([6, 14]);
-        let profile_content: Element<Message> = column![avatar_row, status_row, edit_profile_btn]
-            .spacing(15)
-            .into();
-        let profile_section = settings_section("Profile", profile_content);
+        let profile_content: Element<Message> = column![
+            avatar_row,
+            setting_divider(),
+            status_row,
+            setting_divider(),
+            edit_profile_btn,
+        ]
+        .spacing(10)
+        .into();
+        let profile_section =
+            settings_section_with_desc("Profile", Some("Avatar and status"), profile_content);
 
         // === Account section ===
         let account_section = self.view_account_details();
@@ -783,19 +898,30 @@ impl SettingsScreen {
             .align_y(Alignment::Center);
 
         let content = column![
+            // -- General --
+            category_heading("GENERAL"),
             appearance_section,
             notifications_section,
+            // -- Communication --
+            category_heading("COMMUNICATION"),
             messages_section,
             chat_prefs_section,
+            // -- Account & Profile --
+            category_heading("ACCOUNT & PROFILE"),
             profile_section,
             account_section,
+            // -- Privacy & Security --
+            category_heading("PRIVACY & SECURITY"),
             omemo_section,
             blocklist_section,
+            // -- Advanced --
+            category_heading("ADVANCED"),
             network_section,
             data_section,
+            // -- Actions --
             bottom_row,
         ]
-        .spacing(30)
+        .spacing(16)
         .padding(24)
         .width(500);
 
@@ -857,20 +983,25 @@ impl SettingsScreen {
 
         let details: Element<Message> = column![
             copyable_row!("JID", bare_jid),
+            setting_divider(),
             copyable_row!("Server", server),
+            setting_divider(),
             copyable_row!("Resource", resource),
+            setting_divider(),
             row![
                 text("Status").size(13).width(Length::Fixed(140.0)),
                 text(status_str).size(13).width(Length::Fill),
             ]
             .spacing(8),
+            setting_divider(),
             copyable_row!("Auth", auth_val),
+            setting_divider(),
             copyable_row!("Server features", features_val),
         ]
-        .spacing(10)
+        .spacing(8)
         .into();
 
-        settings_section("Account", details)
+        settings_section_with_desc("Account", Some("Connection and server details"), details)
     }
 
     // M6: Data & Storage sub-view.
@@ -930,10 +1061,20 @@ impl SettingsScreen {
         .align_y(Alignment::Center)
         .into();
 
-        let content: Element<Message> = column![limit_row, clear_section, export_row]
-            .spacing(15)
-            .into();
-        settings_section("Data & Storage", content)
+        let content: Element<Message> = column![
+            limit_row,
+            setting_divider(),
+            clear_section,
+            setting_divider(),
+            export_row,
+        ]
+        .spacing(10)
+        .into();
+        settings_section_with_desc(
+            "Data & Storage",
+            Some("Message archive and export options"),
+            content,
+        )
     }
 
     // MEMO: OMEMO encryption sub-view.
@@ -967,7 +1108,11 @@ impl SettingsScreen {
             .align_y(Alignment::Center)
             .into()
         };
-        settings_section("OMEMO Encryption", body)
+        settings_section_with_desc(
+            "OMEMO Encryption",
+            Some("End-to-end encryption for private conversations"),
+            body,
+        )
     }
 
     // M5: Network settings sub-view.
@@ -1033,15 +1178,22 @@ impl SettingsScreen {
         .spacing(10)
         .align_y(Alignment::Center);
 
-        let mut col = column![proxy_type_row].spacing(15);
+        let mut col = column![proxy_type_row].spacing(10);
         if let Some(detail) = proxy_detail {
+            col = col.push(setting_divider());
             col = col.push(detail);
         }
+        col = col.push(setting_divider());
         col = col.push(srv_row);
+        col = col.push(setting_divider());
         col = col.push(tls_row);
 
         let content: Element<Message> = col.into();
-        settings_section("Advanced", content)
+        settings_section_with_desc(
+            "Network",
+            Some("Proxy, TLS, and server connection settings"),
+            content,
+        )
     }
 }
 
