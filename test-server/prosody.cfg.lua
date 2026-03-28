@@ -72,8 +72,8 @@ modules_enabled = {
     -- XEP-0313: Message Archive Management
     "mam";
 
-    -- XEP-0198: Stream Management
-    "smacks";
+    -- XEP-0198: Stream Management (disabled: client doesn't negotiate SM enable)
+    -- "smacks";
 
     -- XEP-0048: Bookmarks
     "bookmarks";

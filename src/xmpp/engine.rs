@@ -346,7 +346,10 @@ async fn run_session_loop<C: ServerConnector>(
     let mut reconnect_attempt: u32 = 0;
 
     // C1: XEP-0198 stream management tracker
+    // Note: SM is only active when negotiated with the server via <enable>.
+    // Currently the client never sends <enable>, so sm_enabled stays false.
     let mut sm = StreamMgmt::new();
+    let sm_enabled = false;
     // C4: XEP-0191 blocking command manager
     let mut blocking_mgr = BlockingManager::new();
     // own JID (set on Online, used for carbon detection)
@@ -432,8 +435,10 @@ async fn run_session_loop<C: ServerConnector>(
                 break;
             }
             // C1: record sent stanza and check for queue desync
-            sm.on_stanza_sent(stanza.clone());
-            if sm.has_queue_desync() {
+            if sm_enabled {
+                sm.on_stanza_sent(stanza.clone());
+            }
+            if sm_enabled && sm.has_queue_desync() {
                 tracing::warn!(
                     "stream_mgmt: unacked queue desync — {} pending, h={}",
                     sm.pending_count(),
@@ -441,7 +446,7 @@ async fn run_session_loop<C: ServerConnector>(
                 );
             }
             // C1: every 5 stanzas sent, proactively request an ack from server
-            if sm.pending_count() % 5 == 0 && sm.pending_count() > 0 {
+            if sm_enabled && sm.pending_count() % 5 == 0 && sm.pending_count() > 0 {
                 outbox.push_back(sm.build_request());
             }
             // F1: emit sent stanza to debug console
@@ -465,7 +470,7 @@ async fn run_session_loop<C: ServerConnector>(
                         break;
                     }
                     Some(ev) => {
-                        let auth_failure = handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &mut ignore_mgr, &conv_sync_mgr, &mut account_mgr, &mut sync_orch, &config.jid, config.push_service_jid.as_deref(), flags).await;
+                        let auth_failure = handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &mut ignore_mgr, &conv_sync_mgr, &mut account_mgr, &mut sync_orch, &config.jid, config.push_service_jid.as_deref(), flags, sm_enabled).await;
                         if auth_failure {
                             tracing::info!("engine: breaking session loop due to auth failure");
                             break;
@@ -1008,6 +1013,7 @@ async fn handle_client_event(
     account_jid: &str,
     push_service_jid: Option<&str>,
     privacy_flags: u8,
+    sm_enabled: bool,
 ) -> bool {
     match ev {
         tokio_xmpp::Event::Online { bound_jid, .. } => {
@@ -1129,8 +1135,10 @@ async fn handle_client_event(
         tokio_xmpp::Event::Stanza(el) => {
             // C1: record inbound stanza and maybe send coalesced ack
             sm.on_stanza_received();
-            if let Some(ack) = sm.maybe_send_ack() {
-                outbox.push_back(ack);
+            if sm_enabled {
+                if let Some(ack) = sm.maybe_send_ack() {
+                    outbox.push_back(ack);
+                }
             }
             dispatch_stanza(
                 el,
