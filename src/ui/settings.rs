@@ -1391,4 +1391,36 @@ mod tests {
         let _ = screen.update(Message::ForceTlsToggled(false));
         assert!(!screen.settings.force_tls);
     }
+
+    #[test]
+    fn settings_theme_toggle_switches_dark_to_light() {
+        let mut screen = SettingsScreen::new(Settings { theme: Theme::Dark, ..Settings::default() });
+        screen.update(Message::ThemeToggled);
+        assert_eq!(screen.settings.theme, Theme::Light);
+    }
+
+    #[test]
+    fn settings_font_size_increase_bounded_at_20() {
+        let mut s = Settings::default();
+        s.font_size = 20;
+        let mut screen = SettingsScreen::new(s);
+        screen.update(Message::FontSizeIncreased);
+        assert_eq!(screen.settings.font_size, 20);
+    }
+
+    #[test]
+    fn settings_font_size_decrease_bounded_at_12() {
+        let mut s = Settings::default();
+        s.font_size = 12;
+        let mut screen = SettingsScreen::new(s);
+        screen.update(Message::FontSizeDecreased);
+        assert_eq!(screen.settings.font_size, 12);
+    }
+
+    #[test]
+    fn settings_back_returns_goback_action() {
+        let mut screen = SettingsScreen::new(Settings::default());
+        let action = screen.update(Message::Back);
+        assert!(matches!(action, Action::GoBack));
+    }
 }

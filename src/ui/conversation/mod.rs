@@ -448,4 +448,57 @@ mod tests {
         assert!(!is_me_action("/me")); // no trailing space + content
         assert!(!is_me_action("/menu"));
     }
+
+    #[test]
+    fn conversation_send_clears_composer_and_reply() {
+        let mut cv = ConversationView::new("alice@example.com".into(), "me@example.com".into());
+        cv.composer = "hello world".into();
+        cv.reply_to = Some(("msg-1".into(), "preview text".into()));
+
+        let _ = cv.update(Message::Send);
+
+        assert!(cv.composer.is_empty());
+        assert!(cv.reply_to.is_none());
+    }
+
+    #[test]
+    fn conversation_toggle_encryption_flips_flag() {
+        let mut cv = ConversationView::new("alice@example.com".into(), "me@example.com".into());
+        assert!(!cv.is_encryption_enabled);
+
+        let _ = cv.update(Message::ToggleEncryption);
+        assert!(cv.is_encryption_enabled);
+
+        let _ = cv.update(Message::ToggleEncryption);
+        assert!(!cv.is_encryption_enabled);
+    }
+
+    #[test]
+    fn conversation_apply_retraction_marks_message() {
+        let mut cv = ConversationView::new("alice@example.com".into(), "me@example.com".into());
+        cv.push_message(make_msg("m1", "alice@example.com", "hello", false));
+        cv.apply_retraction("m1");
+        assert!(cv.messages()[0].retracted);
+    }
+
+    #[test]
+    fn conversation_apply_correction_updates_body() {
+        let mut cv = ConversationView::new("alice@example.com".into(), "me@example.com".into());
+        cv.push_message(make_msg("m1", "alice@example.com", "original", false));
+        cv.apply_correction("m1", "corrected");
+        assert_eq!(cv.messages()[0].body, "corrected");
+        assert!(cv.messages()[0].edited);
+    }
+
+    #[test]
+    fn conversation_search_toggle_opens_and_clears_on_close() {
+        let mut cv = ConversationView::new("alice@example.com".into(), "me@example.com".into());
+        let _ = cv.update(Message::SearchToggled);
+        assert!(cv.search_open);
+        let _ = cv.update(Message::SearchQueryChanged("hello".into()));
+        assert_eq!(cv.search_query, "hello");
+        let _ = cv.update(Message::SearchToggled);
+        assert!(!cv.search_open);
+        assert!(cv.search_query.is_empty());
+    }
 }

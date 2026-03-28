@@ -203,3 +203,61 @@ impl LoginScreen {
             .into()
     }
 }
+
+#[cfg(test)]
+impl LoginScreen {
+    pub fn jid(&self) -> &str {
+        &self.jid
+    }
+    pub fn password(&self) -> &str {
+        &self.password
+    }
+    pub fn is_connecting(&self) -> bool {
+        matches!(self.state, LoginState::Connecting)
+    }
+    pub fn error_message(&self) -> Option<&str> {
+        if let LoginState::Error(ref e) = self.state {
+            Some(e)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_connect_transitions_to_connecting_state() {
+        let mut screen = LoginScreen::new();
+        screen.jid = "user@example.com".into();
+        screen.password = "secret".into();
+        let action = screen.update(Message::Connect);
+        assert!(screen.is_connecting());
+        assert!(matches!(action, Action::AttemptConnect(_)));
+    }
+
+    #[test]
+    fn login_on_error_sets_error_state() {
+        let mut screen = LoginScreen::new();
+        screen.on_error("Authentication failed".to_string());
+        assert_eq!(screen.error_message(), Some("Authentication failed"));
+    }
+
+    #[test]
+    fn login_jid_changed_updates_field() {
+        let mut screen = LoginScreen::new();
+        let action = screen.update(Message::JidChanged("alice@example.com".into()));
+        assert_eq!(screen.jid(), "alice@example.com");
+        assert!(matches!(action, Action::None));
+    }
+
+    #[test]
+    fn login_remember_me_toggle_returns_action() {
+        let mut screen = LoginScreen::new();
+        let action = screen.update(Message::RememberMeToggled(false));
+        assert!(!screen.remember_me);
+        assert!(matches!(action, Action::RememberMeToggled(false)));
+    }
+}

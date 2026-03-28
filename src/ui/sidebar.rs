@@ -764,6 +764,25 @@ impl SidebarScreen {
 }
 
 #[cfg(test)]
+impl SidebarScreen {
+    pub fn selected_profile_jid(&self) -> Option<&str> {
+        self.selected_profile.as_deref()
+    }
+    pub fn show_add_contact(&self) -> bool {
+        self.show_add_contact
+    }
+    pub fn add_contact_input(&self) -> &str {
+        &self.add_contact_input
+    }
+    pub fn unread_count(&self, jid: &str) -> u32 {
+        self.unread_counts.get(jid).copied().unwrap_or(0)
+    }
+    pub fn unread_for(&self, jid: &str) -> u32 {
+        self.unread_count(jid)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -784,5 +803,78 @@ mod tests {
         }]);
         let _ = s.update(Message::SelectContact("alice@example.com".into()));
         assert_eq!(s.selected_jid(), Some("alice@example.com"));
+    }
+
+    #[test]
+    fn sidebar_select_contact_updates_selected_jid() {
+        let mut s = SidebarScreen::new();
+        s.set_contacts(vec![
+            RosterContact {
+                jid: "alice@example.com".into(),
+                name: Some("Alice".into()),
+                subscription: "both".into(),
+            },
+            RosterContact {
+                jid: "bob@example.com".into(),
+                name: Some("Bob".into()),
+                subscription: "both".into(),
+            },
+        ]);
+        let action = s.update(Message::SelectContact("alice@example.com".into()));
+        assert_eq!(s.selected_jid(), Some("alice@example.com"));
+        assert!(matches!(action, Action::SelectContact(ref jid) if jid == "alice@example.com"));
+    }
+
+    #[test]
+    fn sidebar_add_contact_flow() {
+        let mut sidebar = SidebarScreen::new();
+
+        let action = sidebar.update(Message::ToggleAddContact);
+        assert!(matches!(action, Action::None));
+        assert!(sidebar.show_add_contact());
+
+        sidebar.update(Message::AddContactInputChanged("new@example.com".into()));
+        assert_eq!(sidebar.add_contact_input(), "new@example.com");
+
+        let action = sidebar.update(Message::SubmitAddContact);
+        assert!(matches!(action, Action::AddContact(ref jid) if jid == "new@example.com"));
+        assert!(!sidebar.show_add_contact());
+        assert!(sidebar.add_contact_input().is_empty());
+    }
+
+    #[test]
+    fn sidebar_submit_add_contact_empty_jid_no_op() {
+        let mut sidebar = SidebarScreen::new();
+        sidebar.update(Message::ToggleAddContact);
+        sidebar.update(Message::AddContactInputChanged("   ".into()));
+        let action = sidebar.update(Message::SubmitAddContact);
+        assert!(matches!(action, Action::None));
+    }
+
+    #[test]
+    fn sidebar_remove_contact_returns_action() {
+        let mut sidebar = SidebarScreen::new();
+        let action = sidebar.update(Message::RemoveContact("alice@example.com".into()));
+        assert!(matches!(action, Action::RemoveContact(ref jid) if jid == "alice@example.com"));
+    }
+
+    #[test]
+    fn sidebar_unread_increments_and_clears() {
+        let mut sidebar = SidebarScreen::new();
+        sidebar.increment_unread("alice@example.com");
+        sidebar.increment_unread("alice@example.com");
+        sidebar.increment_unread("alice@example.com");
+        assert_eq!(sidebar.unread_for("alice@example.com"), 3);
+        sidebar.clear_unread("alice@example.com");
+        assert_eq!(sidebar.unread_for("alice@example.com"), 0);
+    }
+
+    #[test]
+    fn sidebar_selecting_contact_clears_profile_popover() {
+        let mut sidebar = SidebarScreen::new();
+        sidebar.update(Message::ShowProfile("alice@example.com".into()));
+        assert_eq!(sidebar.selected_profile_jid(), Some("alice@example.com"));
+        sidebar.update(Message::SelectContact("alice@example.com".into()));
+        assert!(sidebar.selected_profile_jid().is_none());
     }
 }

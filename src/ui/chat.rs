@@ -1320,6 +1320,13 @@ fn apply_markdown_wrap(text: &str, marker: &str) -> String {
 }
 
 #[cfg(test)]
+impl ChatScreen {
+    pub fn unread_for(&self, jid: &str) -> u32 {
+        self.sidebar.unread_count(jid)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::xmpp::IncomingMessage;
@@ -1573,5 +1580,21 @@ mod tests {
                 .any(|c| matches!(c, XmppCommand::RequestUploadSlot { .. })),
             "expected RequestUploadSlot command after voice Send"
         );
+    }
+
+    #[test]
+    fn chat_screen_receive_message_increments_unread_for_inactive() {
+        let mut s = ChatScreen::new("me@example.com".into());
+        // No active conversation — active_jid is None
+        assert!(s.active_jid.is_none());
+        s.on_message_received(IncomingMessage {
+            id: "1".into(),
+            from: "alice@example.com".into(),
+            body: "hi".into(),
+            is_historical: false,
+            is_encrypted: false,
+            is_trusted: false,
+        });
+        assert_eq!(s.unread_for("alice@example.com"), 1);
     }
 }
