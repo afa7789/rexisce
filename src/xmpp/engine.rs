@@ -911,9 +911,9 @@ async fn run_session_loop<C: ServerConnector>(
                         }
                     }
                     // MEMO: Encrypt and send an OMEMO message.
-                    Some(XmppCommand::OmemoEncryptMessage { to, body }) => {
+                    Some(XmppCommand::OmemoEncryptMessage { to, body, id }) => {
                         if let Some(ref mut mgr) = omemo_mgr {
-                            match omemo_encrypt_and_send(mgr, &config.jid, &to, &body).await {
+                            match omemo_encrypt_and_send(mgr, &config.jid, &to, &body, &id).await {
                                 Ok(stanza) => {
                                     outbox.push_back(stanza);
                                     tracing::info!("omemo: encrypted message queued for {to}");

@@ -482,7 +482,7 @@ pub enum XmppCommand {
     OmemoEnable,
 
     /// Encrypt `body` for all trusted devices of `to` and send the result.
-    OmemoEncryptMessage { to: String, body: String },
+    OmemoEncryptMessage { to: String, body: String, id: String },
 
     /// Mark `device_id` for `jid` as trusted by the user.
     OmemoTrustDevice { jid: String, device_id: u32 },

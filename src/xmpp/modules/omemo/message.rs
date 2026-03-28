@@ -70,12 +70,14 @@ pub fn build_encrypted_message(
     to: &str,
     _from_device: u32,
     encrypted: &EncryptedMessage,
+    id: &str,
 ) -> Element {
     let encrypted_el = build_encrypted_element(&encrypted.header, encrypted.payload.as_deref());
 
     let mut message = Element::builder("message", NS_CLIENT)
         .attr("to", to)
         .attr("type", "chat")
+        .attr("id", id)
         .append(encrypted_el)
         .build();
 
@@ -95,7 +97,7 @@ pub fn build_key_transport(to: &str, _from_device: u32, header: &MessageHeader) 
         header: header.clone(),
         payload: None,
     };
-    build_encrypted_message(to, 0, &transport)
+    build_encrypted_message(to, 0, &transport, "")
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +222,7 @@ mod tests {
             payload: Some(vec![0xab; 32]),
         };
 
-        let message_el = build_encrypted_message("bob@example.com", 12345, &original);
+        let message_el = build_encrypted_message("bob@example.com", 12345, &original, "test-id");
         let parsed =
             parse_encrypted_message(&message_el).expect("parse_encrypted_message must succeed");
 
@@ -234,7 +236,7 @@ mod tests {
             payload: None,
         };
 
-        let message_el = build_encrypted_message("carol@example.com", 99, &original);
+        let message_el = build_encrypted_message("carol@example.com", 99, &original, "test-id");
         let parsed = parse_encrypted_message(&message_el)
             .expect("parse_encrypted_message must succeed for key-transport");
 
@@ -295,7 +297,7 @@ mod tests {
             payload: Some(vec![0x10, 0x20, 0x30]),
         };
 
-        let el = build_encrypted_message("group@conference.example.com", 42, &original);
+        let el = build_encrypted_message("group@conference.example.com", 42, &original, "test-id");
         let parsed = parse_encrypted_message(&el).expect("must parse");
         assert_eq!(parsed, original);
         assert_eq!(parsed.header.keys.len(), 3);
@@ -324,7 +326,7 @@ mod tests {
             header: make_header(1),
             payload: None,
         };
-        let el = build_encrypted_message("target@example.com", 1, &msg);
+        let el = build_encrypted_message("target@example.com", 1, &msg, "test-id");
         assert_eq!(el.name(), "message");
         assert_eq!(el.attr("to"), Some("target@example.com"));
         assert_eq!(el.attr("type"), Some("chat"));
@@ -336,7 +338,7 @@ mod tests {
             header: make_header(1),
             payload: None,
         };
-        let el = build_encrypted_message("x@x.com", 1, &msg);
+        let el = build_encrypted_message("x@x.com", 1, &msg, "test-id");
         let encrypted = el.get_child("encrypted", NS_OMEMO);
         assert!(
             encrypted.is_some(),
@@ -366,7 +368,7 @@ mod tests {
             payload: None,
         };
 
-        let el = build_encrypted_message("x@x.com", 1, &original);
+        let el = build_encrypted_message("x@x.com", 1, &original, "test-id");
         let parsed = parse_encrypted_message(&el).unwrap();
 
         let prekey_true = parsed.header.keys.iter().find(|k| k.rid == 10).unwrap();
@@ -385,7 +387,7 @@ mod tests {
             header: make_header(55),
             payload: Some(vec![0x99; 8]),
         };
-        let message_el = build_encrypted_message("x@x.com", 55, &original);
+        let message_el = build_encrypted_message("x@x.com", 55, &original, "test-id");
         // Extract the <encrypted> child and parse it directly.
         let encrypted_el = message_el
             .get_child("encrypted", NS_OMEMO)

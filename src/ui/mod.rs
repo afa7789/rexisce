@@ -896,12 +896,14 @@ impl App {
                         let pool = self.db.clone();
                         let send_cmds: Vec<(String, String)> = cmds
                             .iter()
-                            .filter_map(|c| {
-                                if let XmppCommand::SendMessage { to, body, .. } = c {
+                            .filter_map(|c| match c {
+                                XmppCommand::SendMessage { to, body, .. } => {
                                     Some((to.clone(), body.clone()))
-                                } else {
-                                    None
                                 }
+                                XmppCommand::OmemoEncryptMessage { to, body, .. } => {
+                                    Some((to.clone(), body.clone()))
+                                }
+                                _ => None,
                             })
                             .collect();
                         if !send_cmds.is_empty() {

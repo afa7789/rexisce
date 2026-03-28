@@ -1032,6 +1032,7 @@ impl ChatScreen {
                             .push(XmppCommand::OmemoEncryptMessage {
                                 to: jid_for_cmd,
                                 body: body_clone,
+                                id: msg_id.clone(),
                             });
                     } else {
                         self.pending_commands.push(XmppCommand::SendMessage {
@@ -1052,6 +1053,7 @@ impl ChatScreen {
                         .push(XmppCommand::OmemoEncryptMessage {
                             to: jid.clone(),
                             body,
+                            id: msg_id.clone(),
                         });
                 } else {
                     self.pending_commands.push(XmppCommand::SendMessage {

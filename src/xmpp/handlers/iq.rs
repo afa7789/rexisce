@@ -558,6 +558,7 @@ pub(crate) async fn omemo_encrypt_and_send(
     account_jid: &str,
     to: &str,
     body: &str,
+    msg_id: &str,
 ) -> Result<Element, OmemoEncryptError> {
     // Load own identity so we know our device_id.
     let identity = mgr
@@ -660,7 +661,7 @@ pub(crate) async fn omemo_encrypt_and_send(
         payload: Some(enc_payload.ciphertext),
     };
 
-    Ok(build_encrypted_message(to, own_device_id, &encrypted_msg))
+    Ok(build_encrypted_message(to, own_device_id, &encrypted_msg, msg_id))
 }
 
 /// Attempt to decrypt an incoming OMEMO `<message>` stanza.
