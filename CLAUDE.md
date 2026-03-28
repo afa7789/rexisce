@@ -131,3 +131,48 @@ rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
 
 Overall average: **60-90% token reduction** on common development operations.
 <!-- /rtk-instructions -->
+
+---
+
+# Iced UI Rules (learned from bugs)
+
+## Modals: DO NOT use stack overlay
+Iced's `stack![]` layer overlay renders the backdrop but the modal_box is invisible due to layout constraints with center_x/center_y. **Use full-screen swap instead:**
+
+```rust
+// ✅ Correct: swap screen, store previous for GoBack
+let prev = std::mem::replace(&mut app.screen, Screen::Login(...));
+app.screen = Screen::Settings(Box::new(settings_screen), Box::new(prev));
+
+// ❌ Wrong: modal overlay (invisible on Iced 0.13)
+app.settings_modal = Some(Box::new(settings_screen));
+// stack![base, backdrop, modal_overlay] → modal_box renders at 0 size
+```
+
+## Emoji text in buttons: avoid `Shaping::Advanced`
+Buttons with `text("⚙ Settings").shaping(Shaping::Advanced)` don't receive click events reliably. Use plain text:
+
+```rust
+// ✅ Works
+button(text("Settings").size(12)).on_press(Message::OpenSettings)
+
+// ❌ Clicks silently eaten
+button(text("⚙ Settings").size(12).shaping(Shaping::Advanced)).on_press(Message::OpenSettings)
+```
+
+## Stream Management: guard with `sm_enabled`
+Don't send `<r/>` or `<a/>` SM stanzas unless SM has been negotiated via `<enable>`. Prosody rejects unknown SM stanzas and disconnects.
+
+## JID validation: allow localhost
+`is_valid_jid()` must accept `localhost` and `127.0.0.1` domains for local testing.
+
+## Conversations: scope per-account
+Use `get_all_for_account(pool, bound_jid)` not `get_all(pool)` when prefilling conversations. Otherwise conversations from other accounts leak into the sidebar.
+
+## GUI testing with cliclick + osascript
+- `cliclick c:x,y` for clicks (works with Iced)
+- `osascript keystroke "text"` for typing (works with Iced text_input)
+- `osascript key code 48` for Tab (works, `cliclick kp:tab` does NOT)
+- `osascript keystroke using command down` does NOT reach Iced's `on_key_press` subscription
+- Always `Cmd+A` (select all) before typing into a field that may have existing text
+- Clear `~/Library/Application Support/rexisce/` before tests to prevent auto-connect from saved credentials

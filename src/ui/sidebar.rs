@@ -619,22 +619,30 @@ impl SidebarScreen {
         }
         // UX-2: account menu popover — presence options + settings
         if self.show_account_menu {
-            let available_btn = button(text("Available").size(12))
-                .on_press(Message::SetPresence(PresenceStatus::Available))
-                .width(Length::Fill)
-                .padding([4, 8]);
-            let away_btn = button(text("Away").size(12))
-                .on_press(Message::SetPresence(PresenceStatus::Away))
-                .width(Length::Fill)
-                .padding([4, 8]);
-            let dnd_btn = button(text("Do Not Disturb").size(12))
-                .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
-                .width(Length::Fill)
-                .padding([4, 8]);
-            let settings_btn = button(text("Settings").size(12))
-                .on_press(Message::OpenSettings)
-                .width(Length::Fill)
-                .padding([4, 8]);
+            let available_btn = button(
+                row![text("●").size(12).shaping(Shaping::Advanced), text("Available").size(12)].spacing(6),
+            )
+            .on_press(Message::SetPresence(PresenceStatus::Available))
+            .width(Length::Fill)
+            .padding([4, 8]);
+            let away_btn = button(
+                row![text("◐").size(12).shaping(Shaping::Advanced), text("Away").size(12)].spacing(6),
+            )
+            .on_press(Message::SetPresence(PresenceStatus::Away))
+            .width(Length::Fill)
+            .padding([4, 8]);
+            let dnd_btn = button(
+                row![text("⛔").size(12).shaping(Shaping::Advanced), text("DND").size(12)].spacing(6),
+            )
+            .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
+            .width(Length::Fill)
+            .padding([4, 8]);
+            let settings_btn = button(
+                row![text("⚙").size(12).shaping(Shaping::Advanced), text("Settings").size(12)].spacing(6),
+            )
+            .on_press(Message::OpenSettings)
+            .width(Length::Fill)
+            .padding([4, 8]);
             let switch_btn = button(text("Switch Account").size(12))
                 .on_press(Message::OpenAccountSwitcher)
                 .width(Length::Fill)
