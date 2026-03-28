@@ -61,7 +61,7 @@ impl ConversationView {
             let msg_date = Utc
                 .timestamp_millis_opt(m.timestamp)
                 .single()
-                .map(|dt| dt.date_naive());
+                .map(|dt| dt.with_timezone(&chrono::Local).date_naive());
 
             if let Some(date) = msg_date {
                 if prev_date != Some(date) {
@@ -246,13 +246,20 @@ impl ConversationView {
                     .into()
             } else if !m.own {
                 // H5/H1: avatar + sender + body for incoming messages
+                // For MUC messages, use full JID (room/nick) for avatar key to
+                // distinguish participants; fall back to bare JID for 1:1.
                 let from_bare = m.from.split('/').next().unwrap_or(&m.from);
-                let avatar: Element<Message> = if let Some(png) = vctx.avatars.get(from_bare) {
+                let avatar_key = if !occupants.is_empty() {
+                    &m.from // MUC: room@server/nick
+                } else {
+                    from_bare // 1:1: user@server
+                };
+                let avatar: Element<Message> = if let Some(png) = vctx.avatars.get(avatar_key) {
                     let handle = iced_image::Handle::from_bytes(png.clone());
                     image(handle).width(24).height(24).into()
                 } else {
-                    let color = jid_color(from_bare);
-                    let initial = jid_initial(from_bare).to_string();
+                    let color = jid_color(avatar_key);
+                    let initial = jid_initial(avatar_key).to_string();
                     container(text(initial).size(11))
                         .width(24)
                         .height(24)

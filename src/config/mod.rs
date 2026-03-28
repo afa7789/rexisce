@@ -190,6 +190,10 @@ fn settings_file() -> PathBuf {
     config_path().join("settings.json")
 }
 
+fn credentials_file() -> PathBuf {
+    config_path().join("credentials.json")
+}
+
 // ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
@@ -213,44 +217,43 @@ pub fn save(settings: &Settings) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Keychain
+// Credential storage (file-based, no OS keychain)
 // ---------------------------------------------------------------------------
 
-const KEYRING_SERVICE: &str = "rexisce";
+/// Load the credentials map from disk.
+fn load_credentials() -> std::collections::HashMap<String, String> {
+    let path = credentials_file();
+    match std::fs::read_to_string(&path) {
+        Ok(data) => serde_json::from_str(&data).unwrap_or_default(),
+        Err(_) => std::collections::HashMap::new(),
+    }
+}
 
-/// Store a password in the OS keychain for the given JID.
+/// Persist the credentials map to disk.
+fn persist_credentials(creds: &std::collections::HashMap<String, String>) -> Result<()> {
+    let path = credentials_file();
+    let data = serde_json::to_string_pretty(creds)?;
+    std::fs::write(&path, data)?;
+    Ok(())
+}
+
+/// Store a password for the given JID.
 pub fn save_password(jid: &str, password: &str) -> Result<()> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, jid).map_err(|e| {
-        tracing::error!("keyring: failed to create entry for {jid}: {e}");
-        e
-    })?;
-    entry.set_password(password).map_err(|e| {
-        tracing::error!("keyring: failed to store password for {jid}: {e}");
-        e
-    })?;
-    tracing::debug!("keyring: stored password for {jid}");
+    let mut creds = load_credentials();
+    creds.insert(jid.to_string(), password.to_string());
+    persist_credentials(&creds)?;
+    tracing::debug!("credentials: stored password for {jid}");
     Ok(())
 }
 
 /// Retrieve the stored password for the given JID; returns `None` if not found.
 pub fn load_password(jid: &str) -> Option<String> {
-    let entry = match keyring::Entry::new(KEYRING_SERVICE, jid) {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::warn!("keyring: failed to create entry for {jid}: {e}");
-            return None;
-        }
-    };
-    match entry.get_password() {
-        Ok(pw) => {
-            tracing::debug!("keyring: loaded password for {jid}");
-            Some(pw)
-        }
-        Err(e) => {
-            tracing::debug!("keyring: no stored password for {jid}: {e}");
-            None
-        }
+    let creds = load_credentials();
+    let pw = creds.get(jid).cloned();
+    if pw.is_some() {
+        tracing::debug!("credentials: loaded password for {jid}");
     }
+    pw
 }
 
 /// M1: Detect the OS dark/light mode preference.
@@ -264,9 +267,9 @@ pub fn detect_system_theme() -> Theme {
 
 /// Delete the stored password (e.g. on logout).
 pub fn delete_password(jid: &str) {
-    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, jid) {
-        let _ = entry.delete_credential();
-    }
+    let mut creds = load_credentials();
+    creds.remove(jid);
+    let _ = persist_credentials(&creds);
 }
 
 // ---------------------------------------------------------------------------
@@ -360,43 +363,38 @@ fn save_avatar_jid_sidecar(jid: &str) {
 
 /// Store a password in the OS keychain for the given `AccountConfig`.
 ///
-/// Uses `account.password_key` as the keychain username so the credential can
-/// be looked up or deleted by key later.
+/// Uses `account.password_key` as the credential key in the local file store.
 #[allow(dead_code)]
 pub fn save_account_password(account: &AccountConfig, password: &str) -> Result<()> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &account.password_key)?;
-    entry.set_password(password)?;
-    Ok(())
+    save_password(&account.password_key, password)
 }
 
 /// Retrieve the stored password for the given `AccountConfig`.
 /// Returns `None` if no credential is found.
 #[allow(dead_code)]
 pub fn load_account_password(account: &AccountConfig) -> Option<String> {
-    keyring::Entry::new(KEYRING_SERVICE, &account.password_key)
-        .ok()?
-        .get_password()
-        .ok()
+    load_password(&account.password_key)
 }
 
-/// Remove the stored credential for the given `AccountConfig` (e.g. on
-/// account removal or explicit sign-out with `remember_me == false`).
+/// Remove the stored credential for the given `AccountConfig`.
 #[allow(dead_code)]
 pub fn delete_account_password(account: &AccountConfig) {
-    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &account.password_key) {
-        let _ = entry.delete_credential();
-    }
+    delete_password(&account.password_key);
 }
 
 impl TimeFormat {
     /// Format a unix timestamp (milliseconds) into a human-readable string.
+    /// Converts from UTC to the user's local timezone before formatting.
     pub fn format_timestamp(&self, ts_millis: i64) -> String {
         let ts = chrono::DateTime::from_timestamp_millis(ts_millis);
         match ts {
-            Some(dt) => match self {
-                TimeFormat::TwentyFourHour => dt.format("%H:%M").to_string(),
-                TimeFormat::TwelveHour => dt.format("%I:%M %p").to_string(),
-            },
+            Some(dt) => {
+                let local = dt.with_timezone(&chrono::Local);
+                match self {
+                    TimeFormat::TwentyFourHour => local.format("%H:%M").to_string(),
+                    TimeFormat::TwelveHour => local.format("%I:%M %p").to_string(),
+                }
+            }
             None => String::new(),
         }
     }

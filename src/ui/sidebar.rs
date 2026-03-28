@@ -131,7 +131,20 @@ impl SidebarScreen {
         }
     }
 
+    /// Ensure a JID appears in the sidebar contacts list.
+    /// If it's not already present, add a synthetic roster entry.
+    pub fn ensure_contact(&mut self, jid: &str, name: Option<&str>) {
+        if !self.contacts.iter().any(|c| c.jid == jid) {
+            self.contacts.push(crate::xmpp::RosterContact {
+                jid: jid.to_string(),
+                name: name.map(str::to_string),
+                subscription: "none".to_string(),
+            });
+        }
+    }
+
     /// G1: remove a contact/conversation from the sidebar.
+    #[allow(dead_code)]
     pub fn remove_contact(&mut self, jid: &str) {
         self.contacts.retain(|c| c.jid != jid);
         self.unread_counts.remove(jid);

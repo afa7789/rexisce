@@ -151,6 +151,24 @@ impl ConversationView {
             Message::OpenOmemoTrust(_) => Task::none(), // bubbled to ChatScreen
             Message::ToggleEncryption => {
                 self.is_encryption_enabled = !self.is_encryption_enabled;
+                let status = if self.is_encryption_enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                };
+                // Add a /me-style system message so the user sees the change inline
+                self.push_message(super::DisplayMessage {
+                    id: format!("system-omemo-{}", chrono::Utc::now().timestamp_millis()),
+                    from: String::new(),
+                    body: format!("/me OMEMO encryption {status}"),
+                    own: false,
+                    timestamp: chrono::Utc::now().timestamp_millis(),
+                    reply_preview: None,
+                    edited: false,
+                    retracted: false,
+                    is_encrypted: false,
+                    is_trusted: false,
+                });
                 Task::none()
             }
             Message::AttachmentLoaded(msg_id, handle) => {

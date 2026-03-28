@@ -40,8 +40,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 # Storage
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros", "migrate", "chrono", "uuid"] }
 
-# Keychain — platform backends must be feature-gated in keyring v3
-keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
+# Credential storage (file-based, no OS keychain)
 
 # i18n
 fluent = "0.16"

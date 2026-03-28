@@ -1249,7 +1249,7 @@ impl App {
             let settings_view = settings_screen.view().map(Message::Settings);
             let modal_box = container(settings_view)
                 .width(Length::Fixed(750.0))
-                .max_height(500.0)
+                .height(Length::Fixed(500.0))
                 .style(|theme: &iced::Theme| {
                     let palette = theme.extended_palette();
                     iced::widget::container::Style {

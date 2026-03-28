@@ -44,6 +44,7 @@ pub enum Action {
     /// User toggled encryption on a conversation — persist the new state to DB.
     SetEncrypted(String, bool),
     /// User closed/archived a conversation — persist to DB.
+    #[allow(dead_code)]
     ArchiveConversation(String),
 }
 
@@ -190,6 +191,8 @@ impl ChatScreen {
     pub fn prefill_conversations(&mut self, convos: Vec<(String, bool)>) {
         let own_jid = self.own_jid.clone();
         for (jid, encrypted) in convos {
+            // Ensure each known conversation appears in sidebar
+            self.sidebar.ensure_contact(&jid, None);
             let convo = self
                 .conversations
                 .entry(jid.clone())
@@ -204,6 +207,8 @@ impl ChatScreen {
         self.muc_panels
             .entry(room_jid.to_string())
             .or_insert_with(|| OccupantPanel::new(room_jid.to_string()));
+        // Ensure room appears in sidebar
+        self.sidebar.ensure_contact(room_jid, None);
     }
 
     /// D1: Update the occupant panel for a room from a MUC presence.
@@ -254,6 +259,8 @@ impl ChatScreen {
             .entry(bare_jid.clone())
             .or_insert_with(|| ConversationView::new(bare_jid.clone(), own_jid));
 
+        // Ensure the JID appears in sidebar (handles MUC rooms not in roster)
+        self.sidebar.ensure_contact(&bare_jid, None);
         // Update last-message preview in sidebar
         self.sidebar.set_last_message(&bare_jid, &msg.body);
 
@@ -501,12 +508,10 @@ impl ChatScreen {
             }
 
             Message::CloseConversation(jid) => {
-                self.conversations.remove(&jid);
-                self.sidebar.remove_contact(&jid);
                 if self.active_jid.as_deref() == Some(jid.as_str()) {
                     self.active_jid = None;
                 }
-                Action::ArchiveConversation(jid)
+                Action::None
             }
             Message::OpenSettings => Action::OpenSettings,
             Message::OpenAccountSwitcher => Action::OpenAccountSwitcher,
@@ -689,14 +694,12 @@ impl ChatScreen {
                     return Action::ToggleMute(jid);
                 }
 
-                // G1: intercept Close to archive and remove the conversation
+                // G1: intercept Close to deselect the conversation (keep in sidebar)
                 if let super::conversation::Message::Close = cmsg {
-                    self.conversations.remove(&jid);
-                    self.sidebar.remove_contact(&jid);
                     if self.active_jid.as_deref() == Some(jid.as_str()) {
                         self.active_jid = None;
                     }
-                    return Action::ArchiveConversation(jid);
+                    return Action::None;
                 }
 
                 // C4: intercept BlockPeer to queue a block command for the engine
