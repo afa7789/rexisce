@@ -81,15 +81,18 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
                 Message::XmppEvent(XmppEvent::RosterReceived(xmpp_contacts))
             });
             // Also pre-populate known conversations from DB cache.
+            // Use account-scoped query so conversations from other accounts don't leak.
             let pool2 = app.db.clone();
+            let own_bare = bound_jid.split('/').next().unwrap_or("").to_string();
             let conv_prefill = Task::future(async move {
-                let convos: Vec<(String, bool)> = crate::store::conversation_repo::get_all(&pool2)
-                    .await
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|c| c.archived == 0) // Skip archived conversations
-                    .map(|c| (c.jid, c.encrypted != 0))
-                    .collect();
+                let convos: Vec<(String, bool)> =
+                    crate::store::conversation_repo::get_all_for_account(&pool2, &own_bare)
+                        .await
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|c| c.archived == 0)
+                        .map(|c| (c.jid, c.encrypted != 0))
+                        .collect();
                 Message::ConversationsPrefill(convos)
             });
             let toast = app.update(Message::ShowToast(

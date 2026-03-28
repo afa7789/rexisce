@@ -72,6 +72,7 @@ pub async fn get_all_for_account(
 
 /// Return all conversations ordered by last_activity descending (NULLs last).
 /// Backward-compatible: returns conversations where account_jid = ''.
+#[allow(dead_code)]
 pub async fn get_all(pool: &SqlitePool) -> Result<Vec<Conversation>> {
     get_all_for_account(pool, "").await
 }
