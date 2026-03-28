@@ -22,6 +22,9 @@ pub fn keyboard_shortcuts() -> Subscription<Message> {
     iced::keyboard::on_key_press(|key, modifiers| {
         use iced::keyboard::Key;
         if modifiers.command() {
+            if key == Key::Character(",".into()) {
+                return Some(Message::GoToSettings);
+            }
             if key == Key::Character("k".into()) {
                 return Some(Message::TogglePalette);
             }

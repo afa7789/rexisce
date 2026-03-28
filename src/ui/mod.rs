@@ -1248,8 +1248,8 @@ impl App {
                 });
             let settings_view = settings_screen.view().map(Message::Settings);
             let modal_box = container(settings_view)
-                .width(Length::Fixed(750.0))
-                .height(Length::Fixed(500.0))
+                .width(750)
+                .height(500)
                 .style(|theme: &iced::Theme| {
                     let palette = theme.extended_palette();
                     iced::widget::container::Style {
@@ -1263,19 +1263,13 @@ impl App {
                     }
                 });
             let modal_overlay = container(
-                column![
-                    Space::new(Length::Fill, Length::Fixed(60.0)),
-                    row![
-                        Space::new(Length::Fill, Length::Shrink),
-                        modal_box,
-                        Space::new(Length::Fill, Length::Shrink),
-                    ]
-                    .width(Length::Fill),
-                ]
-                .width(Length::Fill),
+                container(modal_box)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
             )
             .width(Length::Fill)
-            .height(Length::Fill);
+            .height(Length::Fill)
+            .padding(40);
             layers.push(backdrop.into());
             layers.push(modal_overlay.into());
         }
