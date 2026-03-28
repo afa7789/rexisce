@@ -17,7 +17,14 @@ pub fn is_valid_jid(jid: &str) -> bool {
     let Some((local, domain)) = jid.split_once('@') else {
         return false;
     };
-    !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
+    if local.is_empty() || domain.is_empty() {
+        return false;
+    }
+    // Allow "localhost" and IP addresses for local testing
+    if domain == "localhost" || domain == "127.0.0.1" {
+        return true;
+    }
+    domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
 }
 
 /// Optional proxy configuration for routing an account's connection.
@@ -107,8 +114,9 @@ mod tests {
     }
 
     #[test]
-    fn jid_domain_without_dot_rejected() {
-        assert!(!is_valid_jid("user@localhost"));
+    fn jid_localhost_accepted() {
+        assert!(is_valid_jid("user@localhost"));
+        assert!(is_valid_jid("alice@127.0.0.1"));
     }
 
     #[test]

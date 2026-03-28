@@ -67,16 +67,29 @@ impl ServerConnector for InsecureTlsConfig {
         // Ensure rustls crypto provider is installed (needed for TLS handshake)
         let _ = rustls::crypto::ring::default_provider().install_default();
 
+        tracing::info!("insecure_tls: connecting to {}:{}", self.host, self.port);
         let tcp_stream = TcpStream::connect((self.host.as_str(), self.port))
             .await
             .map_err(tokio_xmpp::Error::Io)?;
+        tracing::info!("insecure_tls: TCP connected, starting XMPP stream");
 
         let xmpp_stream = XMPPStream::start(tcp_stream, jid.clone(), ns.to_owned()).await?;
+        tracing::info!("insecure_tls: XMPP stream started, can_starttls={}", xmpp_stream.stream_features.can_starttls());
 
         if xmpp_stream.stream_features.can_starttls() {
-            let tls_stream = do_insecure_starttls(xmpp_stream, jid.domain().as_str()).await?;
-            Ok(XMPPStream::start(tls_stream, jid.clone(), ns.to_owned()).await?)
+            tracing::info!("insecure_tls: starting STARTTLS handshake");
+            match do_insecure_starttls(xmpp_stream, jid.domain().as_str()).await {
+                Ok(tls_stream) => {
+                    tracing::info!("insecure_tls: TLS handshake OK, restarting XMPP stream");
+                    Ok(XMPPStream::start(tls_stream, jid.clone(), ns.to_owned()).await?)
+                }
+                Err(e) => {
+                    tracing::error!("insecure_tls: TLS handshake failed: {e}");
+                    Err(e)
+                }
+            }
         } else {
+            tracing::warn!("insecure_tls: server does not offer STARTTLS");
             Err(tokio_xmpp::Error::Protocol(tokio_xmpp::ProtocolError::NoTls).into())
         }
     }

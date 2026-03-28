@@ -1,6 +1,6 @@
 COMPOSE = docker compose
 
-.PHONY: up down reset logs status shell admin
+.PHONY: up down reset logs status shell admin gui-test gui-test-all gui-test-core gui-test-chat gui-test-ui
 
 ## Start the XMPP test server (detached).
 up:
@@ -43,3 +43,31 @@ shell:
 ## Open Prosody's interactive admin shell.
 admin:
 	docker exec -it rexisce-prosody prosodyctl shell
+
+# ---- GUI Tests (Claude Computer Use) ----
+
+VENV = source ../.venv/bin/activate &&
+
+## Run all GUI tests.
+gui-test-all: up
+	$(VENV) python gui_test.py --all
+
+## Run core tests (login, wrong password).
+gui-test-core: up
+	$(VENV) python gui_test.py --group core
+
+## Run chat tests (messaging, OMEMO, MUC).
+gui-test-chat: up
+	$(VENV) python gui_test.py --group chat
+
+## Run UI tests (settings, theme, close conversation).
+gui-test-ui: up
+	$(VENV) python gui_test.py --group ui
+
+## Run a single GUI test (usage: make gui-test TEST=login).
+gui-test: up
+	$(VENV) python gui_test.py $(TEST)
+
+## List all available GUI tests.
+gui-test-list:
+	@$(VENV) python gui_test.py --list
