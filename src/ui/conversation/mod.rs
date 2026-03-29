@@ -74,8 +74,8 @@ pub struct Attachment {
     pub size: u64,
     /// Upload progress 0–100.
     pub progress: u8,
-    /// DC-17: thumbnail preview for image attachments (PNG bytes from thumbnail::generate).
-    pub thumbnail: Option<Vec<u8>>,
+    /// DC-17: thumbnail preview for image attachments (width, height, and PNG bytes).
+    pub thumbnail: Option<crate::store::thumbnail::Thumbnail>,
 }
 
 pub(crate) fn extract_first_url(text: &str) -> Option<String> {
@@ -109,7 +109,9 @@ pub(crate) fn extract_image_url(body: &str) -> Option<String> {
 
 /// DC-17: generate a thumbnail for a local image file.
 /// Returns `None` for non-image files or if generation fails.
-pub(crate) fn thumbnail_for_path(path: &std::path::Path) -> Option<Vec<u8>> {
+pub(crate) fn thumbnail_for_path(
+    path: &std::path::Path,
+) -> Option<crate::store::thumbnail::Thumbnail> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -118,9 +120,7 @@ pub(crate) fn thumbnail_for_path(path: &std::path::Path) -> Option<Vec<u8>> {
     if !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp") {
         return None;
     }
-    crate::store::thumbnail::generate_from_path(path)
-        .ok()
-        .map(|t| t.data)
+    crate::store::thumbnail::generate_from_path(path).ok()
 }
 
 // M3: emoji picker data — common emoji grouped by category

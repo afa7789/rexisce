@@ -9,20 +9,19 @@ use iced::{
     Element, Length,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DataForm {
     pub title: Option<String>,
     pub instructions: Option<String>,
     pub fields: Vec<FormField>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FormField {
     pub var: Option<String>,
     pub field_type: FieldType,
     pub label: Option<String>,
     pub value: Option<String>,
-    #[allow(dead_code)]
     pub required: bool,
     pub options: Vec<(String, String)>,
 }
@@ -41,8 +40,8 @@ pub enum FieldType {
     JidMulti,
 }
 
+#[allow(dead_code)]
 impl DataForm {
-    #[allow(dead_code)]
     pub fn from_element(el: &tokio_xmpp::minidom::Element) -> Option<Self> {
         if el.ns() != "jabber:x:data" {
             return None;
@@ -72,8 +71,8 @@ impl DataForm {
     }
 }
 
+#[allow(dead_code)]
 impl FormField {
-    #[allow(dead_code)]
     pub fn from_element(el: &tokio_xmpp::minidom::Element) -> Option<Self> {
         let var = el.attr("var").map(String::from);
         let field_type = match el.attr("type") {
@@ -118,7 +117,6 @@ impl FormField {
         })
     }
 
-    #[allow(dead_code)]
     pub fn to_element(&self) -> tokio_xmpp::minidom::Element {
         let type_str = match self.field_type {
             FieldType::TextSingle => "text-single",
@@ -179,7 +177,6 @@ impl FormField {
 ///
 /// Hidden fields are omitted. Text inputs are shown but not interactive.
 /// Use `render_form_interactive` when the user needs to fill in the form.
-#[allow(dead_code)]
 pub fn render_form<M: Clone + 'static>(form: DataForm) -> Element<'static, M> {
     let mut col: Column<M> = column![].spacing(12).padding(16);
 
@@ -255,6 +252,103 @@ pub fn render_form<M: Clone + 'static>(form: DataForm) -> Element<'static, M> {
     }
 
     container(col).width(Length::Fill).into()
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_field_element(
+        var: &str,
+        type_str: &str,
+        value: Option<&str>,
+    ) -> tokio_xmpp::minidom::Element {
+        let mut el = tokio_xmpp::minidom::Element::builder("field", "jabber:x:data")
+            .attr("var", var)
+            .attr("type", type_str)
+            .build();
+        if let Some(v) = value {
+            el.append_child(
+                tokio_xmpp::minidom::Element::builder("value", "jabber:x:data")
+                    .append(v)
+                    .build(),
+            );
+        }
+        el
+    }
+
+    fn make_form_element(fields: Vec<tokio_xmpp::minidom::Element>) -> tokio_xmpp::minidom::Element {
+        let mut el = tokio_xmpp::minidom::Element::builder("x", "jabber:x:data")
+            .attr("type", "form")
+            .build();
+        for field in fields {
+            el.append_child(field);
+        }
+        el
+    }
+
+    #[test]
+    fn form_field_round_trip() {
+        let field = FormField {
+            var: Some("muc#roomconfig_roomname".into()),
+            field_type: FieldType::TextSingle,
+            label: Some("Room Name".into()),
+            value: Some("my-room".into()),
+            required: true,
+            options: vec![],
+        };
+
+        let el = field.to_element();
+        let parsed = FormField::from_element(&el).expect("from_element should parse back");
+
+        assert_eq!(parsed.var, field.var);
+        assert_eq!(parsed.field_type, field.field_type);
+        assert_eq!(parsed.value, field.value);
+        assert!(parsed.required);
+    }
+
+    #[test]
+    fn data_form_from_element_parses_fields() {
+        let field1 = make_field_element(
+            "FORM_TYPE",
+            "hidden",
+            Some("http://jabber.org/protocol/muc#roomconfig"),
+        );
+        let field2 =
+            make_field_element("muc#roomconfig_roomname", "text-single", Some("Test Room"));
+        let form_el = make_form_element(vec![field1, field2]);
+
+        let form = DataForm::from_element(&form_el).expect("should parse DataForm");
+        assert_eq!(form.fields.len(), 2);
+        assert_eq!(form.fields[0].field_type, FieldType::Hidden);
+        assert_eq!(form.fields[1].value.as_deref(), Some("Test Room"));
+    }
+
+    #[test]
+    fn data_form_wrong_namespace_returns_none() {
+        let el = tokio_xmpp::minidom::Element::builder("x", "wrong:namespace").build();
+        assert!(DataForm::from_element(&el).is_none());
+    }
+
+    #[test]
+    fn field_type_boolean_round_trip() {
+        let field = FormField {
+            var: Some("muc#roomconfig_publicroom".into()),
+            field_type: FieldType::Boolean,
+            label: None,
+            value: Some("1".into()),
+            required: false,
+            options: vec![],
+        };
+        let el = field.to_element();
+        let parsed = FormField::from_element(&el).unwrap();
+        assert_eq!(parsed.field_type, FieldType::Boolean);
+        assert_eq!(parsed.value.as_deref(), Some("1"));
+    }
 }
 
 /// Render a XEP-0004 form with interactive text inputs.

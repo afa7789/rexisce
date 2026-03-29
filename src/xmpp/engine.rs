@@ -6,7 +6,7 @@
 // Task P1.7  — DNS SRV (tokio-xmpp ServerConfig::UseSrv)
 // Task P1.9  — Connection state machine
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use futures::{SinkExt, StreamExt};
 use sqlx::SqlitePool;
@@ -162,16 +162,8 @@ pub async fn run_engine(
         match cmd_rx.recv().await {
             Some(XmppCommand::Connect(config)) => {
                 tracing::info!("engine: connecting as {}", config.jid);
-                // Detect localhost domain → use plain TCP (no TLS)
-                let domain = config
-                    .jid
-                    .split('@')
-                    .nth(1)
-                    .and_then(|d| d.split('/').next())
-                    .unwrap_or("");
-                let is_localhost = domain == "localhost" || domain == "127.0.0.1";
-                if is_localhost {
-                    tracing::info!("engine: localhost detected, using plain TCP (no TLS)");
+                if config.allow_insecure_tls {
+                    tracing::info!("engine: allow_insecure_tls=true, using InsecureTlsConfig");
                     run_session_plain(config, &event_tx, &mut cmd_rx, db.clone()).await;
                 } else {
                     run_session(config, &event_tx, &mut cmd_rx, db.clone()).await;
@@ -418,6 +410,13 @@ async fn run_session_loop<C: ServerConnector>(
         | ((config.send_typing as u8) << 1)
         | ((config.send_read_markers as u8) << 2);
 
+    // FIX: in-memory dedup cache for MessageReceived events.
+    // MAM and carbons can deliver the same message multiple times; the DB uses
+    // INSERT OR IGNORE so storage is idempotent, but the UI must not receive
+    // duplicate MessageReceived events.  We keep the last 500 message IDs.
+    let mut seen_msg_ids: HashSet<String> = HashSet::new();
+    let mut seen_msg_ids_order: VecDeque<String> = VecDeque::new();
+
     loop {
         // Drain outbox before blocking on the next event.
         // Warn when the backlog is large (possible flood).
@@ -470,7 +469,38 @@ async fn run_session_loop<C: ServerConnector>(
                         break;
                     }
                     Some(ev) => {
-                        let auth_failure = handle_client_event(ev, event_tx, &mut outbox, &mut reconnect_attempt, &mut sm, &mut blocking_mgr, &mut own_jid_str, &mut mam_mgr, &mut catchup_mgr, &mut presence_machine, &mut disco_mgr, &mut file_upload_mgr, &mut avatar_mgr, &mut muc_mgr, &mut muc_config_mgr, &mut bookmark_mgr, &mut push_mgr, &mut vcard_edit_mgr, &mut adhoc_mgr, &mut omemo_mgr, &mut ignore_mgr, &conv_sync_mgr, &mut account_mgr, &mut sync_orch, &config.jid, config.push_service_jid.as_deref(), flags, sm_enabled).await;
+                        let mut ctx = SessionContext {
+                            outbox: &mut outbox,
+                            reconnect_attempt: &mut reconnect_attempt,
+                            sm: &mut sm,
+                            blocking_mgr: &mut blocking_mgr,
+                            own_jid_str: &mut own_jid_str,
+                            mam_mgr: &mut mam_mgr,
+                            catchup_mgr: &mut catchup_mgr,
+                            presence_machine: &mut presence_machine,
+                            disco_mgr: &mut disco_mgr,
+                            file_upload_mgr: &mut file_upload_mgr,
+                            avatar_mgr: &mut avatar_mgr,
+                            muc_mgr: &mut muc_mgr,
+                            muc_config_mgr: &mut muc_config_mgr,
+                            bookmark_mgr: &mut bookmark_mgr,
+                            push_mgr: &mut push_mgr,
+                            vcard_edit_mgr: &mut vcard_edit_mgr,
+                            adhoc_mgr: &mut adhoc_mgr,
+                            omemo_mgr: &mut omemo_mgr,
+                            ignore_mgr: &mut ignore_mgr,
+                            conv_sync_mgr: &conv_sync_mgr,
+                            account_mgr: &mut account_mgr,
+                            sync_orch: &mut sync_orch,
+                            account_jid: &config.jid,
+                            push_service_jid: config.push_service_jid.as_deref(),
+                            privacy_flags: flags,
+                            sm_enabled,
+                            seen_msg_ids: &mut seen_msg_ids,
+                            seen_msg_ids_order: &mut seen_msg_ids_order,
+                        };
+                        let auth_failure =
+                            handle_client_event(ev, event_tx, &mut ctx).await;
                         if auth_failure {
                             tracing::info!("engine: breaking session loop due to auth failure");
                             break;
@@ -984,61 +1014,69 @@ async fn run_session_loop<C: ServerConnector>(
 // Event dispatching
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
+/// Bundles all per-session mutable state so that `handle_client_event` and
+/// `dispatch_stanza` can take a single `ctx` parameter instead of 18+
+/// individual arguments.  Private to this module — not part of the public API.
+struct SessionContext<'a> {
+    outbox: &'a mut VecDeque<Element>,
+    reconnect_attempt: &'a mut u32,
+    sm: &'a mut StreamMgmt,
+    blocking_mgr: &'a mut BlockingManager,
+    own_jid_str: &'a mut String,
+    mam_mgr: &'a mut MamManager,
+    catchup_mgr: &'a mut CatchupManager,
+    presence_machine: &'a mut PresenceMachine,
+    disco_mgr: &'a mut DiscoManager,
+    file_upload_mgr: &'a mut FileUploadManager,
+    avatar_mgr: &'a mut AvatarManager,
+    muc_mgr: &'a mut MucManager,
+    muc_config_mgr: &'a mut MucConfigManager,
+    bookmark_mgr: &'a mut BookmarkManager,
+    push_mgr: &'a mut PushManager,
+    vcard_edit_mgr: &'a mut VCardEditManager,
+    adhoc_mgr: &'a mut AdhocManager,
+    omemo_mgr: &'a mut Option<OmemoManager>,
+    ignore_mgr: &'a mut IgnoreManager,
+    conv_sync_mgr: &'a ConversationSyncManager,
+    account_mgr: &'a mut AccountManager,
+    sync_orch: &'a mut SyncOrchestrator,
+    account_jid: &'a str,
+    push_service_jid: Option<&'a str>,
+    privacy_flags: u8,
+    sm_enabled: bool,
+    seen_msg_ids: &'a mut HashSet<String>,
+    seen_msg_ids_order: &'a mut VecDeque<String>,
+}
+
 async fn handle_client_event(
     ev: tokio_xmpp::Event,
     event_tx: &mpsc::Sender<XmppEvent>,
-    outbox: &mut VecDeque<Element>,
-    reconnect_attempt: &mut u32,
-    sm: &mut StreamMgmt,
-    blocking_mgr: &mut BlockingManager,
-    own_jid_str: &mut String,
-    mam_mgr: &mut MamManager,
-    catchup_mgr: &mut CatchupManager,
-    presence_machine: &mut PresenceMachine,
-    disco_mgr: &mut DiscoManager,
-    file_upload_mgr: &mut FileUploadManager,
-    avatar_mgr: &mut AvatarManager,
-    muc_mgr: &mut MucManager,
-    muc_config_mgr: &mut MucConfigManager,
-    bookmark_mgr: &mut BookmarkManager,
-    push_mgr: &mut PushManager,
-    vcard_edit_mgr: &mut VCardEditManager,
-    adhoc_mgr: &mut AdhocManager,
-    omemo_mgr: &mut Option<OmemoManager>,
-    ignore_mgr: &mut IgnoreManager,
-    conv_sync_mgr: &ConversationSyncManager,
-    account_mgr: &mut AccountManager,
-    sync_orch: &mut SyncOrchestrator,
-    account_jid: &str,
-    push_service_jid: Option<&str>,
-    privacy_flags: u8,
-    sm_enabled: bool,
+    ctx: &mut SessionContext<'_>,
 ) -> bool {
     match ev {
         tokio_xmpp::Event::Online { bound_jid, .. } => {
-            *reconnect_attempt = 0;
-            *own_jid_str = bound_jid.to_string();
+            *ctx.reconnect_attempt = 0;
+            *ctx.own_jid_str = bound_jid.to_string();
             tracing::info!("engine: online as {bound_jid}");
 
             // Request roster (P1.4).
-            outbox.push_back(make_roster_get());
+            ctx.outbox.push_back(make_roster_get());
 
             // Enable message carbons (P1.5 / XEP-0280).
-            outbox.push_back(make_carbons_enable());
+            ctx.outbox.push_back(make_carbons_enable());
 
             // Announce presence (C2: track state, C5: with XEP-0115 caps).
-            presence_machine.on_connected();
-            outbox.push_back(make_presence_with_caps(
-                disco_mgr,
-                presence_machine.status_message(),
+            ctx.presence_machine.on_connected();
+            ctx.outbox.push_back(make_presence_with_caps(
+                ctx.disco_mgr,
+                ctx.presence_machine.status_message(),
             ));
 
             // C4: fetch blocklist (XEP-0191)
-            outbox.push_back(blocking_mgr.build_fetch_iq());
+            ctx.outbox.push_back(ctx.blocking_mgr.build_fetch_iq());
 
             // C3: MAM catchup — query archive for the last 50 messages overall
-            let (server_query_id, mam_query) = catchup_mgr.start("__server__", None);
+            let (server_query_id, mam_query) = ctx.catchup_mgr.start("__server__", None);
             let catchup_query = MamQuery {
                 query_id: mam_query.query_id.clone(),
                 filter: MamFilter {
@@ -1052,34 +1090,34 @@ async fn handle_client_event(
                     before: None,
                 },
             };
-            outbox.push_back(mam_mgr.build_query_iq(catchup_query));
+            ctx.outbox.push_back(ctx.mam_mgr.build_query_iq(catchup_query));
             tracing::info!("mam: triggered post-connect catchup (query_id={server_query_id})");
 
             // D4: fetch bookmarks from private XML storage (XEP-0048)
-            outbox.push_back(make_bookmarks_get_iq());
+            ctx.outbox.push_back(make_bookmarks_get_iq());
             tracing::debug!("bookmarks: requested private XML storage");
 
             // J10: fetch MAM archiving preferences
-            outbox.push_back(make_mam_prefs_get_iq());
+            ctx.outbox.push_back(make_mam_prefs_get_iq());
             tracing::debug!("mam: requested archiving preferences");
 
             // DC-7: XEP-0357 push cleanup — disable all stale push subscriptions on connect
-            outbox.push_back(push_mgr.build_disable_all_iq());
+            ctx.outbox.push_back(ctx.push_mgr.build_disable_all_iq());
             tracing::debug!("push: sent disable-all push IQ on connect");
 
             // K7: XEP-0357 push notifications — enable on connect if configured
-            if let Some(svc) = push_service_jid {
-                outbox.push_back(push_mgr.build_enable_iq(svc));
+            if let Some(svc) = ctx.push_service_jid {
+                ctx.outbox.push_back(ctx.push_mgr.build_enable_iq(svc));
                 tracing::info!("push: enabling notifications via {svc} on connect");
             }
 
             // MEMO: Auto-publish OMEMO device list + bundle on reconnect if identity exists.
-            if let Some(ref mut mgr) = omemo_mgr {
-                match mgr.republish_stanzas(account_jid).await {
+            if let Some(ref mut mgr) = ctx.omemo_mgr {
+                match mgr.republish_stanzas(ctx.account_jid).await {
                     Ok(Some(stanzas)) => {
                         let device_id = mgr.device_mgr.own_device_id();
                         for stanza in stanzas {
-                            outbox.push_back(stanza);
+                            ctx.outbox.push_back(stanza);
                         }
                         tracing::info!(
                             "omemo: republished device list + bundle on reconnect (device_id={device_id})"
@@ -1102,17 +1140,17 @@ async fn handle_client_event(
         }
 
         tokio_xmpp::Event::Disconnected(err) => {
-            presence_machine.on_disconnected();
-            let unacked = sm.unacked_stanzas().len();
+            ctx.presence_machine.on_disconnected();
+            let unacked = ctx.sm.unacked_stanzas().len();
             let err_str = err.to_string();
             tracing::warn!(
                 "engine: disconnected — {err_str} ({unacked} unacked stanzas, h={})",
-                sm.h()
+                ctx.sm.h()
             );
             // C1: reset stream management counters for the next session
-            sm.reset();
+            ctx.sm.reset();
             // P4.3: discard stale catchup query IDs so they are not matched in the new session
-            catchup_mgr.reset();
+            ctx.catchup_mgr.reset();
 
             // BUG-7: detect auth failures — do not reconnect, surface the error instead
             let is_auth_error = is_auth_error(&err_str);
@@ -1124,79 +1162,57 @@ async fn handle_client_event(
                 return true;
             }
 
-            *reconnect_attempt += 1;
+            *ctx.reconnect_attempt += 1;
             let _ = event_tx
                 .send(XmppEvent::Reconnecting {
-                    attempt: *reconnect_attempt,
+                    attempt: *ctx.reconnect_attempt,
                 })
                 .await;
         }
 
         tokio_xmpp::Event::Stanza(el) => {
             // C1: record inbound stanza and maybe send coalesced ack
-            sm.on_stanza_received();
-            if sm_enabled {
-                if let Some(ack) = sm.maybe_send_ack() {
-                    outbox.push_back(ack);
+            ctx.sm.on_stanza_received();
+            if ctx.sm_enabled {
+                if let Some(ack) = ctx.sm.maybe_send_ack() {
+                    ctx.outbox.push_back(ack);
                 }
             }
-            dispatch_stanza(
-                el,
-                event_tx,
-                blocking_mgr,
-                sm,
-                outbox,
-                own_jid_str,
-                mam_mgr,
-                catchup_mgr,
-                sync_orch,
-                disco_mgr,
-                file_upload_mgr,
-                avatar_mgr,
-                muc_mgr,
-                muc_config_mgr,
-                bookmark_mgr,
-                vcard_edit_mgr,
-                adhoc_mgr,
-                omemo_mgr,
-                ignore_mgr,
-                conv_sync_mgr,
-                account_mgr,
-                account_jid,
-                privacy_flags,
-            )
-            .await;
+            dispatch_stanza(el, event_tx, ctx).await;
         }
     }
     false
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn dispatch_stanza(
     el: Element,
     event_tx: &mpsc::Sender<XmppEvent>,
-    blocking_mgr: &mut BlockingManager,
-    sm: &mut StreamMgmt,
-    outbox: &mut VecDeque<Element>,
-    own_jid_str: &str,
-    mam_mgr: &mut MamManager,
-    catchup_mgr: &mut CatchupManager,
-    sync_orch: &mut SyncOrchestrator,
-    disco_mgr: &mut DiscoManager,
-    file_upload_mgr: &mut FileUploadManager,
-    avatar_mgr: &mut AvatarManager,
-    muc_mgr: &mut MucManager,
-    muc_config_mgr: &mut MucConfigManager,
-    bookmark_mgr: &mut BookmarkManager,
-    vcard_edit_mgr: &mut VCardEditManager,
-    adhoc_mgr: &mut AdhocManager,
-    omemo_mgr: &mut Option<OmemoManager>,
-    ignore_mgr: &mut IgnoreManager,
-    conv_sync_mgr: &ConversationSyncManager,
-    account_mgr: &mut AccountManager,
-    account_jid: &str,
-    privacy_flags: u8,
+    ctx: &mut SessionContext<'_>,
 ) {
+    // FIX: returns true when this message id is new (not yet seen).
+    // Empty ids bypass dedup (no stable key).  Evicts oldest entry when
+    // the cache reaches 500 to bound memory.
+    fn is_new_msg_id(
+        id: &str,
+        seen: &mut HashSet<String>,
+        order: &mut VecDeque<String>,
+    ) -> bool {
+        const LIMIT: usize = 500;
+        if id.is_empty() {
+            return true;
+        }
+        if seen.contains(id) {
+            return false;
+        }
+        if seen.len() >= LIMIT {
+            if let Some(oldest) = order.pop_front() {
+                seen.remove(&oldest);
+            }
+        }
+        seen.insert(id.to_string());
+        order.push_back(id.to_string());
+        true
+    }
     // F1: emit received stanza to debug console before routing
     let xml_str = String::from(&el);
     let _ = event_tx
@@ -1209,14 +1225,14 @@ async fn dispatch_stanza(
     // XEP-0198: handle server <a h='...'> acks
     if el.name() == "a" && el.ns() == "urn:xmpp:sm:3" {
         if let Some(h) = el.attr("h").and_then(|v| v.parse::<u32>().ok()) {
-            sm.on_ack_received(h);
+            ctx.sm.on_ack_received(h);
         }
         return;
     }
     // XEP-0198: handle server <r/> ack requests
     if el.name() == "r" && el.ns() == "urn:xmpp:sm:3" {
-        if let Some(ack) = sm.flush_ack() {
-            outbox.push_back(ack);
+        if let Some(ack) = ctx.sm.flush_ack() {
+            ctx.outbox.push_back(ack);
         }
         return;
     }
@@ -1225,23 +1241,23 @@ async fn dispatch_stanza(
             handle_iq(
                 el,
                 event_tx,
-                outbox,
-                blocking_mgr,
-                mam_mgr,
-                catchup_mgr,
-                sync_orch,
-                disco_mgr,
-                file_upload_mgr,
-                avatar_mgr,
-                muc_config_mgr,
-                bookmark_mgr,
-                vcard_edit_mgr,
-                adhoc_mgr,
-                ignore_mgr,
-                conv_sync_mgr,
-                omemo_mgr,
-                account_mgr,
-                account_jid,
+                ctx.outbox,
+                ctx.blocking_mgr,
+                ctx.mam_mgr,
+                ctx.catchup_mgr,
+                ctx.sync_orch,
+                ctx.disco_mgr,
+                ctx.file_upload_mgr,
+                ctx.avatar_mgr,
+                ctx.muc_config_mgr,
+                ctx.bookmark_mgr,
+                ctx.vcard_edit_mgr,
+                ctx.adhoc_mgr,
+                ctx.ignore_mgr,
+                ctx.conv_sync_mgr,
+                ctx.omemo_mgr,
+                ctx.account_mgr,
+                ctx.account_jid,
             )
             .await
         }
@@ -1271,23 +1287,34 @@ async fn dispatch_stanza(
                 }
             }
             // D3: XEP-0045 groupchat message — route through MucManager
-            if let Some(muc_msg) = muc_mgr.on_groupchat_message(&el) {
-                let _ = event_tx
-                    .send(XmppEvent::MessageReceived(IncomingMessage {
-                        id: muc_msg.id,
-                        from: format!("{}/{}", muc_msg.room_jid, muc_msg.from_nick),
-                        body: muc_msg.body,
-                        is_historical: false,
-                        is_encrypted: false,
-                        is_trusted: false,
-                    }))
-                    .await;
+            if let Some(muc_msg) = ctx.muc_mgr.on_groupchat_message(&el) {
+                // DC-10: drop messages from ignored occupants (check nick, not room JID)
+                if ctx.ignore_mgr.is_ignored(&muc_msg.room_jid, &muc_msg.from_nick) {
+                    tracing::debug!(
+                        "ignore: dropped MUC message from nick {:?} in {}",
+                        muc_msg.from_nick,
+                        muc_msg.room_jid
+                    );
+                    return;
+                }
+                if is_new_msg_id(&muc_msg.id, ctx.seen_msg_ids, ctx.seen_msg_ids_order) {
+                    let _ = event_tx
+                        .send(XmppEvent::MessageReceived(IncomingMessage {
+                            id: muc_msg.id,
+                            from: format!("{}/{}", muc_msg.room_jid, muc_msg.from_nick),
+                            body: muc_msg.body,
+                            is_historical: false,
+                            is_encrypted: false,
+                            is_trusted: false,
+                        }))
+                        .await;
+                }
                 return;
             }
             // C3: XEP-0313 MAM result wrapper — extract forwarded message
-            if let Some(mam_msg) = mam_mgr.on_mam_message(&el) {
+            if let Some(mam_msg) = ctx.mam_mgr.on_mam_message(&el) {
                 // P4.4: notify bulk sync orchestrator of each incoming MAM result
-                sync_orch.on_mam_result(mam_msg.clone());
+                ctx.sync_orch.on_mam_result(mam_msg.clone());
                 if !mam_msg.body.is_empty() {
                     let bare_from = mam_msg
                         .forwarded_from
@@ -1295,7 +1322,13 @@ async fn dispatch_stanza(
                         .next()
                         .unwrap_or(&mam_msg.forwarded_from)
                         .to_string();
-                    if !blocking_mgr.is_blocked(&bare_from) {
+                    if !ctx.blocking_mgr.is_blocked(&bare_from)
+                        && is_new_msg_id(
+                            &mam_msg.archive_id,
+                            ctx.seen_msg_ids,
+                            ctx.seen_msg_ids_order,
+                        )
+                    {
                         let _ = event_tx
                             .send(XmppEvent::MessageReceived(IncomingMessage {
                                 id: mam_msg.archive_id,
@@ -1310,6 +1343,26 @@ async fn dispatch_stanza(
                 }
                 return;
             }
+            // XEP-0280 §6: verify the carbon wrapper came from our own bare JID.
+            {
+                let own_bare_jid = ctx.own_jid_str.split('/').next().unwrap_or(ctx.own_jid_str);
+                if !own_bare_jid.is_empty() {
+                    let carbon_from = el.attr("from").unwrap_or("");
+                    let carbon_bare_from =
+                        carbon_from.split('/').next().unwrap_or(carbon_from);
+                    let is_carbon = el.children().any(|c| {
+                        (c.name() == "sent" || c.name() == "received")
+                            && c.ns() == NS_CARBONS
+                    });
+                    if is_carbon && carbon_bare_from != own_bare_jid {
+                        tracing::debug!(
+                            "carbon: dropped — wrapper from {carbon_bare_from:?} \
+                             does not match own JID {own_bare_jid}"
+                        );
+                        return;
+                    }
+                }
+            }
             // XEP-0280: carbon <sent> — own message from another device
             if let Some(inner) = extract_carbon(&el, "sent") {
                 let body = inner
@@ -1317,11 +1370,14 @@ async fn dispatch_stanza(
                     .find(|c| c.name() == "body")
                     .map(Element::text)
                     .unwrap_or_default();
-                if !body.is_empty() {
+                let carbon_id = inner.attr("id").unwrap_or("").to_string();
+                if !body.is_empty()
+                    && is_new_msg_id(&carbon_id, ctx.seen_msg_ids, ctx.seen_msg_ids_order)
+                {
                     let _ = event_tx
                         .send(XmppEvent::MessageReceived(IncomingMessage {
-                            id: inner.attr("id").unwrap_or("").to_string(),
-                            from: own_jid_str.to_string(),
+                            id: carbon_id,
+                            from: ctx.own_jid_str.to_string(),
                             body,
                             is_historical: false,
                             is_encrypted: false,
@@ -1336,10 +1392,10 @@ async fn dispatch_stanza(
                 handle_message(
                     inner,
                     event_tx,
-                    blocking_mgr,
-                    ignore_mgr,
-                    outbox,
-                    privacy_flags,
+                    ctx.blocking_mgr,
+                    ctx.ignore_mgr,
+                    ctx.outbox,
+                    ctx.privacy_flags,
                 )
                 .await;
                 return;
@@ -1362,10 +1418,11 @@ async fn dispatch_stanza(
                 });
                 if is_avatar_meta {
                     let from_jid = el.attr("from").unwrap_or("").to_string();
-                    if let Some(info) = avatar_mgr.on_avatar_metadata_event(&from_jid, &el) {
+                    if let Some(info) = ctx.avatar_mgr.on_avatar_metadata_event(&from_jid, &el) {
                         // Fetch the actual avatar data
-                        let fetch_iq = avatar_mgr.build_avatar_data_request(&info.jid, &info.sha1);
-                        outbox.push_back(fetch_iq);
+                        let fetch_iq =
+                            ctx.avatar_mgr.build_avatar_data_request(&info.jid, &info.sha1);
+                        ctx.outbox.push_back(fetch_iq);
                         tracing::debug!("avatar: fetching XEP-0084 data for {from_jid}");
                     }
                     return;
@@ -1398,10 +1455,10 @@ async fn dispatch_stanza(
             if let Some(from_jid) = DeviceManager::is_device_list_event(&el) {
                 let devices = DeviceManager::parse_device_list(&el);
                 // Persist device list update in the store.
-                if let Some(ref mut mgr) = omemo_mgr {
+                if let Some(ref mut mgr) = ctx.omemo_mgr {
                     if let Err(e) = mgr
                         .store
-                        .sync_device_list(account_jid, &from_jid, &devices)
+                        .sync_device_list(ctx.account_jid, &from_jid, &devices)
                         .await
                     {
                         tracing::warn!("omemo: sync_device_list failed for {from_jid}: {e}");
@@ -1410,7 +1467,7 @@ async fn dispatch_stanza(
                         for &device_id in &devices {
                             let has_session = mgr
                                 .store
-                                .load_session(account_jid, &from_jid, device_id)
+                                .load_session(ctx.account_jid, &from_jid, device_id)
                                 .await
                                 .unwrap_or(None)
                                 .is_some();
@@ -1418,7 +1475,7 @@ async fn dispatch_stanza(
                                 let (iq_id, iq) =
                                     mgr.device_mgr.build_bundle_fetch(&from_jid, device_id);
                                 mgr.track_bundle_fetch(iq_id, from_jid.clone(), device_id);
-                                outbox.push_back(iq);
+                                ctx.outbox.push_back(iq);
                                 tracing::debug!(
                                     "omemo: fetching bundle for {from_jid}/{device_id}"
                                 );
@@ -1437,33 +1494,55 @@ async fn dispatch_stanza(
             // MEMO: Check for OMEMO <encrypted> stanza (incoming encrypted message).
             {
                 if has_omemo_encrypted(&el) {
-                    if let Some(ref mut mgr) = omemo_mgr {
+                    if let Some(ref mut mgr) = ctx.omemo_mgr {
                         let from = el.attr("from").unwrap_or("").to_string();
                         let msg_id = el.attr("id").unwrap_or("").to_string();
-                        match omemo_try_decrypt(mgr, account_jid, &el).await {
-                            Ok(Some((body, is_trusted))) => {
+                        match omemo_try_decrypt(mgr, ctx.account_jid, &el).await {
+                            Ok(Some((body, new_device))) => {
                                 // Route decrypted message through the normal
                                 // MessageReceived path so it appears in
                                 // notifications and sidebar preview.
-                                let _ = event_tx
-                                    .send(XmppEvent::MessageReceived(IncomingMessage {
-                                        id: msg_id,
-                                        from,
-                                        body,
-                                        is_historical: false,
-                                        is_encrypted: true,
-                                        is_trusted,
-                                    }))
-                                    .await;
+                                if is_new_msg_id(
+                                    &msg_id,
+                                    ctx.seen_msg_ids,
+                                    ctx.seen_msg_ids_order,
+                                ) {
+                                    let _ = event_tx
+                                        .send(XmppEvent::MessageReceived(IncomingMessage {
+                                            id: msg_id,
+                                            from: from.clone(),
+                                            body,
+                                            is_historical: false,
+                                            is_encrypted: true,
+                                            is_trusted: !new_device,
+                                        }))
+                                        .await;
+                                }
+                                // Notify the UI about a newly-seen undecided device.
+                                if new_device {
+                                    let sender_device_id = {
+                                        use crate::xmpp::modules::omemo::message::parse_encrypted_message;
+                                        parse_encrypted_message(&el)
+                                            .map_or(0, |e| e.header.sid)
+                                    };
+                                    let _ = event_tx
+                                        .send(XmppEvent::OmemoNewDeviceDetected {
+                                            jid: from,
+                                            device_id: sender_device_id,
+                                        })
+                                        .await;
+                                }
                                 // Check pre-key stock and replenish if below threshold.
-                                omemo_check_prekey_rotation(mgr, account_jid, outbox).await;
+                                omemo_check_prekey_rotation(mgr, ctx.account_jid, ctx.outbox)
+                                    .await;
                             }
                             Ok(None) => {
                                 tracing::debug!(
                                     "omemo: key-transport message (no payload), ignored"
                                 );
                                 // A key-transport also consumes a pre-key -- check rotation.
-                                omemo_check_prekey_rotation(mgr, account_jid, outbox).await;
+                                omemo_check_prekey_rotation(mgr, ctx.account_jid, ctx.outbox)
+                                    .await;
                             }
                             Err(e) => {
                                 tracing::warn!("omemo: decrypt failed from {from}: {e}");
@@ -1478,16 +1557,16 @@ async fn dispatch_stanza(
             handle_message(
                 el,
                 event_tx,
-                blocking_mgr,
-                ignore_mgr,
-                outbox,
-                privacy_flags,
+                ctx.blocking_mgr,
+                ctx.ignore_mgr,
+                ctx.outbox,
+                ctx.privacy_flags,
             )
             .await;
         }
         "presence" => {
             // D3: update MUC occupant lists from room presence stanzas
-            muc_mgr.on_presence(&el);
+            ctx.muc_mgr.on_presence(&el);
             // K1: detect room-created status code 201 in MUC owner presence
             {
                 let is_room_created = el.children().any(|c| {
@@ -1499,8 +1578,8 @@ async fn dispatch_stanza(
                 if is_room_created {
                     if let Some(from) = el.attr("from") {
                         let room_jid = from.split('/').next().unwrap_or(from).to_string();
-                        let (_, iq) = muc_config_mgr.build_config_request(&room_jid);
-                        outbox.push_back(iq);
+                        let (_, iq) = ctx.muc_config_mgr.build_config_request(&room_jid);
+                        ctx.outbox.push_back(iq);
                         tracing::info!("muc: room {room_jid} created, requesting config form");
                     }
                 }
@@ -2034,6 +2113,7 @@ mod tests {
             proxy_port: None,
             manual_srv: None,
             push_service_jid: None,
+            allow_insecure_tls: false,
         };
         assert_eq!(cfg.jid, "user@example.com");
         assert_eq!(cfg.server, "xmpp.example.com:5222");
@@ -2056,6 +2136,7 @@ mod tests {
             proxy_port: Some(1080),
             manual_srv: None,
             push_service_jid: None,
+            allow_insecure_tls: false,
         };
         let pc = cfg.proxy_config();
         assert!(pc.is_some());
@@ -2080,6 +2161,7 @@ mod tests {
             proxy_port: Some(8080),
             manual_srv: None,
             push_service_jid: None,
+            allow_insecure_tls: false,
         };
         assert!(cfg.proxy_config().is_none());
     }

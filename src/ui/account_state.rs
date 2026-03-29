@@ -18,7 +18,6 @@ use crate::xmpp::{AccountId, RosterContact};
 
 /// Simple online/offline flag as seen by the UI for a contact.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum PresenceStatus {
     Available,
     Unavailable,
@@ -29,15 +28,20 @@ pub enum PresenceStatus {
 // ---------------------------------------------------------------------------
 
 /// All per-account UI state.
-#[allow(dead_code)]
 pub struct AccountState {
     /// Conversation list, active conversation, composer drafts, etc.
+    // TODO(MULTI): wire per-account ChatScreen when multi-account isolation is complete.
+    #[allow(dead_code)]
     pub chat: ChatScreen,
     /// Roster contacts for this account.
+    // TODO(MULTI): populate and use per-account roster.
+    #[allow(dead_code)]
     pub roster: Vec<RosterContact>,
     /// Contact presence keyed by bare JID.
     pub presence: HashMap<String, PresenceStatus>,
     /// Decoded avatar image handles keyed by bare JID.
+    // TODO(MULTI): populate and use per-account avatar cache.
+    #[allow(dead_code)]
     pub avatar_cache: HashMap<String, iced::widget::image::Handle>,
     /// Total unread messages across all conversations — used for sidebar badge.
     pub unread_total: usize,
@@ -116,7 +120,6 @@ impl AccountStateManager {
     /// Remove an account and its state. If the removed account was active,
     /// the active account is cleared (caller should call `switch_to` with a
     /// remaining account).
-    #[allow(dead_code)]
     pub fn remove_account(&mut self, id: &AccountId) {
         self.accounts.remove(id);
         if self.active.as_ref() == Some(id) {
@@ -135,7 +138,6 @@ impl AccountStateManager {
     }
 
     /// Returns `true` when more than one account is registered.
-    #[allow(dead_code)]
     pub fn is_multi_account(&self) -> bool {
         self.accounts.len() > 1
     }

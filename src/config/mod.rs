@@ -59,8 +59,12 @@ pub struct Settings {
     /// M1: time format for timestamps (12h or 24h).
     #[serde(default)]
     pub time_format: TimeFormat,
-    /// H2: cached own avatar data (PNG bytes).
-    #[serde(default)]
+    /// H2: own avatar is now stored on disk via `config::save_own_avatar` /
+    /// `config::load_own_avatar` rather than in the settings JSON to avoid
+    /// bloating the file with binary data. This field is kept for struct
+    /// compatibility but is never serialised.
+    #[serde(skip)]
+    #[allow(dead_code)]
     pub avatar_data: Option<Vec<u8>>,
     /// K6: contact sorting preference ("alphabetical" or "recent")
     #[serde(default)]
@@ -212,7 +216,13 @@ pub fn save(settings: &Settings) -> Result<()> {
     let dir = config_path();
     std::fs::create_dir_all(&dir)?;
     let json = serde_json::to_string_pretty(settings)?;
-    std::fs::write(settings_file(), json)?;
+    let path = settings_file();
+    std::fs::write(&path, json)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(())
 }
 
@@ -344,6 +354,30 @@ pub fn load_avatar_cache() -> std::collections::HashMap<String, Vec<u8>> {
     map
 }
 
+/// Persist the user's own avatar PNG to disk (separate file, not in settings JSON).
+///
+/// Stored as `avatars/own_avatar.png` in the platform data directory.
+/// This avoids bloating `settings.json` with binary data encoded as a JSON array.
+pub fn save_own_avatar(png_bytes: &[u8]) {
+    let dir = avatar_cache_dir();
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!("avatar cache: failed to create dir for own avatar: {e}");
+        return;
+    }
+    let path = dir.join("own_avatar.png");
+    if let Err(e) = std::fs::write(&path, png_bytes) {
+        tracing::warn!("avatar cache: failed to write own avatar: {e}");
+    }
+}
+
+/// Load the user's own avatar PNG from disk cache.
+///
+/// Returns `None` if no own avatar has been saved yet.
+pub fn load_own_avatar() -> Option<Vec<u8>> {
+    let path = avatar_cache_dir().join("own_avatar.png");
+    std::fs::read(&path).ok()
+}
+
 /// Internal: write the JID sidecar file so `load_avatar_cache` can map
 /// filename back to JID.
 fn save_avatar_jid_sidecar(jid: &str) {
@@ -371,7 +405,6 @@ pub fn save_account_password(account: &AccountConfig, password: &str) -> Result<
 
 /// Retrieve the stored password for the given `AccountConfig`.
 /// Returns `None` if no credential is found.
-#[allow(dead_code)]
 pub fn load_account_password(account: &AccountConfig) -> Option<String> {
     load_password(&account.password_key)
 }
@@ -516,23 +549,6 @@ mod tests {
         assert_eq!(s.theme, Theme::Light);
     }
 
-    // -----------------------------------------------------------------------
-    // MULTI: per-account keychain helpers
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn save_account_password_uses_password_key() {
-        // Verify that `save_account_password` routes through `password_key`,
-        // not the bare JID, by constructing an account where the two differ.
-        let mut account = AccountConfig::new("alice@example.com");
-        account.password_key = "alice@example.com:rotated-2025".to_string();
-
-        // We can't call the real keychain in a unit test environment, but we can
-        // confirm the public API is callable and that the key field is wired.
-        // The actual keychain round-trip is exercised by manual integration tests.
-        assert_eq!(account.password_key, "alice@example.com:rotated-2025");
-        assert_ne!(account.jid, account.password_key);
-    }
 
     #[test]
     fn account_config_new_sets_password_key_equal_to_jid() {

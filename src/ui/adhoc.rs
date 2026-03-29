@@ -15,7 +15,7 @@ use iced::{
     Alignment, Element, Length,
 };
 
-use crate::ui::data_forms::{render_form_interactive, DataForm, FieldType, FormField};
+use crate::ui::data_forms::{render_form, render_form_interactive, DataForm, FieldType, FormField};
 use crate::xmpp::modules::adhoc::{CommandResponse, CommandStatus, DataField};
 
 // ---------------------------------------------------------------------------
@@ -35,8 +35,8 @@ pub enum AdhocStep {
     Executing,
     /// Showing a form returned by the server.
     ShowingForm(CommandResponse),
-    /// Command completed.
-    Done(String),
+    /// Command completed — holds summary message and optional read-only result form.
+    Done(String, Option<DataForm>),
 }
 
 #[derive(Debug, Clone)]
@@ -237,7 +237,13 @@ impl AdhocScreen {
                         } else {
                             notes
                         };
-                        self.step = AdhocStep::Done(summary);
+                        // Build a read-only result form if the server returned fields.
+                        let result_form = if resp.fields.is_empty() {
+                            None
+                        } else {
+                            Some(Self::data_fields_to_data_form(&resp.fields))
+                        };
+                        self.step = AdhocStep::Done(summary, result_form);
                     }
                     CommandStatus::Canceled => {
                         self.step = AdhocStep::CommandList;
@@ -309,14 +315,19 @@ impl AdhocScreen {
             AdhocStep::CommandList => self.view_command_list(),
             AdhocStep::Executing => text("Executing command\u{2026}").into(),
             AdhocStep::ShowingForm(resp) => self.view_form(resp),
-            AdhocStep::Done(msg) => column![
-                text(msg.as_str()),
-                button("Back to list")
-                    .on_press(Message::BackToList)
-                    .padding([4, 12]),
-            ]
-            .spacing(8)
-            .into(),
+            AdhocStep::Done(msg, result_form) => {
+                let mut done_col = column![text(msg.as_str())].spacing(8);
+                // If the server returned result fields, show them as a read-only form.
+                if let Some(form) = result_form.clone() {
+                    done_col = done_col.push(render_form::<Message>(form));
+                }
+                done_col = done_col.push(
+                    button("Back to list")
+                        .on_press(Message::BackToList)
+                        .padding([4, 12]),
+                );
+                done_col.into()
+            }
         };
 
         let content = column![

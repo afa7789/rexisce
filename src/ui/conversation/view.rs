@@ -61,7 +61,7 @@ impl ConversationView {
             let msg_date = Utc
                 .timestamp_millis_opt(m.timestamp)
                 .single()
-                .map(|dt| dt.with_timezone(&chrono::Local).date_naive());
+                .map(|dt| dt.date_naive());
 
             if let Some(date) = msg_date {
                 if prev_date != Some(date) {
@@ -206,7 +206,7 @@ impl ConversationView {
             // E2: retract button (own messages only)
             let retract_msg_id = m.id.clone();
             let retract_btn = tooltip(
-                button(text("✕").size(10).shaping(Shaping::Advanced))
+                button(text("✕").size(10))
                     .on_press(Message::RetractMessage(retract_msg_id))
                     .padding([2, 4]),
                 "Retract message",
@@ -246,20 +246,13 @@ impl ConversationView {
                     .into()
             } else if !m.own {
                 // H5/H1: avatar + sender + body for incoming messages
-                // For MUC messages, use full JID (room/nick) for avatar key to
-                // distinguish participants; fall back to bare JID for 1:1.
                 let from_bare = m.from.split('/').next().unwrap_or(&m.from);
-                let avatar_key = if !occupants.is_empty() {
-                    &m.from // MUC: room@server/nick
-                } else {
-                    from_bare // 1:1: user@server
-                };
-                let avatar: Element<Message> = if let Some(png) = vctx.avatars.get(avatar_key) {
+                let avatar: Element<Message> = if let Some(png) = vctx.avatars.get(from_bare) {
                     let handle = iced_image::Handle::from_bytes(png.clone());
                     image(handle).width(24).height(24).into()
                 } else {
-                    let color = jid_color(avatar_key);
-                    let initial = jid_initial(avatar_key).to_string();
+                    let color = jid_color(from_bare);
+                    let initial = jid_initial(from_bare).to_string();
                     container(text(initial).size(11))
                         .width(24)
                         .height(24)
@@ -338,6 +331,21 @@ impl ConversationView {
                 } else {
                     None
                 };
+                // M2: delivery indicator for this specific message
+                let delivery_state = self.message_states.get(&m.id).copied();
+                let (delivery_mark, delivery_color) = match delivery_state {
+                    None | Some(MessageState::Sending) => ("", palette::MUTED_TEXT),
+                    Some(MessageState::Sent) => ("\u{2713}", palette::MUTED_TEXT),
+                    Some(MessageState::Delivered) => ("\u{2713}\u{2713}", palette::MUTED_TEXT),
+                    Some(MessageState::Read) => ("\u{2713}\u{2713}", palette::BRAND_BLUE),
+                };
+                let ts_row: Element<Message> = row![
+                    text(own_ts_label).size(10),
+                    text(delivery_mark).size(10).color(delivery_color),
+                ]
+                .spacing(3)
+                .align_y(Alignment::Center)
+                .into();
                 let text_col = if show_sender {
                     let mut own_header = row![
                         text(sender.clone()).size(11).shaping(Shaping::Advanced),
@@ -372,7 +380,7 @@ impl ConversationView {
                     if let Some(lbl) = edited_label {
                         col = col.push(lbl);
                     }
-                    col.push(text(own_ts_label).size(10))
+                    col.push(ts_row)
                 } else {
                     let mut col = column![].spacing(4).padding([2, 10]);
                     if let Some(preview) = m.reply_preview.as_ref() {
@@ -394,7 +402,7 @@ impl ConversationView {
                     if let Some(lbl) = edited_label {
                         col = col.push(lbl);
                     }
-                    col.push(text(own_ts_label).size(10))
+                    col.push(ts_row)
                 };
                 container(text_col)
                     .width(Length::Fill)
@@ -503,22 +511,17 @@ impl ConversationView {
             if let Some(msg) = last_own {
                 let state = self.message_states.get(&msg.id).copied();
                 let label = match state {
-                    None => "·", // sending
-                    Some(MessageState::Sending) => "·",
-                    Some(MessageState::Sent) => "✓",
-                    Some(MessageState::Delivered) => "✓✓",
-                    Some(MessageState::Read) => "✓✓",
+                    None | Some(MessageState::Sending) => "",
+                    Some(MessageState::Sent) => "\u{2713}",
+                    Some(MessageState::Delivered) => "\u{2713}\u{2713}",
+                    Some(MessageState::Read) => "\u{2713}\u{2713}",
                 };
                 let color = if state == Some(MessageState::Read) {
                     palette::BRAND_BLUE
                 } else {
                     palette::MUTED_TEXT
                 };
-                text(label)
-                    .size(12)
-                    .color(color)
-                    .shaping(Shaping::Advanced)
-                    .into()
+                text(label).size(12).color(color).into()
             } else {
                 text("").size(12).into()
             }
@@ -560,7 +563,7 @@ impl ConversationView {
 
         // E1: edit-mode strip above composer
         let edit_strip: Option<Element<Message>> = self.edit_mode.as_ref().map(|(_id, _orig)| {
-            let cancel_btn = button(text("✕").size(10).shaping(Shaping::Advanced))
+            let cancel_btn = button(text("✕").size(10))
                 .on_press(Message::CancelEdit)
                 .padding([2, 4]);
             let strip = row![
@@ -724,7 +727,7 @@ impl ConversationView {
             for (i, att) in self.pending_attachments.iter().enumerate() {
                 let size_kb = att.size / 1024;
                 let label = format!("{} ({}KB)", att.name, size_kb);
-                let remove_btn = button(text("✕").size(10).shaping(Shaping::Advanced))
+                let remove_btn = button(text("✕").size(10))
                     .on_press(Message::RemoveAttachment(i))
                     .padding([2, 4]);
                 let progress_bar = container(
@@ -742,10 +745,23 @@ impl ConversationView {
                     background: Some(iced::Background::Color(palette::PROGRESS_TRACK)),
                     ..Default::default()
                 });
-                // DC-17: show thumbnail preview if available
-                if let Some(ref thumb_bytes) = att.thumbnail {
-                    let handle = iced_image::Handle::from_bytes(thumb_bytes.clone());
-                    att_col = att_col.push(iced::widget::image(handle).width(64).height(64));
+                // DC-17: show thumbnail preview if available, using actual dimensions
+                // scaled to fit within 64px while preserving aspect ratio.
+                if let Some(ref thumb) = att.thumbnail {
+                    let max_dim: u32 = 64;
+                    let (render_w, render_h) = if thumb.width >= thumb.height {
+                        let h = (thumb.height * max_dim / thumb.width.max(1)).max(1);
+                        (max_dim as u16, h as u16)
+                    } else {
+                        let w = (thumb.width * max_dim / thumb.height.max(1)).max(1);
+                        (w as u16, max_dim as u16)
+                    };
+                    let handle = iced_image::Handle::from_bytes(thumb.data.clone());
+                    att_col = att_col.push(
+                        iced::widget::image(handle)
+                            .width(render_w)
+                            .height(render_h),
+                    );
                 }
                 let att_row = row![
                     text(label).size(11).width(Length::Fill),
@@ -762,7 +778,7 @@ impl ConversationView {
         };
 
         let close_btn = tooltip(
-            button(text("✕").size(14).shaping(Shaping::Advanced))
+            button(text("✕").size(14))
                 .on_press(Message::Close)
                 .padding([4, 10]),
             "Close conversation",
@@ -840,17 +856,17 @@ impl ConversationView {
             ]
             .spacing(4)
             .align_y(Alignment::Center);
-            // OMEMO: always show per-conversation encryption toggle (like Gajim "Choose Encryption")
-            {
+            // OMEMO Phase 2: show per-conversation lock button only when OMEMO is globally enabled
+            if vctx.omemo_enabled {
                 let lock_icon = if self.is_encryption_enabled {
                     "🔒"
                 } else {
                     "🔓"
                 };
                 let lock_tip = if self.is_encryption_enabled {
-                    "OMEMO encryption enabled — click to disable"
+                    "Encryption enabled — click to disable"
                 } else {
-                    "Click to enable OMEMO encryption"
+                    "Encryption disabled — click to enable"
                 };
                 let lock_btn = tooltip(
                     button(text(lock_icon).size(14).shaping(Shaping::Advanced))

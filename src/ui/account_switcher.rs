@@ -45,6 +45,8 @@ pub enum Message {
     SwitchTo(AccountId),
     /// User clicked "Add Account".
     AddAccount,
+    /// User clicked "Remove" for an account.
+    RemoveAccount(AccountId),
     /// User closed / dismissed the switcher.
     Close,
 }
@@ -53,11 +55,11 @@ pub enum Message {
 // Update + View
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
 pub enum Action {
-    None,
     SwitchTo(AccountId),
     AddAccount,
+    /// Remove the account with this ID (caller should disconnect it and clean up state).
+    RemoveAccount(AccountId),
     Close,
 }
 
@@ -73,6 +75,13 @@ impl AccountSwitcherScreen {
                 Action::SwitchTo(id)
             }
             Message::AddAccount => Action::AddAccount,
+            Message::RemoveAccount(id) => {
+                self.accounts.retain(|e| e.id != id);
+                if self.active.as_ref() == Some(&id) {
+                    self.active = self.accounts.first().map(|e| e.id.clone());
+                }
+                Action::RemoveAccount(id)
+            }
             Message::Close => Action::Close,
         }
     }
@@ -141,12 +150,19 @@ impl AccountSwitcherScreen {
             .spacing(8)
             .align_y(Alignment::Center);
 
-        let btn = button(row_content)
+        let switch_btn = button(row_content)
             .on_press(Message::SwitchTo(entry.id.clone()))
             .width(Length::Fill)
             .padding([6, 12]);
 
-        btn.into()
+        let remove_btn = button(text("Remove").size(11))
+            .on_press(Message::RemoveAccount(entry.id.clone()))
+            .padding([4, 8]);
+
+        row![switch_btn, remove_btn]
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .into()
     }
 }
 

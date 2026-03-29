@@ -634,6 +634,7 @@ fn privacy_flags_computed_from_config() {
         proxy_port: None,
         manual_srv: None,
         push_service_jid: None,
+        allow_insecure_tls: false,
     };
 
     // Config B: receipts=false, typing=true, read_markers=true  → 0b110 = 6
@@ -650,6 +651,7 @@ fn privacy_flags_computed_from_config() {
         proxy_port: None,
         manual_srv: None,
         push_service_jid: None,
+        allow_insecure_tls: false,
     };
 
     // Replicate the exact formula used in run_session (engine.rs ~line 352).
@@ -688,6 +690,7 @@ fn privacy_flags_computed_from_config() {
         proxy_port: None,
         manual_srv: None,
         push_service_jid: None,
+        allow_insecure_tls: false,
     };
     let flags_all: u8 = (config_all.send_receipts as u8)
         | ((config_all.send_typing as u8) << 1)
@@ -711,6 +714,7 @@ fn privacy_flags_computed_from_config() {
         proxy_port: None,
         manual_srv: None,
         push_service_jid: None,
+        allow_insecure_tls: false,
     };
     let flags_none: u8 = (config_none.send_receipts as u8)
         | ((config_none.send_typing as u8) << 1)

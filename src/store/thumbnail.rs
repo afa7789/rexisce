@@ -4,9 +4,7 @@ use std::io::Cursor;
 /// Maximum dimension (width or height) for generated thumbnails.
 pub const THUMBNAIL_MAX_DIM: u32 = 256;
 
-// TODO: wire width/height into file upload preview
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Thumbnail {
     /// Pixel width of the generated thumbnail.
     pub width: u32,

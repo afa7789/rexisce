@@ -11,6 +11,7 @@ use super::{
     adhoc, chat, config, login::LoginScreen, omemo_trust, vcard_editor, App, ChatScreen, Message,
     Screen,
 };
+use crate::ui::account_state::PresenceStatus as AccountPresenceStatus;
 use crate::xmpp::modules::presence_machine::PresenceStatus;
 use crate::xmpp::{AccountId, XmppCommand, XmppEvent};
 
@@ -57,10 +58,11 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
                 .get_active()
                 .map_or(0, |s| s.unread_total);
             // H2: restore cached own avatar so it displays immediately
-            // before the server fetch completes.
-            if let Some(ref avatar_bytes) = app.settings.avatar_data {
+            // before the server fetch completes. Avatar is stored on disk,
+            // not in settings JSON.
+            if let Some(avatar_bytes) = crate::config::load_own_avatar() {
                 app.avatar_cache
-                    .insert(account_id.0.clone(), avatar_bytes.clone());
+                    .insert(account_id.0.clone(), avatar_bytes);
             }
             chat_screen.set_active_account(Some(account_id), unread);
             app.screen = Screen::Chat(Box::new(chat_screen));
@@ -80,26 +82,28 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
                     .collect();
                 Message::XmppEvent(XmppEvent::RosterReceived(xmpp_contacts))
             });
-            // Also pre-populate known conversations from DB cache.
-            // Use account-scoped query so conversations from other accounts don't leak.
+            // Also pre-populate known conversations from DB cache (full rows for archive/mute state).
             let pool2 = app.db.clone();
-            let own_bare = bound_jid.split('/').next().unwrap_or("").to_string();
             let conv_prefill = Task::future(async move {
-                let convos: Vec<(String, bool)> =
-                    crate::store::conversation_repo::get_all_for_account(&pool2, &own_bare)
-                        .await
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter(|c| c.archived == 0)
-                        .map(|c| (c.jid, c.encrypted != 0))
-                        .collect();
+                let convos = crate::store::conversation_repo::get_all(&pool2)
+                    .await
+                    .unwrap_or_default();
                 Message::ConversationsPrefill(convos)
+            });
+            // K3: load muted JIDs from DB so the notification path has a fresh,
+            // DB-authoritative snapshot (get_muted_jids is the canonical source).
+            let pool3 = app.db.clone();
+            let muted_prefill = Task::future(async move {
+                let jids = crate::store::conversation_repo::get_muted_jids(&pool3)
+                    .await
+                    .unwrap_or_default();
+                Message::MutedJidsLoaded(jids)
             });
             let toast = app.update(Message::ShowToast(
                 format!("Connected as {}", bound_jid),
                 ToastKind::Success,
             ));
-            return Task::batch([roster_prefill, conv_prefill, toast]);
+            return Task::batch([roster_prefill, conv_prefill, muted_prefill, toast]);
         }
         XmppEvent::RegistrationFormReceived { .. } => {
             // For now, just show a toast. In a full impl, we'd show the Data Form.
@@ -234,8 +238,9 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
             {
                 let notif_from = bare_from.clone();
                 let notif_body: String = msg.body.chars().take(100).collect();
+                let is_encrypted = msg.is_encrypted;
                 tokio::spawn(async move {
-                    let _ = crate::notifications::notify_message(&notif_from, &notif_body);
+                    let _ = crate::notifications::notify_message(&notif_from, &notif_body, is_encrypted);
                 });
                 Task::none()
             } else {
@@ -297,6 +302,15 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
             if let Screen::Chat(ref mut chat) = app.screen {
                 chat.on_presence(jid, available);
             }
+            // Update per-account presence state using the typed PresenceStatus enum.
+            let status = if available {
+                AccountPresenceStatus::Available
+            } else {
+                AccountPresenceStatus::Unavailable
+            };
+            if let Some(state) = app.account_state_mgr.get_active_mut() {
+                state.presence.insert(jid.clone(), status);
+            }
             // F5: fetch avatar for newly-available contacts not yet cached
             if available
                 && !app.avatar_cache.contains_key(jid.as_str())
@@ -325,12 +339,10 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
             app.avatar_cache.insert(jid.clone(), png_bytes.clone());
             config::save_avatar(jid, png_bytes);
             if let Screen::Chat(ref mut chat) = app.screen {
-                // H2: persist own avatar to settings for instant
-                // restore on next login.
+                // H2: persist own avatar to disk cache for instant restore on next login.
                 let own_bare = chat.own_jid().split('/').next().unwrap_or(chat.own_jid());
                 if jid == own_bare {
-                    app.settings.avatar_data = Some(png_bytes.clone());
-                    let _ = config::save(&app.settings);
+                    config::save_own_avatar(png_bytes);
                 }
             }
         }
@@ -417,12 +429,10 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
             app.avatar_cache.insert(jid.clone(), data.clone());
             config::save_avatar(jid, data);
             if let Screen::Chat(ref mut chat) = app.screen {
-                // H2: persist own avatar to settings for instant
-                // restore on next login.
+                // H2: persist own avatar to disk cache for instant restore on next login.
                 let own_bare = chat.own_jid().split('/').next().unwrap_or(chat.own_jid());
                 if jid == own_bare {
-                    app.settings.avatar_data = Some(data.clone());
-                    let _ = config::save(&app.settings);
+                    config::save_own_avatar(data);
                 }
             }
         }
@@ -587,11 +597,7 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
         XmppEvent::OmemoEnabled { device_id } => {
             app.omemo_enabled = true;
             app.omemo_device_id = Some(device_id);
-            // Push state into the settings modal if it is currently open.
-            if let Some(ref mut ss) = app.settings_modal {
-                ss.set_omemo_active(device_id);
-            }
-            // Also handle legacy full-screen settings path.
+            // Push state into the settings screen if it is currently open.
             if let Screen::Settings(ref mut ss, _) = app.screen {
                 ss.set_omemo_active(device_id);
             }
@@ -625,6 +631,12 @@ pub(crate) fn handle(app: &mut App, event: XmppEvent) -> Task<Message> {
                     modal.devices = entries;
                 }
             }
+        }
+        // OMEMO: a new device was detected for a peer — log for now, future: show toast
+        XmppEvent::OmemoNewDeviceDetected { ref jid, device_id } => {
+            tracing::info!(
+                "omemo: new undecided device {device_id} for {jid} — user should verify"
+            );
         }
         // MEMO / other agents: unhandled events from additional modules.
         XmppEvent::LocationReceived { .. }

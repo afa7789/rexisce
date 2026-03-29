@@ -120,16 +120,6 @@ pub(crate) async fn handle_iq(
             .await;
         return;
     }
-    // E4: detect upload slot error and emit error toast
-    if let Some(iq_id) = file_upload_mgr.on_slot_error(&el) {
-        let _ = event_tx
-            .send(XmppEvent::UploadSlotError {
-                iq_id: iq_id.clone(),
-            })
-            .await;
-        tracing::warn!("file_upload: slot request failed for iq_id={iq_id}");
-        return;
-    }
     // J6: detect XEP-0084 avatar data result (PubSub items node='urn:xmpp:avatar:data')
     if el.attr("type") == Some("result") {
         let is_avatar_data = el.children().any(|c| {
@@ -345,10 +335,18 @@ pub(crate) async fn handle_iq(
                                                         {
                                                             tracing::warn!("omemo: save_session failed for {peer_jid}/{device_id}: {e}");
                                                         } else {
+                                                            // Register as Undecided — do not silently TOFU.
+                                                            // Notify the UI so the user can verify.
                                                             let _ = mgr.store
-                                                                .upsert_device(account_jid, &peer_jid, device_id, TrustState::Tofu, None, true)
+                                                                .upsert_device(account_jid, &peer_jid, device_id, TrustState::Undecided, None, true)
                                                                 .await;
-                                                            tracing::info!("omemo: outbound session created for {peer_jid}/{device_id}");
+                                                            tracing::info!("omemo: outbound session created for {peer_jid}/{device_id} (trust=Undecided)");
+                                                            let _ = event_tx
+                                                                .send(XmppEvent::OmemoNewDeviceDetected {
+                                                                    jid: peer_jid.clone(),
+                                                                    device_id,
+                                                                })
+                                                                .await;
                                                         }
                                                     }
                                                     Err(e) => tracing::warn!("omemo: pickle_session failed for {peer_jid}/{device_id}: {e}"),
@@ -558,7 +556,7 @@ pub(crate) async fn omemo_encrypt_and_send(
     account_jid: &str,
     to: &str,
     body: &str,
-    msg_id: &str,
+    id: &str,
 ) -> Result<Element, OmemoEncryptError> {
     // Load own identity so we know our device_id.
     let identity = mgr
@@ -661,11 +659,15 @@ pub(crate) async fn omemo_encrypt_and_send(
         payload: Some(enc_payload.ciphertext),
     };
 
-    Ok(build_encrypted_message(to, own_device_id, &encrypted_msg, msg_id))
+    Ok(build_encrypted_message(to, own_device_id, &encrypted_msg, id))
 }
 
 /// Attempt to decrypt an incoming OMEMO `<message>` stanza.
-/// Returns `Ok(Some((body, is_trusted)))` on success.
+///
+/// Returns `Ok(Some((body, new_device)))` on success, where `new_device` is `true`
+/// when the sender's device was previously unknown (trust = Undecided) so the caller
+/// can emit an `OmemoNewDeviceDetected` notification.
+/// Returns `Ok(None)` for key-transport messages (no payload).
 pub(crate) async fn omemo_try_decrypt(
     mgr: &mut OmemoManager,
     account_jid: &str,
@@ -712,8 +714,39 @@ pub(crate) async fn omemo_try_decrypt(
         .to_string();
 
     // Reconstruct the AES key via Olm.
-    let aes_key: Vec<u8> = if our_key.prekey {
+    // Also track whether this is a newly-seen device (trust = Undecided).
+    let (aes_key, new_device): (Vec<u8>, bool) = if our_key.prekey {
         // PreKey message — create an inbound session from the X3DH material.
+
+        // Check whether this sender device is already known to us.
+        let known_devices = mgr
+            .store
+            .load_devices(account_jid, &from_jid)
+            .await
+            .unwrap_or_default();
+        let already_known = known_devices
+            .iter()
+            .any(|d| d.device_id == sender_device_id);
+        let is_new_device = !already_known;
+
+        // If the device is not yet in our store, register it as Undecided.
+        if is_new_device {
+            let _ = mgr
+                .store
+                .upsert_device(
+                    account_jid,
+                    &from_jid,
+                    sender_device_id,
+                    TrustState::Undecided,
+                    None,
+                    true,
+                )
+                .await;
+            tracing::info!(
+                "omemo: new device {sender_device_id} for {from_jid} registered as Undecided"
+            );
+        }
+
         let account_bytes = &identity.identity_key;
         let mut own_account = OmemoSessionManager::unpickle_account(account_bytes)?;
 
@@ -743,7 +776,7 @@ pub(crate) async fn omemo_try_decrypt(
         };
         mgr.store.save_own_identity(&updated_identity).await?;
 
-        result.plaintext
+        (result.plaintext, is_new_device)
     } else {
         // Normal message — use existing session.
         let stored_session = mgr
@@ -767,7 +800,7 @@ pub(crate) async fn omemo_try_decrypt(
         mgr.store
             .save_session(account_jid, &from_jid, sender_device_id, &pickled)
             .await?;
-        key
+        (key, false)
     };
 
     // Decrypt the AES-256-GCM payload.
@@ -776,17 +809,7 @@ pub(crate) async fn omemo_try_decrypt(
         Some(ref ciphertext) => {
             let body =
                 OmemoSessionManager::decrypt_payload(&aes_key, &encrypted.header.iv, ciphertext)?;
-
-            // Query trust state of the sender device.
-            let is_trusted = match mgr.store.load_devices(account_jid, &from_jid).await {
-                Ok(devices) => devices
-                    .iter()
-                    .find(|d| d.device_id == sender_device_id)
-                    .is_some_and(|d| d.trust.is_decryptable()),
-                Err(_) => false,
-            };
-
-            Ok(Some((body, is_trusted)))
+            Ok(Some((body, new_device)))
         }
     }
 }

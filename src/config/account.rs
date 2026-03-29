@@ -72,7 +72,6 @@ impl AccountConfig {
     /// Validate the configuration, returning an error message if invalid.
     ///
     /// Currently checks that `jid` is a well-formed bare JID (`local@domain`).
-    #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), String> {
         if is_valid_jid(&self.jid) {
             Ok(())

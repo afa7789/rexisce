@@ -246,9 +246,7 @@ impl ConversationView {
                 if std::fs::write(&tmp_path, &bytes).is_ok() {
                     let size = bytes.len() as u64;
                     // DC-17: generate thumbnail from the PNG bytes we just wrote
-                    let thumbnail = crate::store::thumbnail::generate(&bytes)
-                        .ok()
-                        .map(|t| t.data);
+                    let thumbnail = crate::store::thumbnail::generate(&bytes).ok();
                     self.pending_attachments.push(Attachment {
                         path: tmp_path,
                         name: "clipboard_paste.png".into(),

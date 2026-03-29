@@ -12,6 +12,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use tokio_xmpp::minidom::Element;
 
+use vodozemac::{Curve25519PublicKey, Curve25519SecretKey};
+
 use super::{DeviceManager, OmemoSessionManager, OmemoStore, NS_OMEMO, NS_OMEMO_BUNDLES};
 use crate::xmpp::modules::{find_child_recursive, NS_CLIENT, NS_PUBSUB};
 
@@ -253,8 +255,18 @@ impl OmemoManager {
         // Unpickle the account to obtain the public curve25519 identity key.
         let account = OmemoSessionManager::unpickle_account(&identity.identity_key)?;
         let ik_pub = account.identity_keys().curve25519.to_bytes().to_vec();
-        // Reproduce the SPK signature: sign the identity key bytes.
-        let spk_sig = account.sign(&ik_pub).to_bytes().to_vec();
+
+        // Reconstruct the SPK public key from the persisted secret bytes and
+        // re-sign it with the Ed25519 identity key.
+        let spk_secret_bytes: [u8; 32] = identity
+            .signed_prekey
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("signed_prekey in DB is not 32 bytes"))?;
+        let spk_secret = Curve25519SecretKey::from_slice(&spk_secret_bytes);
+        let spk_pub = Curve25519PublicKey::from(&spk_secret);
+        let spk_pub_bytes = spk_pub.to_bytes().to_vec();
+        let spk_sig = account.sign(&spk_pub_bytes).to_bytes().to_vec();
 
         // Load unconsumed one-time pre-keys.
         let stored_otks = self.store.load_unconsumed_prekeys(account_jid).await?;
@@ -265,7 +277,7 @@ impl OmemoManager {
 
         let bundle = OmemoBundle {
             identity_key: ik_pub,
-            signed_pre_key: identity.signed_prekey.clone(),
+            signed_pre_key: spk_pub_bytes,
             signed_pre_key_id: identity.spk_id,
             signed_pre_key_signature: spk_sig,
             pre_keys,
@@ -315,18 +327,28 @@ impl OmemoManager {
 
         // Derive public key material for the bundle
         let ik_pub = account.identity_keys().curve25519.to_bytes().to_vec();
-        // Sign the identity key bytes with the Ed25519 signing key to produce
-        // the signed-pre-key signature.
-        let spk_sig = account.sign(&ik_pub).to_bytes().to_vec();
+
+        // Generate a dedicated signed pre-key (distinct from the identity key).
+        // The secret is persisted so it can be used for X3DH decryption later.
+        let spk_secret = Curve25519SecretKey::new();
+        let spk_pub = Curve25519PublicKey::from(&spk_secret);
+        let spk_pub_bytes = spk_pub.to_bytes().to_vec();
+        // Store the raw secret bytes so we can reconstruct the keypair on reload.
+        let spk_secret_bytes = spk_secret.to_bytes().to_vec();
+
+        // Sign the SPK public bytes with the Ed25519 identity key (as required
+        // by X3DH / XEP-0384 §4.3).
+        let spk_sig = account.sign(&spk_pub_bytes).to_bytes().to_vec();
         let spk_id: u32 = 1;
 
-        // Persist identity
+        // Persist identity — signed_prekey stores the SPK *secret* bytes so
+        // the public key can be reconstructed and the key used for X3DH.
         let identity_bytes = OmemoSessionManager::pickle_account(&account)?;
         let identity = super::store::OwnIdentity {
             account_jid: account_jid.to_owned(),
             device_id,
             identity_key: identity_bytes,
-            signed_prekey: ik_pub.clone(),
+            signed_prekey: spk_secret_bytes,
             spk_id,
         };
         self.store.save_own_identity(&identity).await?;
@@ -335,7 +357,7 @@ impl OmemoManager {
         // Build IQs
         let bundle = OmemoBundle {
             identity_key: ik_pub,
-            signed_pre_key: identity.signed_prekey.clone(),
+            signed_pre_key: spk_pub_bytes,
             signed_pre_key_id: spk_id,
             signed_pre_key_signature: spk_sig,
             pre_keys: otks,
@@ -490,5 +512,65 @@ mod tests {
         let entry = map.remove("iq-abc");
         assert_eq!(entry, Some(("alice@example.com".to_string(), 42)));
         assert!(map.remove("iq-abc").is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // SPK correctness: separate key, valid signature, round-trip reconstruction
+    // -----------------------------------------------------------------------
+
+    /// Verify that a freshly generated SPK is distinct from the Curve25519
+    /// identity key (regression test for the bug that set SPK = IK).
+    #[test]
+    fn spk_is_distinct_from_identity_key() {
+        let account = super::super::OmemoSessionManager::init_account(0);
+        let ik_pub_bytes = account.identity_keys().curve25519.to_bytes().to_vec();
+
+        let spk_secret = Curve25519SecretKey::new();
+        let spk_pub = Curve25519PublicKey::from(&spk_secret);
+        let spk_pub_bytes = spk_pub.to_bytes().to_vec();
+
+        assert_ne!(
+            spk_pub_bytes, ik_pub_bytes,
+            "signed pre-key must differ from the Curve25519 identity key"
+        );
+    }
+
+    /// Verify that the Ed25519 identity key correctly signs the SPK bytes and
+    /// that the signature can be verified with the matching public key.
+    #[test]
+    fn spk_signature_verifiable_with_ed25519_identity_key() {
+        let account = super::super::OmemoSessionManager::init_account(0);
+        let ed25519_pub = account.identity_keys().ed25519;
+
+        let spk_secret = Curve25519SecretKey::new();
+        let spk_pub = Curve25519PublicKey::from(&spk_secret);
+        let spk_pub_bytes = spk_pub.to_bytes().to_vec();
+
+        let sig = account.sign(&spk_pub_bytes);
+
+        // The Ed25519 public key must successfully verify the signature over
+        // the SPK bytes.
+        ed25519_pub
+            .verify(&spk_pub_bytes, &sig)
+            .expect("SPK signature must verify with the Ed25519 identity public key");
+    }
+
+    /// Verify that the SPK secret round-trips: store secret bytes, reconstruct
+    /// the public key, and confirm it matches the original.
+    #[test]
+    fn spk_secret_round_trip_to_public_key() {
+        let spk_secret = Curve25519SecretKey::new();
+        let spk_pub_original = Curve25519PublicKey::from(&spk_secret);
+        let secret_bytes: [u8; 32] = *spk_secret.to_bytes();
+
+        // Simulate reload from DB: reconstruct from stored secret bytes.
+        let spk_secret_reloaded = Curve25519SecretKey::from_slice(&secret_bytes);
+        let spk_pub_reloaded = Curve25519PublicKey::from(&spk_secret_reloaded);
+
+        assert_eq!(
+            spk_pub_original.to_bytes(),
+            spk_pub_reloaded.to_bytes(),
+            "SPK public key must be identical after secret-byte round-trip"
+        );
     }
 }

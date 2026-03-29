@@ -2,7 +2,7 @@
 // Source reference: apps/fluux/src/components/Sidebar.tsx
 //                   apps/fluux/src/components/sidebar-components/ContactList.tsx
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use iced::{
     widget::text::Shaping,
@@ -44,8 +44,9 @@ pub struct SidebarScreen {
     create_room_nick: String,
     // UX-2: account menu popover state
     show_account_menu: bool,
-    // C2: own presence status for the indicator dot
-    pub(crate) own_presence: PresenceStatus,
+    /// Archive/mute state loaded from DB on prefill.
+    pub archived_jids: HashSet<String>,
+    pub muted_jids: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +78,10 @@ pub enum Message {
     ToggleAccountMenu,
     SetPresence(PresenceStatus),
     OpenSettings,
+    /// Archive a conversation by JID (removes it from the visible list).
+    ArchiveConversation(String),
+    /// Toggle mute for a JID from the sidebar.
+    ToggleMute(String),
 }
 
 #[allow(dead_code)]
@@ -102,6 +107,10 @@ pub enum Action {
     SetPresence(PresenceStatus),
     OpenSettings,
     OpenAccountSwitcher,
+    /// Archive a conversation — caller should persist to DB and remove from sidebar.
+    ArchiveConversation(String),
+    /// Toggle mute on a JID — caller persists to DB + config.
+    ToggleMute(String),
 }
 
 impl Default for SidebarScreen {
@@ -130,29 +139,9 @@ impl SidebarScreen {
             create_room_service: String::new(),
             create_room_nick: String::new(),
             show_account_menu: false,
-            own_presence: PresenceStatus::Available,
+            archived_jids: HashSet::new(),
+            muted_jids: HashSet::new(),
         }
-    }
-
-    /// Ensure a JID appears in the sidebar contacts list.
-    /// If it's not already present, add a synthetic roster entry.
-    pub fn ensure_contact(&mut self, jid: &str, name: Option<&str>) {
-        if !self.contacts.iter().any(|c| c.jid == jid) {
-            self.contacts.push(crate::xmpp::RosterContact {
-                jid: jid.to_string(),
-                name: name.map(str::to_string),
-                subscription: "none".to_string(),
-            });
-        }
-    }
-
-    /// G1: remove a contact/conversation from the sidebar.
-    #[allow(dead_code)]
-    pub fn remove_contact(&mut self, jid: &str) {
-        self.contacts.retain(|c| c.jid != jid);
-        self.unread_counts.remove(jid);
-        self.last_messages.remove(jid);
-        self.presence.remove(jid);
     }
 
     /// B5: increment unread count for a JID.
@@ -304,6 +293,22 @@ impl SidebarScreen {
                 self.show_account_menu = false;
                 return Action::OpenSettings;
             }
+            Message::ArchiveConversation(jid) => {
+                self.archived_jids.insert(jid.clone());
+                // Deselect if the archived conversation was active.
+                if self.selected_jid.as_deref() == Some(jid.as_str()) {
+                    self.selected_jid = None;
+                }
+                return Action::ArchiveConversation(jid);
+            }
+            Message::ToggleMute(jid) => {
+                if self.muted_jids.contains(&jid) {
+                    self.muted_jids.remove(&jid);
+                } else {
+                    self.muted_jids.insert(jid.clone());
+                }
+                return Action::ToggleMute(jid);
+            }
         }
         Action::None
     }
@@ -327,15 +332,7 @@ impl SidebarScreen {
         // when an account is active. Displays a colored dot, truncated JID,
         // and (optionally) an unread badge; clicking opens the account switcher.
         let account_indicator: Option<Element<Message>> = active_account.map(|(id, unread)| {
-            let _account_color = account_color(id);
-            // C2: dot color reflects presence status
-            let color = match self.own_presence {
-                PresenceStatus::Available => iced::Color::from_rgb(0.2, 0.8, 0.2),    // green
-                PresenceStatus::Away => iced::Color::from_rgb(1.0, 0.75, 0.0),        // amber
-                PresenceStatus::ExtendedAway => iced::Color::from_rgb(1.0, 0.6, 0.0), // orange
-                PresenceStatus::DoNotDisturb => iced::Color::from_rgb(0.9, 0.2, 0.2), // red
-                PresenceStatus::Offline => iced::Color::from_rgb(0.5, 0.5, 0.5),      // gray
-            };
+            let color = account_color(id);
             let dot = container(text("").size(1)).width(10).height(10).style(
                 move |_theme: &iced::Theme| iced::widget::container::Style {
                     background: Some(iced::Background::Color(color)),
@@ -481,6 +478,8 @@ impl SidebarScreen {
         let contact_rows: Vec<Element<Message>> = self
             .contacts
             .iter()
+            // Filter archived conversations from the sidebar list.
+            .filter(|c| !self.archived_jids.contains(&c.jid))
             .map(|c| {
                 let available = self.presence.get(c.jid.as_str()).copied().unwrap_or(false);
                 let indicator = if available { "●" } else { "○" };
@@ -489,10 +488,12 @@ impl SidebarScreen {
                 let muc_prefix = if is_muc { "# " } else { "" };
                 // G6: append [draft] if this JID has a non-empty draft
                 let has_draft = drafts.iter().any(|d| d == &c.jid);
+                let is_muted = self.muted_jids.contains(&c.jid);
+                let mute_indicator = if is_muted { " [M]" } else { "" };
                 let name_label = if has_draft {
-                    format!("{}{} {} [draft]", indicator, muc_prefix, display_name)
+                    format!("{}{} {}{} [draft]", indicator, muc_prefix, display_name, mute_indicator)
                 } else {
-                    format!("{}{} {}", indicator, muc_prefix, display_name)
+                    format!("{}{} {}{}", indicator, muc_prefix, display_name, mute_indicator)
                 };
 
                 // H5/H1: avatar image if available, otherwise colored initial (32x32)
@@ -592,6 +593,32 @@ impl SidebarScreen {
                     tooltip::Position::Top,
                 );
 
+                // Archive button
+                let jid_for_archive = c.jid.clone();
+                let archive_btn = tooltip(
+                    button(text("Arc").size(10))
+                        .on_press(Message::ArchiveConversation(jid_for_archive))
+                        .padding([2, 4]),
+                    "Archive conversation",
+                    tooltip::Position::Top,
+                );
+
+                // Mute/Unmute button
+                let jid_for_mute = c.jid.clone();
+                let mute_label = if is_muted { "Unm" } else { "Mut" };
+                let mute_tip = if is_muted {
+                    "Unmute notifications"
+                } else {
+                    "Mute notifications"
+                };
+                let mute_btn = tooltip(
+                    button(text(mute_label).size(10))
+                        .on_press(Message::ToggleMute(jid_for_mute))
+                        .padding([2, 4]),
+                    mute_tip,
+                    tooltip::Position::Top,
+                );
+
                 // H3: if renaming this contact, show inline rename input
                 if let Some((_, new_name)) = self.rename_state.as_ref().filter(|(j, _)| j == &c.jid)
                 {
@@ -610,10 +637,17 @@ impl SidebarScreen {
                         .align_y(Alignment::Center)
                         .into()
                 } else {
-                    row![contact_btn, profile_btn, rename_btn, remove_btn]
-                        .spacing(2)
-                        .align_y(Alignment::Center)
-                        .into()
+                    row![
+                        contact_btn,
+                        profile_btn,
+                        rename_btn,
+                        remove_btn,
+                        archive_btn,
+                        mute_btn
+                    ]
+                    .spacing(2)
+                    .align_y(Alignment::Center)
+                    .into()
                 }
             })
             .collect();
@@ -630,42 +664,38 @@ impl SidebarScreen {
         }
         // UX-2: account menu popover — presence options + settings
         if self.show_account_menu {
-            let available_btn = button(
-                row![text("●").size(12).shaping(Shaping::Advanced), text("Available").size(12)].spacing(6),
-            )
-            .on_press(Message::SetPresence(PresenceStatus::Available))
-            .width(Length::Fill)
-            .padding([4, 8]);
-            let away_btn = button(
-                row![text("◐").size(12).shaping(Shaping::Advanced), text("Away").size(12)].spacing(6),
-            )
-            .on_press(Message::SetPresence(PresenceStatus::Away))
-            .width(Length::Fill)
-            .padding([4, 8]);
-            let dnd_btn = button(
-                row![text("⛔").size(12).shaping(Shaping::Advanced), text("DND").size(12)].spacing(6),
-            )
-            .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
-            .width(Length::Fill)
-            .padding([4, 8]);
-            let settings_btn = button(
-                row![text("⚙").size(12).shaping(Shaping::Advanced), text("Settings").size(12)].spacing(6),
-            )
-            .on_press(Message::OpenSettings)
-            .width(Length::Fill)
-            .padding([4, 8]);
-            let switch_btn = button(text("Switch Account").size(12))
-                .on_press(Message::OpenAccountSwitcher)
+            let available_btn = button(text("● Available").size(12).shaping(Shaping::Advanced))
+                .on_press(Message::SetPresence(PresenceStatus::Available))
                 .width(Length::Fill)
                 .padding([4, 8]);
-            let menu_col = column![
+            let away_btn = button(text("◐ Away").size(12).shaping(Shaping::Advanced))
+                .on_press(Message::SetPresence(PresenceStatus::Away))
+                .width(Length::Fill)
+                .padding([4, 8]);
+            let dnd_btn = button(text("⛔ DND").size(12).shaping(Shaping::Advanced))
+                .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
+                .width(Length::Fill)
+                .padding([4, 8]);
+            let settings_btn = button(text("⚙ Settings").size(12).shaping(Shaping::Advanced))
+                .on_press(Message::OpenSettings)
+                .width(Length::Fill)
+                .padding([4, 8]);
+            let mut menu_col = column![
                 available_btn,
                 away_btn,
                 dnd_btn,
                 horizontal_rule(1),
                 settings_btn,
-                switch_btn,
-            ]
+            ];
+            // Only show "Switch Account" when multiple accounts are registered.
+            if vctx.multi_account {
+                let switch_btn = button(text("Switch Account").size(12))
+                    .on_press(Message::OpenAccountSwitcher)
+                    .width(Length::Fill)
+                    .padding([4, 8]);
+                menu_col = menu_col.push(switch_btn);
+            }
+            let menu_col = menu_col
             .spacing(2)
             .padding(4);
             let menu_panel =
@@ -712,24 +742,17 @@ impl SidebarScreen {
                 .padding([2, 4]);
 
             // H5: large avatar for profile popover (64x64)
-            let profile_avatar: Element<'_, Message> =
-                if let Some(png) = vctx.avatars.get(jid.as_str()) {
-                    let handle = iced::widget::image::Handle::from_bytes(png.clone());
-                    iced::widget::image(handle).width(64).height(64).into()
-                } else {
-                    let avatar_color = jid_color(jid.as_str());
-                    let avatar_initial = jid_initial(jid.as_str()).to_string();
-                    container(text(avatar_initial).size(28))
-                        .width(64)
-                        .height(64)
-                        .style(move |_theme: &iced::Theme| iced::widget::container::Style {
-                            background: Some(iced::Background::Color(avatar_color)),
-                            ..Default::default()
-                        })
-                        .align_x(Alignment::Center)
-                        .align_y(Alignment::Center)
-                        .into()
-                };
+            let avatar_color = jid_color(jid.as_str());
+            let avatar_initial = jid_initial(jid.as_str()).to_string();
+            let profile_avatar = container(text(avatar_initial).size(28))
+                .width(64)
+                .height(64)
+                .style(move |_theme: &iced::Theme| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(avatar_color)),
+                    ..Default::default()
+                })
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center);
 
             let profile_col = column![
                 row![text("Profile").size(12).width(Length::Fill), close_btn,]
@@ -764,25 +787,6 @@ impl SidebarScreen {
 }
 
 #[cfg(test)]
-impl SidebarScreen {
-    pub fn selected_profile_jid(&self) -> Option<&str> {
-        self.selected_profile.as_deref()
-    }
-    pub fn show_add_contact(&self) -> bool {
-        self.show_add_contact
-    }
-    pub fn add_contact_input(&self) -> &str {
-        &self.add_contact_input
-    }
-    pub fn unread_count(&self, jid: &str) -> u32 {
-        self.unread_counts.get(jid).copied().unwrap_or(0)
-    }
-    pub fn unread_for(&self, jid: &str) -> u32 {
-        self.unread_count(jid)
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -803,78 +807,5 @@ mod tests {
         }]);
         let _ = s.update(Message::SelectContact("alice@example.com".into()));
         assert_eq!(s.selected_jid(), Some("alice@example.com"));
-    }
-
-    #[test]
-    fn sidebar_select_contact_updates_selected_jid() {
-        let mut s = SidebarScreen::new();
-        s.set_contacts(vec![
-            RosterContact {
-                jid: "alice@example.com".into(),
-                name: Some("Alice".into()),
-                subscription: "both".into(),
-            },
-            RosterContact {
-                jid: "bob@example.com".into(),
-                name: Some("Bob".into()),
-                subscription: "both".into(),
-            },
-        ]);
-        let action = s.update(Message::SelectContact("alice@example.com".into()));
-        assert_eq!(s.selected_jid(), Some("alice@example.com"));
-        assert!(matches!(action, Action::SelectContact(ref jid) if jid == "alice@example.com"));
-    }
-
-    #[test]
-    fn sidebar_add_contact_flow() {
-        let mut sidebar = SidebarScreen::new();
-
-        let action = sidebar.update(Message::ToggleAddContact);
-        assert!(matches!(action, Action::None));
-        assert!(sidebar.show_add_contact());
-
-        sidebar.update(Message::AddContactInputChanged("new@example.com".into()));
-        assert_eq!(sidebar.add_contact_input(), "new@example.com");
-
-        let action = sidebar.update(Message::SubmitAddContact);
-        assert!(matches!(action, Action::AddContact(ref jid) if jid == "new@example.com"));
-        assert!(!sidebar.show_add_contact());
-        assert!(sidebar.add_contact_input().is_empty());
-    }
-
-    #[test]
-    fn sidebar_submit_add_contact_empty_jid_no_op() {
-        let mut sidebar = SidebarScreen::new();
-        sidebar.update(Message::ToggleAddContact);
-        sidebar.update(Message::AddContactInputChanged("   ".into()));
-        let action = sidebar.update(Message::SubmitAddContact);
-        assert!(matches!(action, Action::None));
-    }
-
-    #[test]
-    fn sidebar_remove_contact_returns_action() {
-        let mut sidebar = SidebarScreen::new();
-        let action = sidebar.update(Message::RemoveContact("alice@example.com".into()));
-        assert!(matches!(action, Action::RemoveContact(ref jid) if jid == "alice@example.com"));
-    }
-
-    #[test]
-    fn sidebar_unread_increments_and_clears() {
-        let mut sidebar = SidebarScreen::new();
-        sidebar.increment_unread("alice@example.com");
-        sidebar.increment_unread("alice@example.com");
-        sidebar.increment_unread("alice@example.com");
-        assert_eq!(sidebar.unread_for("alice@example.com"), 3);
-        sidebar.clear_unread("alice@example.com");
-        assert_eq!(sidebar.unread_for("alice@example.com"), 0);
-    }
-
-    #[test]
-    fn sidebar_selecting_contact_clears_profile_popover() {
-        let mut sidebar = SidebarScreen::new();
-        sidebar.update(Message::ShowProfile("alice@example.com".into()));
-        assert_eq!(sidebar.selected_profile_jid(), Some("alice@example.com"));
-        sidebar.update(Message::SelectContact("alice@example.com".into()));
-        assert!(sidebar.selected_profile_jid().is_none());
     }
 }

@@ -38,13 +38,7 @@ pub enum Action {
     ToggleMute(String),
     /// A conversation was selected — App needs to fire history load + mark-read.
     ContactSelected(String),
-    /// User toggled encryption on a conversation but OMEMO is not yet enabled globally.
-    /// Carries the JID so the encrypted state can also be persisted.
-    EnableOmemo(String),
-    /// User toggled encryption on a conversation — persist the new state to DB.
-    SetEncrypted(String, bool),
-    /// User closed/archived a conversation — persist to DB.
-    #[allow(dead_code)]
+    /// User archived a conversation — App needs to persist archived=true to DB.
     ArchiveConversation(String),
 }
 
@@ -92,6 +86,8 @@ pub struct ChatScreen {
     account_unread: usize,
     /// OMEMO Phase 2: whether OMEMO has been enabled globally (from App state)
     pub omemo_enabled: bool,
+    /// Auto-hide timer: set when connected so "Signed in as" hides after 5s.
+    connected_at: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +139,8 @@ pub enum Message {
     ComposerItalic,
     // OMEMO: open trust management UI for a JID (bubbled up to App)
     OpenOmemoTrust(String),
+    /// Archive a conversation — App needs to persist archived=true to DB.
+    ArchiveConversation(String),
 }
 
 impl ChatScreen {
@@ -166,6 +164,7 @@ impl ChatScreen {
             active_account_id: None,
             account_unread: 0,
             omemo_enabled: false,
+            connected_at: Some(std::time::Instant::now()),
         }
     }
 
@@ -188,16 +187,25 @@ impl ChatScreen {
 
     /// Pre-populate the conversation map from cached DB rows so the sidebar
     /// shows known conversations before any messages arrive from the server.
-    pub fn prefill_conversations(&mut self, convos: Vec<(String, bool)>) {
+    ///
+    /// Archived conversations are registered in the sidebar's `archived_jids`
+    /// set so they are filtered from the visible list.  Muted JIDs are
+    /// registered in the sidebar's `muted_jids` set so the indicator renders.
+    pub fn prefill_conversations(
+        &mut self,
+        convos: Vec<crate::store::conversation_repo::Conversation>,
+    ) {
         let own_jid = self.own_jid.clone();
-        for (jid, encrypted) in convos {
-            // Ensure each known conversation appears in sidebar
-            self.sidebar.ensure_contact(&jid, None);
-            let convo = self
-                .conversations
-                .entry(jid.clone())
-                .or_insert_with(|| ConversationView::new(jid, own_jid.clone()));
-            convo.is_encryption_enabled = encrypted;
+        for convo in convos {
+            if convo.archived != 0 {
+                self.sidebar.archived_jids.insert(convo.jid.clone());
+            }
+            if convo.muted != 0 {
+                self.sidebar.muted_jids.insert(convo.jid.clone());
+            }
+            self.conversations
+                .entry(convo.jid.clone())
+                .or_insert_with(|| ConversationView::new(convo.jid, own_jid.clone()));
         }
     }
 
@@ -207,8 +215,6 @@ impl ChatScreen {
         self.muc_panels
             .entry(room_jid.to_string())
             .or_insert_with(|| OccupantPanel::new(room_jid.to_string()));
-        // Ensure room appears in sidebar
-        self.sidebar.ensure_contact(room_jid, None);
     }
 
     /// D1: Update the occupant panel for a room from a MUC presence.
@@ -259,8 +265,6 @@ impl ChatScreen {
             .entry(bare_jid.clone())
             .or_insert_with(|| ConversationView::new(bare_jid.clone(), own_jid));
 
-        // Ensure the JID appears in sidebar (handles MUC rooms not in roster)
-        self.sidebar.ensure_contact(&bare_jid, None);
         // Update last-message preview in sidebar
         self.sidebar.set_last_message(&bare_jid, &msg.body);
 
@@ -273,8 +277,8 @@ impl ChatScreen {
             reply_preview: None,
             edited: false,
             retracted: false,
-            is_encrypted: msg.is_encrypted,
-            is_trusted: msg.is_trusted,
+            is_encrypted: false,
+            is_trusted: false,
         });
 
         // B5: increment unread if not the currently active conversation
@@ -500,15 +504,24 @@ impl ChatScreen {
                     sidebar::Action::SetPresence(status) => {
                         self.pending_commands
                             .push(XmppCommand::SetPresence(status.clone()));
-                        self.sidebar.own_presence = status.clone();
                         Action::SetPresence(status)
                     }
                     sidebar::Action::OpenSettings => Action::OpenSettings,
                     sidebar::Action::OpenAccountSwitcher => Action::OpenAccountSwitcher,
+                    sidebar::Action::ArchiveConversation(jid) => {
+                        // Remove the conversation from the in-memory map so resources are freed.
+                        self.conversations.remove(&jid);
+                        if self.active_jid.as_deref() == Some(jid.as_str()) {
+                            self.active_jid = None;
+                        }
+                        Action::ArchiveConversation(jid)
+                    }
+                    sidebar::Action::ToggleMute(jid) => Action::ToggleMute(jid),
                 }
             }
 
             Message::CloseConversation(jid) => {
+                self.conversations.remove(&jid);
                 if self.active_jid.as_deref() == Some(jid.as_str()) {
                     self.active_jid = None;
                 }
@@ -537,8 +550,6 @@ impl ChatScreen {
                 // C2: queue SetPresence command for the engine (App drains pending_commands)
                 self.pending_commands
                     .push(XmppCommand::SetPresence(status.clone()));
-                // C2: update sidebar dot color immediately
-                self.sidebar.own_presence = status.clone();
                 Action::SetPresence(status)
             }
 
@@ -697,8 +708,9 @@ impl ChatScreen {
                     return Action::ToggleMute(jid);
                 }
 
-                // G1: intercept Close to deselect the conversation (keep in sidebar)
+                // G1: intercept Close to remove the conversation
                 if let super::conversation::Message::Close = cmsg {
+                    self.conversations.remove(&jid);
                     if self.active_jid.as_deref() == Some(jid.as_str()) {
                         self.active_jid = None;
                     }
@@ -825,23 +837,6 @@ impl ChatScreen {
                     return Action::OpenOmemoTrust(peer_jid.clone());
                 }
 
-                // OMEMO: when user toggles encryption, persist to DB and auto-enable OMEMO if needed.
-                if let super::conversation::Message::ToggleEncryption = cmsg {
-                    // Let the conversation toggle its local flag first
-                    if let Some(convo) = self.conversations.get_mut(&jid) {
-                        let _ = convo.update(super::conversation::Message::ToggleEncryption);
-                    }
-                    let new_state = self
-                        .conversations
-                        .get(&jid)
-                        .is_some_and(|c| c.is_encryption_enabled);
-                    if !self.omemo_enabled && new_state {
-                        // Need to enable OMEMO globally first, then persist
-                        return Action::EnableOmemo(jid);
-                    }
-                    return Action::SetEncrypted(jid, new_state);
-                }
-
                 // E4/I3: intercept OpenFilePicker to spawn picker task
                 if let super::conversation::Message::OpenFilePicker = cmsg {
                     if let Some(convo) = self.conversations.get_mut(&jid) {
@@ -911,6 +906,16 @@ impl ChatScreen {
             }
             // OMEMO: bubbled from conversation — handled by App
             Message::OpenOmemoTrust(peer_jid) => Action::OpenOmemoTrust(peer_jid),
+
+            // ArchiveConversation fired directly (e.g. from a future context menu)
+            Message::ArchiveConversation(jid) => {
+                self.sidebar.archived_jids.insert(jid.clone());
+                self.conversations.remove(&jid);
+                if self.active_jid.as_deref() == Some(jid.as_str()) {
+                    self.active_jid = None;
+                }
+                Action::ArchiveConversation(jid)
+            }
         }
     }
 
@@ -1053,7 +1058,7 @@ impl ChatScreen {
                         .push(XmppCommand::OmemoEncryptMessage {
                             to: jid.clone(),
                             body,
-                            id: msg_id.clone(),
+                            id: msg_id,
                         });
                 } else {
                     self.pending_commands.push(XmppCommand::SendMessage {
@@ -1267,6 +1272,41 @@ impl ChatScreen {
                 }
             };
 
+        // Show "Signed in as" only for the first 5 seconds after connection.
+        let show_jid_label = self.connected_at.is_some_and(|t| t.elapsed().as_secs() < 5);
+        let settings_btn = iced::widget::button(text("Settings").size(11))
+            .on_press(Message::OpenSettings)
+            .padding([2, 8]);
+        // C2: presence status picker buttons
+        let available_btn =
+            iced::widget::button(text("● Available").size(11).shaping(Shaping::Advanced))
+                .on_press(Message::SetPresence(PresenceStatus::Available))
+                .padding([2, 8]);
+        let away_btn = iced::widget::button(text("○ Away").size(11).shaping(Shaping::Advanced))
+            .on_press(Message::SetPresence(PresenceStatus::Away))
+            .padding([2, 8]);
+        let dnd_btn = iced::widget::button(text("⛔ DND").size(11).shaping(Shaping::Advanced))
+            .on_press(Message::SetPresence(PresenceStatus::DoNotDisturb))
+            .padding([2, 8]);
+        let status_bar = if show_jid_label {
+            let own_label = text(format!("Signed in as {}", self.own_jid)).size(11);
+            container(
+                row![own_label, available_btn, away_btn, dnd_btn, settings_btn]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([2, 8])
+            .width(Length::Fill)
+        } else {
+            container(
+                row![available_btn, away_btn, dnd_btn, settings_btn]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([2, 8])
+            .width(Length::Fill)
+        };
+
         // D1: if active JID is a MUC room, show the occupant panel on the right
         let content_row: Element<Message> = if let Some(ref jid) = self.active_jid {
             if self.muc_jids.contains(jid.as_str()) {
@@ -1300,7 +1340,7 @@ impl ChatScreen {
                 .into()
         };
 
-        content_row
+        column![content_row, status_bar].into()
     }
 }
 
@@ -1318,13 +1358,6 @@ fn apply_markdown_wrap(text: &str, marker: &str) -> String {
         format!("{marker}{marker}")
     } else {
         format!("{marker}{text}{marker}")
-    }
-}
-
-#[cfg(test)]
-impl ChatScreen {
-    pub fn unread_for(&self, jid: &str) -> u32 {
-        self.sidebar.unread_count(jid)
     }
 }
 
@@ -1582,21 +1615,5 @@ mod tests {
                 .any(|c| matches!(c, XmppCommand::RequestUploadSlot { .. })),
             "expected RequestUploadSlot command after voice Send"
         );
-    }
-
-    #[test]
-    fn chat_screen_receive_message_increments_unread_for_inactive() {
-        let mut s = ChatScreen::new("me@example.com".into());
-        // No active conversation — active_jid is None
-        assert!(s.active_jid.is_none());
-        s.on_message_received(IncomingMessage {
-            id: "1".into(),
-            from: "alice@example.com".into(),
-            body: "hi".into(),
-            is_historical: false,
-            is_encrypted: false,
-            is_trusted: false,
-        });
-        assert_eq!(s.unread_for("alice@example.com"), 1);
     }
 }

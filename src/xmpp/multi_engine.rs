@@ -161,6 +161,7 @@ impl MultiEngineManager {
             proxy_port: config.proxy.as_ref().map(|p| p.port),
             manual_srv: None,
             push_service_jid: None,
+            allow_insecure_tls: false,
         };
         // Best-effort: if the channel is full the connect is deferred.
         let _ = cmd_tx.try_send(XmppCommand::Connect(connect_config));

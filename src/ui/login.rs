@@ -101,6 +101,7 @@ impl LoginScreen {
             proxy_port: settings.proxy_port,
             manual_srv: settings.manual_srv,
             push_service_jid: settings.push_service_jid,
+            allow_insecure_tls: !settings.force_tls,
         }
     }
 
@@ -115,10 +116,20 @@ impl LoginScreen {
             Message::PasswordChanged(v) => self.password = v,
             Message::ServerChanged(v) => self.server = v,
             Message::Connect => {
+                let account = crate::config::account::AccountConfig::new(self.jid.clone());
+                if let Err(e) = account.validate() {
+                    self.state = LoginState::Error(e);
+                    return Action::None;
+                }
                 self.state = LoginState::Connecting;
                 return Action::AttemptConnect(self.connect_config());
             }
             Message::Register => {
+                let account = crate::config::account::AccountConfig::new(self.jid.clone());
+                if let Err(e) = account.validate() {
+                    self.state = LoginState::Error(e);
+                    return Action::None;
+                }
                 self.state = LoginState::Registering;
                 return Action::AttemptRegister(self.connect_config());
             }

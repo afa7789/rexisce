@@ -32,12 +32,18 @@ pub fn send(payload: &NotificationPayload) -> Result<(), String> {
 
 /// Convenience wrapper: show a "new message" notification.
 ///
-/// `from_jid` is displayed as the notification title; `body` is the message
-/// text.
-pub fn notify_message(from_jid: &str, body: &str) -> Result<(), String> {
+/// `from_jid` is displayed as the notification title.  When `is_encrypted`
+/// is `true` the body is replaced with "Encrypted message" so that plaintext
+/// content is never surfaced in the OS notification centre.
+pub fn notify_message(from_jid: &str, body: &str, is_encrypted: bool) -> Result<(), String> {
+    let notification_body = if is_encrypted {
+        "Encrypted message".to_string()
+    } else {
+        body.to_string()
+    };
     let payload = NotificationPayload {
         title: from_jid.to_string(),
-        body: body.to_string(),
+        body: notification_body,
         app_name: "rexisce".to_string(),
     };
     send(&payload)

@@ -44,6 +44,9 @@ pub struct ConnectConfig {
     pub manual_srv: Option<String>,
     /// K7: XEP-0357 push service JID.  None = push disabled.
     pub push_service_jid: Option<String>,
+    /// sec-insecure-tls-gate: when true, accept self-signed TLS certificates
+    /// (InsecureTlsConfig). Must be explicitly opted in; never auto-detected.
+    pub allow_insecure_tls: bool,
 }
 
 impl ConnectConfig {

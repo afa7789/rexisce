@@ -18,9 +18,10 @@ use crate::xmpp::XmppCommand;
 // ---------------------------------------------------------------------------
 
 pub(crate) fn go_to_settings(app: &mut App) -> Task<Message> {
+    let prev = std::mem::replace(&mut app.screen, Screen::Login(LoginScreen::new()));
     let mut settings_screen = settings::SettingsScreen::new(app.settings.clone());
     // Populate Account Details section with the live connection state.
-    if let Screen::Chat(ref chat) = app.screen {
+    if let Screen::Chat(ref chat) = prev {
         settings_screen.set_account_info(account_details::AccountInfo {
             bound_jid: chat.own_jid().to_string(),
             connected: true,
@@ -32,8 +33,6 @@ pub(crate) fn go_to_settings(app: &mut App) -> Task<Message> {
     if let Some(device_id) = app.omemo_device_id {
         settings_screen.set_omemo_active(device_id);
     }
-    // Full-screen settings: swap the screen (keep previous for GoBack)
-    let prev = std::mem::replace(&mut app.screen, Screen::Login(super::login::LoginScreen::new()));
     app.screen = Screen::Settings(Box::new(settings_screen), Box::new(prev));
     Task::none()
 }
@@ -162,6 +161,16 @@ pub(crate) fn handle_account_switcher(
                 }
                 return Task::none();
             }
+            account_switcher::Action::RemoveAccount(id) => {
+                // Remove the account from the state manager and notify the engine.
+                app.account_state_mgr.remove_account(&id);
+                if let Some(ref tx) = app.xmpp_tx {
+                    let tx = tx.clone();
+                    tokio::spawn(async move {
+                        let _ = tx.send(XmppCommand::RemoveAccount(id)).await;
+                    });
+                }
+            }
             account_switcher::Action::Close => {
                 if let Screen::AccountSwitcher(_, prev) =
                     std::mem::replace(&mut app.screen, Screen::Login(LoginScreen::new()))
@@ -169,7 +178,6 @@ pub(crate) fn handle_account_switcher(
                     app.screen = *prev;
                 }
             }
-            account_switcher::Action::None => {}
         }
     }
     Task::none()

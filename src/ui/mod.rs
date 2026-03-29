@@ -13,7 +13,6 @@ pub mod account_details;
 pub mod account_state;
 pub mod account_switcher;
 pub mod adhoc;
-pub mod audio_player;
 pub mod avatar;
 pub mod benchmark;
 pub mod blocklist;
@@ -48,6 +47,7 @@ pub struct ViewContext<'a> {
     pub time_format: crate::config::TimeFormat,
     pub own_jid: &'a str,
     pub omemo_enabled: bool,
+    pub multi_account: bool,
 }
 
 use crate::config::{self, Settings, Theme};
@@ -58,8 +58,8 @@ use crate::xmpp::{
     XmppEvent,
 };
 use account_state::AccountStateManager;
-use palette as pal;
 use toast::{Toast, ToastKind};
+use palette as pal;
 
 // F2: command palette entries — built once and searched via command_palette::search().
 fn palette_commands() -> Vec<command_palette::Command> {
@@ -166,9 +166,6 @@ pub struct App {
     pub(crate) mam_default_mode: Option<String>,
     // AUTH-1: pending auto-connect config — consumed when XmppReady fires
     auto_connect_cfg: Option<crate::xmpp::ConnectConfig>,
-    // Multi-account auto-connect: (jid, password) pairs for additional accounts
-    #[allow(dead_code)]
-    multi_auto_connect: Vec<(String, String)>,
     // L5: spam report modal — Some when open
     spam_report_modal: Option<spam_report::SpamReportModal>,
     // MULTI: per-account UI state manager
@@ -186,8 +183,6 @@ pub struct App {
     pub(crate) omemo_device_id: Option<u32>,
     // MEMO: trust dialog — Some when the OMEMO trust overlay is open
     pub(crate) omemo_trust_modal: Option<omemo_trust::OmemoTrustScreen>,
-    // Settings modal overlay (Gajim-style) — Some when settings is open
-    pub(crate) settings_modal: Option<Box<settings::SettingsScreen>>,
     // MEMO: cached per-peer device lists received via PEP (jid -> device ids)
     pub(crate) omemo_peer_devices: HashMap<String, Vec<u32>>,
 }
@@ -247,8 +242,11 @@ pub enum Message {
     AccountSwitcher(account_switcher::Message),
     // DC-11: handle an xmpp: deep-link URI
     HandleXmppUri(String),
-    // A3: seed conversations from DB cache at connect time
-    ConversationsPrefill(Vec<(String, bool)>),
+    // A3: seed conversations from DB cache at connect time (carries full rows for archive/mute state)
+    ConversationsPrefill(Vec<crate::store::conversation_repo::Conversation>),
+    /// K3: muted JIDs loaded from DB — merged into settings.muted_jids so the
+    /// notification path has a fresh, DB-authoritative snapshot at connect time.
+    MutedJidsLoaded(std::collections::HashSet<String>),
     // MEMO: OMEMO trust dialog messages
     OmemoTrust(omemo_trust::Message),
     // Tab focus navigation between input fields
@@ -256,7 +254,6 @@ pub enum Message {
     FocusPrevious,
 }
 
-#[allow(dead_code)]
 pub(crate) enum Screen {
     Login(LoginScreen),
     Benchmark(BenchmarkScreen),
@@ -290,19 +287,6 @@ impl App {
             None
         };
 
-        // Multi-account: queue auto-connect for each enabled account.
-        // These will be connected via MultiEngineManager when XmppReady fires.
-        let mut multi_account_cfgs: Vec<(String, String)> = Vec::new();
-        for acct in &settings.accounts {
-            if acct.enabled {
-                if let Some(pw) = config::load_account_password(acct) {
-                    if !pw.is_empty() {
-                        multi_account_cfgs.push((acct.jid.clone(), pw));
-                    }
-                }
-            }
-        }
-
         // DC-21: create the multi-account event channel
         let (multi_event_tx, multi_event_rx) =
             tokio::sync::mpsc::channel::<(AccountId, XmppEvent)>(64);
@@ -331,7 +315,6 @@ impl App {
                 idle_state: IdleState::Active,
                 mam_default_mode: mam_mode,
                 auto_connect_cfg,
-                multi_auto_connect: multi_account_cfgs,
                 spam_report_modal: None,
                 account_state_mgr: AccountStateManager::new(),
                 multi_engine: MultiEngineManager::new(AccountId::new(String::new())),
@@ -341,7 +324,6 @@ impl App {
                 omemo_enabled: false,
                 omemo_device_id: None,
                 omemo_trust_modal: None,
-                settings_modal: None,
                 omemo_peer_devices: HashMap::new(),
             },
             Task::none(),
@@ -367,7 +349,10 @@ impl App {
             Screen::Chat(chat) => {
                 if let Some(active_jid) = chat.active_jid() {
                     // Show the chat partner (bare JID local part or full JID)
-                    let display = active_jid.split('/').next().unwrap_or(active_jid);
+                    let display = active_jid
+                        .split('/')
+                        .next()
+                        .unwrap_or(active_jid);
                     format!("ReXisCe \u{2014} {display}")
                 } else {
                     // Connected but no conversation selected — show own JID
@@ -571,16 +556,36 @@ impl App {
             }
 
             Message::ConversationsPrefill(convos) => {
-                if let Screen::Chat(ref mut chat) = self.screen {
-                    chat.prefill_conversations(convos.clone());
-                }
-                // Auto-select the most recent conversation so the user sees
+                // Auto-select the first non-archived conversation so the user sees
                 // their last chat history immediately after restart.
-                if let Some((first_jid, _)) = convos.first() {
+                let first_non_archived = convos
+                    .iter()
+                    .find(|c| c.archived == 0)
+                    .map(|c| c.jid.clone());
+                // Sync muted JIDs from DB into settings so the notification path
+                // (`settings.muted_jids`) stays in sync with the DB state.
+                for convo in &convos {
+                    if convo.muted != 0 {
+                        self.settings.muted_jids.insert(convo.jid.clone());
+                    } else {
+                        self.settings.muted_jids.remove(&convo.jid);
+                    }
+                }
+                if let Screen::Chat(ref mut chat) = self.screen {
+                    chat.prefill_conversations(convos);
+                }
+                if let Some(jid) = first_non_archived {
                     return self.update(Message::Chat(chat::Message::Sidebar(
-                        crate::ui::sidebar::Message::SelectContact(first_jid.clone()),
+                        crate::ui::sidebar::Message::SelectContact(jid),
                     )));
                 }
+                Task::none()
+            }
+
+            Message::MutedJidsLoaded(jids) => {
+                // K3: merge DB-authoritative muted JIDs into settings so the notification
+                // path (`settings.muted_jids`) reflects the latest DB state.
+                self.settings.muted_jids.extend(jids);
                 Task::none()
             }
 
@@ -728,7 +733,7 @@ impl App {
             }
 
             Message::Settings(smsg) => {
-                let action = if let Some(ref mut ss) = self.settings_modal {
+                let action = if let Screen::Settings(ref mut ss, _) = self.screen {
                     let action = ss.update(smsg);
                     self.settings = ss.settings().clone();
                     // M3: drain block/unblock commands produced by the settings panel
@@ -744,25 +749,13 @@ impl App {
                         }
                     }
                     action
-                } else if let Screen::Settings(ref mut ss, _) = self.screen {
-                    // Fallback for legacy full-screen path
-                    let action = ss.update(smsg);
-                    self.settings = ss.settings().clone();
-                    action
                 } else {
                     settings::Action::None
                 };
                 match action {
                     settings::Action::None => Task::none(),
                     settings::Action::Task(task) => task.map(Message::Settings),
-                    settings::Action::GoBack => {
-                        if self.settings_modal.is_some() {
-                            self.settings_modal = None;
-                            Task::none()
-                        } else {
-                            self.update(Message::GoBack)
-                        }
-                    }
+                    settings::Action::GoBack => self.update(Message::GoBack),
                     settings::Action::Logout => self.update(Message::Logout),
                     settings::Action::OpenAbout => self.update(Message::GoToAbout),
                     settings::Action::OpenVCardEditor => self.update(Message::GoToVCardEditor),
@@ -896,14 +889,12 @@ impl App {
                         let pool = self.db.clone();
                         let send_cmds: Vec<(String, String)> = cmds
                             .iter()
-                            .filter_map(|c| match c {
-                                XmppCommand::SendMessage { to, body, .. } => {
+                            .filter_map(|c| {
+                                if let XmppCommand::SendMessage { to, body, .. } = c {
                                     Some((to.clone(), body.clone()))
+                                } else {
+                                    None
                                 }
-                                XmppCommand::OmemoEncryptMessage { to, body, .. } => {
-                                    Some((to.clone(), body.clone()))
-                                }
-                                _ => None,
                             })
                             .collect();
                         if !send_cmds.is_empty() {
@@ -1030,41 +1021,28 @@ impl App {
                 Task::none()
             }
             chat::Action::ToggleMute(jid) => {
-                if self.settings.muted_jids.contains(&jid) {
+                let now_muted = if self.settings.muted_jids.contains(&jid) {
                     self.settings.muted_jids.remove(&jid);
+                    false
                 } else {
-                    self.settings.muted_jids.insert(jid);
-                }
+                    self.settings.muted_jids.insert(jid.clone());
+                    true
+                };
                 let _ = config::save(&self.settings);
+                // Persist mute state to DB so it survives config resets.
+                let pool = self.db.clone();
+                tokio::spawn(async move {
+                    let _ =
+                        crate::store::conversation_repo::set_muted(&pool, &jid, now_muted).await;
+                });
                 Task::none()
             }
             chat::Action::ArchiveConversation(jid) => {
+                // Persist archived=true to DB.
                 let pool = self.db.clone();
                 tokio::spawn(async move {
-                    let _ = crate::store::conversation_repo::set_archived(&pool, &jid, true).await;
-                });
-                Task::none()
-            }
-            chat::Action::EnableOmemo(ref jid) => {
-                if let Some(ref tx) = self.xmpp_tx {
-                    let tx = tx.clone();
-                    tokio::spawn(async move {
-                        let _ = tx.send(XmppCommand::OmemoEnable).await;
-                    });
-                }
-                // Also persist the encrypted flag for this conversation
-                let pool = self.db.clone();
-                let jid = jid.clone();
-                tokio::spawn(async move {
-                    let _ = crate::store::conversation_repo::set_encrypted(&pool, &jid, true).await;
-                });
-                Task::none()
-            }
-            chat::Action::SetEncrypted(jid, encrypted) => {
-                let pool = self.db.clone();
-                tokio::spawn(async move {
-                    let _ = crate::store::conversation_repo::set_encrypted(&pool, &jid, encrypted)
-                        .await;
+                    let _ =
+                        crate::store::conversation_repo::set_archived(&pool, &jid, true).await;
                 });
                 Task::none()
             }
@@ -1073,10 +1051,14 @@ impl App {
                     let jid = jid.clone();
                     let pool = self.db.clone();
                     Task::future(async move {
-                        let rows =
-                            crate::store::message_repo::find_by_conversation(&pool, &jid, 50)
+                        // Use find_before with i64::MAX to fetch the most recent 50 messages
+                        // as a local-first history fallback before any server MAM request.
+                        let mut rows =
+                            crate::store::message_repo::find_before(&pool, &jid, i64::MAX, 50)
                                 .await
                                 .unwrap_or_default();
+                        // find_before returns newest-first; reverse to chronological order.
+                        rows.reverse();
                         Message::MessagesLoaded(jid, rows)
                     })
                 };
@@ -1214,6 +1196,7 @@ impl App {
                     time_format: self.settings.time_format,
                     own_jid: chat.own_jid(),
                     omemo_enabled: self.omemo_enabled,
+                    multi_account: self.account_state_mgr.is_multi_account(),
                 };
                 chat.view(&vctx).map(Message::Chat)
             }
@@ -1238,34 +1221,6 @@ impl App {
 
         // Build layers: screen + optional palette + optional console panel + button + optional toasts
         let mut layers: Vec<Element<Message>> = vec![screen_view];
-
-        // Settings modal overlay (Gajim-style)
-        if let Some(ref settings_screen) = self.settings_modal {
-            let backdrop = container(Space::new(Length::Fill, Length::Fill))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(pal::BACKDROP_DIM)),
-                    ..Default::default()
-                });
-            // DEBUG: plain red box to test if stack overlay renders at all
-            let _settings_view = settings_screen.view().map(Message::Settings);
-            let debug_box = container(text("SETTINGS DEBUG BOX").size(24))
-                .width(400)
-                .height(300)
-                .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.8, 0.1, 0.1))),
-                    ..Default::default()
-                })
-                .padding(20);
-            let modal_overlay = container(debug_box)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill);
-            layers.push(backdrop.into());
-            layers.push(modal_overlay.into());
-        }
 
         // MEMO: OMEMO trust modal overlay
         if let Some(ref trust_screen) = self.omemo_trust_modal {

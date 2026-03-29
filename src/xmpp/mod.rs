@@ -258,6 +258,13 @@ pub enum XmppEvent {
         devices: Vec<u32>,
     },
 
+    /// A previously-unknown device was discovered for `jid`; its trust is Undecided.
+    /// The user should be prompted to verify or dismiss it.
+    OmemoNewDeviceDetected {
+        jid: String,
+        device_id: u32,
+    },
+
     /// A new unrecognized device appeared for `jid` and needs trust resolution.
     OmemoKeyExchangeNeeded {
         jid: String,

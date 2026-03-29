@@ -63,6 +63,7 @@ pub async fn insert_for_account(pool: &SqlitePool, msg: &Message, account_jid: &
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn find_by_conversation(
     pool: &SqlitePool,
     conversation_jid: &str,
@@ -73,6 +74,7 @@ pub async fn find_by_conversation(
 
 /// Fetch messages for a conversation scoped to a specific account.
 /// Pass `account_jid = ""` for backward-compatible single-account queries.
+#[allow(dead_code)]
 pub async fn find_by_conversation_for_account(
     pool: &SqlitePool,
     conversation_jid: &str,
@@ -117,9 +119,8 @@ pub async fn find_by_origin_id(pool: &SqlitePool, origin_id: &str) -> Result<Opt
 }
 
 /// Return up to `limit` messages in a conversation whose timestamp is strictly
-/// before `before_ts`, ordered newest-first. Used for MAM backward pagination.
-// TODO: wire into local MAM pagination fallback
-#[allow(dead_code)]
+/// before `before_ts`, ordered newest-first. Used for local history preload
+/// and MAM backward pagination.
 pub async fn find_before(
     pool: &SqlitePool,
     conversation_jid: &str,

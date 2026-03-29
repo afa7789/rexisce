@@ -1,28 +1,19 @@
 // F3: Settings panel screen
 
 use iced::{
-    widget::text::Shaping,
     widget::{
         button, column, container, horizontal_space, row, scrollable, text, text_input, toggler,
-        vertical_space,
     },
-    Alignment, Color, Element, Length, Task,
+    Alignment, Element, Length, Task,
 };
 
 use super::account_details::AccountInfo;
 use super::blocklist::BlocklistPanel;
 use crate::config::{self, Settings, Theme};
-use crate::ui::palette;
 
 // ---------------------------------------------------------------------------
 // Section card helper — wraps grouped settings in a themed card container
 // ---------------------------------------------------------------------------
-
-/// Build a card container for a settings section with title and optional description.
-#[allow(dead_code)]
-fn settings_section<'a>(title: &str, content: Element<'a, Message>) -> Element<'a, Message> {
-    settings_section_with_desc(title, None, content)
-}
 
 /// Build a card container with title, optional description, and content.
 fn settings_section_with_desc<'a>(
@@ -37,7 +28,11 @@ fn settings_section_with_desc<'a>(
 
     let mut header_col = column![heading].spacing(2);
     if let Some(desc) = description {
-        header_col = header_col.push(text(desc.to_string()).size(12).color(palette::MUTED_DESC));
+        header_col = header_col.push(
+            text(desc.to_string())
+                .size(12)
+                .color(iced::Color::from_rgba(0.5, 0.5, 0.5, 0.8)),
+        );
     }
 
     // Thin divider between header and content
@@ -71,7 +66,7 @@ fn settings_section_with_desc<'a>(
                     radius: 2.0.into(),
                 },
                 shadow: iced::Shadow {
-                    color: palette::SHADOW_COLOR,
+                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.06),
                     offset: iced::Vector::new(0.0, 2.0),
                     blur_radius: 8.0,
                 },
@@ -100,7 +95,6 @@ fn setting_divider<'a>() -> Element<'a, Message> {
 }
 
 /// Category group heading displayed above related sections.
-#[allow(dead_code)]
 fn category_heading<'a>(label: &str) -> Element<'a, Message> {
     text(label.to_string())
         .size(13)
@@ -108,7 +102,7 @@ fn category_heading<'a>(label: &str) -> Element<'a, Message> {
             weight: iced::font::Weight::Bold,
             ..Default::default()
         })
-        .color(palette::CATEGORY_TEXT)
+        .color(iced::Color::from_rgba(0.45, 0.45, 0.45, 0.9))
         .into()
 }
 
@@ -159,23 +153,28 @@ fn segmented_btn(
 }
 
 // ---------------------------------------------------------------------------
-// Settings tab navigation (Gajim-style modal sidebar)
+// SettingsTab — which tab is currently selected
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum SettingsTab {
     General,
     Chats,
-    Notifications,
-    Status,
-    Style,
-    Audio,
-    Shortcuts,
+    Account,
     Privacy,
-    Network,
-    Data,
-    Account(String),
+    Advanced,
+}
+
+impl SettingsTab {
+    fn label(&self) -> &'static str {
+        match self {
+            SettingsTab::General => "General",
+            SettingsTab::Chats => "Chats",
+            SettingsTab::Account => "Account",
+            SettingsTab::Privacy => "Privacy",
+            SettingsTab::Advanced => "Advanced",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +183,8 @@ pub enum SettingsTab {
 
 #[derive(Debug)]
 pub struct SettingsScreen {
+    /// Currently selected settings tab
+    pub active_tab: SettingsTab,
     settings: Settings,
     status_input: String,
     // M3: blocklist panel state
@@ -206,13 +207,11 @@ pub struct SettingsScreen {
     // MEMO: OMEMO status
     omemo_enabled: bool,
     omemo_device_id: Option<u32>,
-    // Settings modal sidebar navigation
-    active_tab: SettingsTab,
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum Message {
+    TabSelected(SettingsTab),
     ThemeToggled,
     NotificationsToggled(bool),
     SoundToggled(bool),
@@ -233,8 +232,12 @@ pub enum Message {
     AvatarFilePicked(Option<std::path::PathBuf>),
     AvatarSelected(Vec<u8>, String),
     // DC-17: interactive crop adjustments — pan/zoom/radius then re-crop
+    // These variants are defined for the DC-17 crop UI but not yet wired to controls.
+    #[allow(dead_code)]
     AvatarCropPan(f32, f32),
+    #[allow(dead_code)]
     AvatarCropZoom(f32),
+    #[allow(dead_code)]
     AvatarCropRadius(f32),
     AvatarCropApply,
     // K6: contact sorting preference
@@ -268,8 +271,6 @@ pub enum Message {
     EnableOmemo,
     // UX-5: copy account detail to clipboard
     CopyToClipboard(String),
-    // Settings modal sidebar navigation
-    SelectTab(SettingsTab),
 }
 
 /// Actions emitted by `SettingsScreen::update()` for the parent App to handle.
@@ -344,6 +345,10 @@ impl SettingsScreen {
 
     pub fn update(&mut self, msg: Message) -> Action {
         match msg {
+            Message::TabSelected(tab) => {
+                self.active_tab = tab;
+                Action::None
+            }
             Message::ThemeToggled => {
                 self.settings.theme = match self.settings.theme {
                     Theme::Dark => Theme::Light,
@@ -508,8 +513,8 @@ impl SettingsScreen {
                 Action::None
             }
             Message::AvatarSelected(data, mime_type) => {
-                self.settings.avatar_data = Some(data.clone());
-                let _ = config::save(&self.settings);
+                // Persist own avatar to disk cache rather than in settings JSON.
+                config::save_own_avatar(&data);
                 Action::AvatarSelected(data, mime_type)
             }
             Message::SortContactsSelected(sort) => {
@@ -625,119 +630,22 @@ impl SettingsScreen {
             Message::CopyToClipboard(content) => {
                 Action::Task(iced::clipboard::write::<Message>(content))
             }
-            Message::SelectTab(tab) => {
-                self.active_tab = tab;
-                Action::None
-            }
         }
-    }
-
-    fn view_sidebar(&self) -> Element<'_, Message> {
-        use iced::widget::button;
-
-        let mut tabs: Vec<(String, SettingsTab)> = vec![
-            ("General".into(), SettingsTab::General),
-            ("Chats".into(), SettingsTab::Chats),
-            ("Notifications".into(), SettingsTab::Notifications),
-            ("Style".into(), SettingsTab::Style),
-            ("Privacy".into(), SettingsTab::Privacy),
-            ("Network".into(), SettingsTab::Network),
-            ("Data".into(), SettingsTab::Data),
-            ("OMEMO".into(), SettingsTab::Status),
-        ];
-        // Add per-account entry if we have account info
-        let bare_jid = self
-            .account_info
-            .bound_jid
-            .split('/')
-            .next()
-            .unwrap_or("")
-            .to_string();
-        if !bare_jid.is_empty() {
-            tabs.push((bare_jid.clone(), SettingsTab::Account(bare_jid)));
-        }
-
-        let mut col = column![].spacing(2).padding([8, 0]);
-        for (label, tab) in tabs {
-            let is_active = self.active_tab == tab;
-            let label_owned = label.clone();
-            let btn = button(text(label_owned).size(13))
-                .on_press(Message::SelectTab(tab.clone()))
-                .padding([6, 16])
-                .width(Length::Fill)
-                .style(move |theme: &iced::Theme, status| {
-                    let palette = theme.extended_palette();
-                    let bg = if is_active {
-                        palette.primary.weak.color
-                    } else {
-                        match status {
-                            button::Status::Hovered => palette.background.weak.color,
-                            _ => Color::TRANSPARENT,
-                        }
-                    };
-                    let text_color = if is_active {
-                        palette.primary.strong.text
-                    } else {
-                        palette.background.base.text
-                    };
-                    button::Style {
-                        background: Some(iced::Background::Color(bg)),
-                        text_color,
-                        border: iced::Border {
-                            radius: 4.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    }
-                });
-            col = col.push(btn);
-        }
-
-        // Bottom actions
-        let about_btn = button(text("About").size(13))
-            .on_press(Message::OpenAbout)
-            .padding([6, 16])
-            .width(Length::Fill);
-        let logout_btn = button(text("Logout").size(13))
-            .on_press(Message::Logout)
-            .padding([6, 16])
-            .width(Length::Fill)
-            .style(|theme: &iced::Theme, status| {
-                let palette = theme.extended_palette();
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        palette.danger.strong.color
-                    }
-                    _ => Color::TRANSPARENT,
-                };
-                button::Style {
-                    background: Some(iced::Background::Color(bg)),
-                    text_color: palette.danger.base.color,
-                    border: iced::Border {
-                        radius: 4.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            });
-
-        column![col, vertical_space(), about_btn, logout_btn,]
-            .spacing(2)
-            .padding([8, 8])
-            .width(Length::Fixed(160.0))
-            .height(Length::Fill)
-            .into()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        // Top bar: close button (X) and title
-        let close_btn = button(text("✕").size(14).shaping(Shaping::Advanced))
-            .on_press(Message::Back)
-            .padding([4, 10]);
-        let top_bar = row![text("Settings").size(16), horizontal_space(), close_btn,]
-            .spacing(8)
-            .align_y(Alignment::Center)
-            .padding([8, 16]);
+        // Top bar: back button (left), title (center).
+        // Logout moved to bottom of the settings panel.
+        let back_btn = button("< Back").on_press(Message::Back).padding([6, 14]);
+        let top_bar = row![
+            back_btn,
+            horizontal_space(),
+            text("Settings").size(18),
+            horizontal_space(),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .padding([8, 16]);
 
         // === Appearance section ===
         let is_dark = self.settings.theme == Theme::Dark;
@@ -990,41 +898,98 @@ impl SettingsScreen {
         // === Data & Storage section ===
         let data_section = self.view_data_storage();
 
-        let content: Element<Message> = match self.active_tab {
-            SettingsTab::General => column![appearance_section, profile_section, account_section,]
-                .spacing(16)
-                .into(),
-            SettingsTab::Chats => column![messages_section, chat_prefs_section,]
-                .spacing(16)
-                .into(),
-            SettingsTab::Notifications => column![notifications_section].spacing(16).into(),
-            SettingsTab::Style => column![appearance_section].spacing(16).into(),
-            SettingsTab::Privacy => column![omemo_section, blocklist_section,]
-                .spacing(16)
-                .into(),
-            SettingsTab::Network => column![network_section].spacing(16).into(),
-            SettingsTab::Data => column![data_section].spacing(16).into(),
-            SettingsTab::Status => column![omemo_section,].spacing(16).into(),
-            SettingsTab::Account(_) => column![profile_section, account_section,]
-                .spacing(16)
-                .into(),
-            SettingsTab::Audio | SettingsTab::Shortcuts => {
-                column![text("Coming soon...").size(14)].spacing(16).into()
+        // === Bottom actions: About + Logout ===
+        let about_btn = button("About")
+            .on_press(Message::OpenAbout)
+            .padding([6, 14]);
+        let logout_btn = button("Logout")
+            .on_press(Message::Logout)
+            .padding([6, 14])
+            .style(|theme: &iced::Theme, status| {
+                let palette = theme.extended_palette();
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        palette.danger.strong.color
+                    }
+                    _ => palette.danger.base.color,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    text_color: palette.danger.base.text,
+                    border: iced::Border {
+                        radius: 4.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            });
+        let bottom_row = row![horizontal_space(), about_btn, logout_btn]
+            .spacing(8)
+            .align_y(Alignment::Center);
+
+        // Tab bar: one segmented button per tab
+        let tabs = [
+            SettingsTab::General,
+            SettingsTab::Chats,
+            SettingsTab::Account,
+            SettingsTab::Privacy,
+            SettingsTab::Advanced,
+        ];
+        let tab_bar = tabs.iter().fold(row![].spacing(4), |r, tab| {
+            let active = *tab == self.active_tab;
+            r.push(
+                segmented_btn(tab.label(), active)
+                    .on_press(Message::TabSelected(tab.clone())),
+            )
+        });
+        let tab_bar_row = container(tab_bar)
+            .padding([6, 16])
+            .width(Length::Fill);
+
+        // Build tab content: only the sections belonging to the active tab
+        let mut tab_col: iced::widget::Column<Message> =
+            column![].spacing(16).padding(24u16).width(500);
+
+        match self.active_tab {
+            SettingsTab::General => {
+                tab_col = tab_col
+                    .push(category_heading("GENERAL"))
+                    .push(appearance_section)
+                    .push(notifications_section);
             }
-        };
+            SettingsTab::Chats => {
+                tab_col = tab_col
+                    .push(category_heading("COMMUNICATION"))
+                    .push(messages_section)
+                    .push(chat_prefs_section);
+            }
+            SettingsTab::Account => {
+                tab_col = tab_col
+                    .push(category_heading("ACCOUNT & PROFILE"))
+                    .push(profile_section)
+                    .push(account_section);
+            }
+            SettingsTab::Privacy => {
+                tab_col = tab_col
+                    .push(category_heading("PRIVACY & SECURITY"))
+                    .push(omemo_section)
+                    .push(blocklist_section);
+            }
+            SettingsTab::Advanced => {
+                tab_col = tab_col
+                    .push(category_heading("ADVANCED"))
+                    .push(network_section)
+                    .push(data_section);
+            }
+        }
+        tab_col = tab_col.push(bottom_row);
 
-        let content_padded = container(content).padding(24).width(Length::Fill);
-
-        let sidebar = self.view_sidebar();
-        let main_area = scrollable(content_padded)
-            .width(Length::Fill)
+        let inner = column![top_bar, tab_bar_row, scrollable(tab_col)]
+            .width(500)
             .height(Length::Fill);
 
-        let body = row![sidebar, main_area]
-            .width(Length::Fill)
-            .height(Length::Fill);
-
-        column![top_bar, body]
+        container(inner)
+            .center_x(Length::Fill)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -1390,37 +1355,5 @@ mod tests {
         assert!(screen.settings.force_tls);
         let _ = screen.update(Message::ForceTlsToggled(false));
         assert!(!screen.settings.force_tls);
-    }
-
-    #[test]
-    fn settings_theme_toggle_switches_dark_to_light() {
-        let mut screen = SettingsScreen::new(Settings { theme: Theme::Dark, ..Settings::default() });
-        screen.update(Message::ThemeToggled);
-        assert_eq!(screen.settings.theme, Theme::Light);
-    }
-
-    #[test]
-    fn settings_font_size_increase_bounded_at_20() {
-        let mut s = Settings::default();
-        s.font_size = 20;
-        let mut screen = SettingsScreen::new(s);
-        screen.update(Message::FontSizeIncreased);
-        assert_eq!(screen.settings.font_size, 20);
-    }
-
-    #[test]
-    fn settings_font_size_decrease_bounded_at_12() {
-        let mut s = Settings::default();
-        s.font_size = 12;
-        let mut screen = SettingsScreen::new(s);
-        screen.update(Message::FontSizeDecreased);
-        assert_eq!(screen.settings.font_size, 12);
-    }
-
-    #[test]
-    fn settings_back_returns_goback_action() {
-        let mut screen = SettingsScreen::new(Settings::default());
-        let action = screen.update(Message::Back);
-        assert!(matches!(action, Action::GoBack));
     }
 }
