@@ -7,22 +7,30 @@
 
 ## 🗺️ Development Milestones
 
-### 🟢 Milestone 1: UI/UX Pivot (The "Photo 1" Style)
+### 🟢 Milestone 1: UI/UX Pivot (The "Photo 1" Style) [DONE]
 **Goal:** Restore the vertical sidebar navigation requested by the user, while preserving the functional richness of the recent horizontal tab sprint.
 
-- [ ] **`ui-sidebar-pivot`**: Revert from horizontal tabs to vertical sidebar (~160px width) in Settings.
-- [ ] **`ui-settings-modular`**: Refactor `settings.rs` into modular `view_*` helper methods.
-- [ ] **`ui-close-btn`**: Ensure every modal/overlay has a standard [X] close interaction.
-- [ ] **`ui-sidebar-about`**: Add "About" and "Logout" buttons to the sidebar bottom.
+- [x] **`ui-sidebar-pivot`**: Revert from horizontal tabs to vertical sidebar (~160px width) in Settings.
+- [x] **`ui-settings-modular`**: Refactor `settings.rs` into modular `view_*` helper methods.
+- [x] **`ui-close-btn`**: Ensure every modal/overlay has a standard [X] close interaction.
+- [x] **`ui-sidebar-about`**: Add "About" and "Logout" buttons to the sidebar bottom.
+- [ ] **`ui-settings-cleanup`**: Remove unused `category_heading` and `SettingsTab::label` post-refactor.
+- [ ] **`ui-sidebar-wrap-fix`**: Fix "awful" layout where OMEMO warning text breaks contact row height.
+- [ ] **`ui-sidebar-muc-missing`**: Ensure group chats (MUC) are correctly listed in the sidebar when joined.
+- [ ] **`ui-icon-audit`**: Fix "Close conversation" and "Retract message" icons (mismatched/wrong).
 
 ### 🟡 Milestone 2: Privacy & Trust (OMEMO Resilience)
 **Goal:** Fix the OMEMO delivery issues by implementing a complete "Trust" lifecycle and recipient status feedback.
 
-- [ ] **`omemo-trust-ui`**: Wire the `OmemoTrustScreen` as an overlay to manage peer fingerprints.
+- [x] **`omemo-pep-sync`**: Verify automatic OMEMO list/bundle publication on account login and PEP push updates.
+- [ ] **`omemo-no-keyslot-fix`**: Implement logic to re-publish own device list/bundle if a message is received without a slot for us.
+- [ ] **`omemo-session-reset`**: Add a "Reset Session" button in Chat Header or Privacy settings to clear corrupt pre-key sessions.
+- [ ] **`omemo-identity-handle`**: UI flow for when a peer's identity key changes (Trust violation handler).
+- [ ] **`omemo-diagnostic-logs`**: Add a "Privacy Log" view in settings to see OMEMO session states (Advanced).
 - [ ] **`omemo-status-header`**: Add persistent encryption/trust icons (Lock/Shield) to the chat header.
+- [ ] **`omemo-trust-ui`**: Wire the `OmemoTrustScreen` as an overlay to manage peer fingerprints.
 - [ ] **`omemo-feedback-loop`**: Show clear UI warnings for "No devices found" or "Untrusted devices".
 - [ ] **`omemo-send-plaintext`**: Implement a fallback toggle to send unencrypted messages if OMEMO is not viable for a specific peer.
-- [ ] **`omemo-pep-sync`**: Verify automatic OMEMO list/bundle publication on account login and PEP push updates.
 
 ### 🔵 Milestone 3: Feature Awakening (Wire-Up & Debt)
 **Goal:** Activate dormant features currently marked as `dead_code` to make the client feature-complete.

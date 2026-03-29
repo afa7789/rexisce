@@ -106,6 +106,47 @@ fn category_heading<'a>(label: &str) -> Element<'a, Message> {
         .into()
 }
 
+/// A vertical sidebar navigation button.
+fn sidebar_button<'a>(
+    label: &str,
+    tab: SettingsTab,
+    active: bool,
+) -> button::Button<'a, Message, iced::Theme, iced::Renderer> {
+    let content = text(label.to_string()).size(14);
+    button(content)
+        .padding([8, 16])
+        .width(Length::Fill)
+        .on_press(Message::TabSelected(tab))
+        .style(move |theme: &iced::Theme, status| {
+            let palette = theme.extended_palette();
+            if active {
+                button::Style {
+                    background: Some(iced::Background::Color(palette.primary.base.color)),
+                    text_color: palette.primary.base.text,
+                    border: iced::Border {
+                        radius: 6.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            } else {
+                let bg = match status {
+                    button::Status::Hovered => palette.background.strong.color,
+                    _ => iced::Color::TRANSPARENT,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    text_color: palette.background.base.text,
+                    border: iced::Border {
+                        radius: 6.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            }
+        })
+}
+
 /// Build a segmented-control button: highlighted when active, transparent when inactive.
 fn segmented_btn(
     label: &str,
@@ -156,13 +197,17 @@ fn segmented_btn(
 // SettingsTab — which tab is currently selected
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
     General,
     Chats,
-    Account,
+    Notifications,
+    Style,
     Privacy,
-    Advanced,
+    Network,
+    Data,
+    OMEMO,
+    Account,
 }
 
 impl SettingsTab {
@@ -170,9 +215,13 @@ impl SettingsTab {
         match self {
             SettingsTab::General => "General",
             SettingsTab::Chats => "Chats",
-            SettingsTab::Account => "Account",
+            SettingsTab::Notifications => "Notifications",
+            SettingsTab::Style => "Style",
             SettingsTab::Privacy => "Privacy",
-            SettingsTab::Advanced => "Advanced",
+            SettingsTab::Network => "Network",
+            SettingsTab::Data => "Data",
+            SettingsTab::OMEMO => "OMEMO",
+            SettingsTab::Account => "Account",
         }
     }
 }
@@ -341,6 +390,426 @@ impl SettingsScreen {
     /// Drain any XmppCommands produced by this panel (e.g. block/unblock).
     pub fn drain_commands(&mut self) -> Vec<crate::xmpp::XmppCommand> {
         std::mem::take(&mut self.pending_commands)
+    }
+
+    fn view_header(&self) -> Element<'_, Message> {
+        let title = text("Settings").size(20).font(iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..Default::default()
+        });
+
+        let close_btn = button(text("✕").size(16).font(iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..Default::default()
+        }))
+        .on_press(Message::Back)
+        .padding([4, 12])
+        .style(|_theme: &iced::Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    iced::Color::from_rgb(0.9, 0.2, 0.2)
+                }
+                _ => iced::Color::from_rgb(0.3, 0.3, 0.4),
+            };
+            button::Style {
+                background: Some(iced::Background::Color(bg)),
+                text_color: iced::Color::WHITE,
+                border: iced::Border {
+                    radius: 4.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        });
+
+        row![title, horizontal_space(), close_btn,]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .padding([4, 16])
+            .into()
+    }
+
+    fn view_sidebar(&self) -> Element<'_, Message> {
+        let categories = column![
+            sidebar_button(
+                "General",
+                SettingsTab::General,
+                self.active_tab == SettingsTab::General
+            ),
+            sidebar_button(
+                "Chats",
+                SettingsTab::Chats,
+                self.active_tab == SettingsTab::Chats
+            ),
+            sidebar_button(
+                "Notifications",
+                SettingsTab::Notifications,
+                self.active_tab == SettingsTab::Notifications
+            ),
+            sidebar_button(
+                "Style",
+                SettingsTab::Style,
+                self.active_tab == SettingsTab::Style
+            ),
+            sidebar_button(
+                "Privacy",
+                SettingsTab::Privacy,
+                self.active_tab == SettingsTab::Privacy
+            ),
+            sidebar_button(
+                "Network",
+                SettingsTab::Network,
+                self.active_tab == SettingsTab::Network
+            ),
+            sidebar_button("Data", SettingsTab::Data, self.active_tab == SettingsTab::Data),
+            sidebar_button(
+                "OMEMO",
+                SettingsTab::OMEMO,
+                self.active_tab == SettingsTab::OMEMO
+            ),
+            sidebar_button(
+                "Account",
+                SettingsTab::Account,
+                self.active_tab == SettingsTab::Account
+            ),
+        ]
+        .spacing(4)
+        .padding([4, 12]);
+
+        let about_btn = button(text("About").size(14))
+            .on_press(Message::OpenAbout)
+            .width(Length::Fill)
+            .padding([8, 16])
+            .style(|theme: &iced::Theme, status| {
+                let palette = theme.extended_palette();
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        palette.primary.strong.color
+                    }
+                    _ => palette.primary.base.color,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    text_color: palette.primary.base.text,
+                    border: iced::Border {
+                        radius: 6.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            });
+
+        let logout_btn = button(text("Logout").size(14).color(iced::Color::from_rgb(0.9, 0.3, 0.3)))
+            .on_press(Message::Logout)
+            .width(Length::Fill)
+            .padding([8, 16])
+            .style(|_theme, status| {
+                let bg = match status {
+                    button::Status::Hovered => iced::Color::from_rgba(1.0, 0.0, 0.0, 0.05),
+                    _ => iced::Color::TRANSPARENT,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    ..Default::default()
+                }
+            });
+
+        let footer = column![about_btn, logout_btn,].spacing(4).padding([16, 12]);
+
+        container(column![scrollable(categories).height(Length::Fill), footer])
+            .width(Length::Fixed(180.0))
+            .height(Length::Fill)
+            .style(|theme: &iced::Theme| {
+                let palette = theme.extended_palette();
+                iced::widget::container::Style {
+                    background: Some(iced::Background::Color(iced::Color {
+                        a: 0.1,
+                        ..palette.background.strong.color
+                    })),
+                    ..Default::default()
+                }
+            })
+            .into()
+    }
+
+    fn view_general(&self) -> Element<'_, Message> {
+        let is_dark = self.settings.theme == Theme::Dark;
+        let theme_row = row![
+            text("Dark theme").size(14),
+            horizontal_space(),
+            toggler(is_dark).on_toggle(|_| Message::ThemeToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let system_theme_row = row![
+            text("Use system theme").size(14),
+            horizontal_space(),
+            toggler(self.settings.use_system_theme).on_toggle(Message::SystemThemeToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let is_24h = matches!(
+            self.settings.time_format,
+            crate::config::TimeFormat::TwentyFourHour
+        );
+        let time_format_row: Element<Message> = row![
+            text("Time format").size(14),
+            horizontal_space(),
+            segmented_btn("24h", is_24h).on_press(Message::TimeFormatToggled("24h".into())),
+            segmented_btn("12h", !is_24h).on_press(Message::TimeFormatToggled("12h".into())),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into();
+
+        let font_row = row![
+            text(format!("Font size: {}", self.settings.font_size)).size(14),
+            horizontal_space(),
+            button("-")
+                .on_press(Message::FontSizeDecreased)
+                .padding([4, 10]),
+            button("+")
+                .on_press(Message::FontSizeIncreased)
+                .padding([4, 10]),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let appearance_content: Element<Message> = column![
+            theme_row,
+            setting_divider(),
+            system_theme_row,
+            setting_divider(),
+            time_format_row,
+            setting_divider(),
+            font_row,
+        ]
+        .spacing(10)
+        .into();
+
+        let appearance_section = settings_section_with_desc(
+            "Appearance",
+            Some("Theme, fonts, and display preferences"),
+            appearance_content,
+        );
+
+        scrollable(column![appearance_section].padding(20)).into()
+    }
+
+    fn view_chats(&self) -> Element<'_, Message> {
+        let receipts_row = row![
+            text("Send delivery receipts").size(14),
+            horizontal_space(),
+            toggler(self.settings.send_receipts).on_toggle(Message::SendReceiptsToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let typing_row = row![
+            text("Send typing indicators").size(14),
+            horizontal_space(),
+            toggler(self.settings.send_typing).on_toggle(Message::SendTypingToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let read_markers_row = row![
+            text("Send read markers").size(14),
+            horizontal_space(),
+            toggler(self.settings.send_read_markers).on_toggle(Message::SendReadMarkersToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let mam_current = self
+            .settings
+            .mam_default_mode
+            .as_deref()
+            .unwrap_or("roster");
+        let mam_mode_row: Element<Message> = row![
+            text("MAM archive mode").size(14),
+            horizontal_space(),
+            segmented_btn("roster", mam_current == "roster")
+                .on_press(Message::MamModeSelected("roster".into())),
+            segmented_btn("always", mam_current == "always")
+                .on_press(Message::MamModeSelected("always".into())),
+            segmented_btn("never", mam_current == "never")
+                .on_press(Message::MamModeSelected("never".into())),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into();
+
+        let messages_content: Element<Message> = column![
+            receipts_row,
+            setting_divider(),
+            typing_row,
+            setting_divider(),
+            read_markers_row,
+            setting_divider(),
+            mam_mode_row,
+        ]
+        .spacing(10)
+        .into();
+
+        let messages_section = settings_section_with_desc(
+            "Messages",
+            Some("Delivery receipts and archive settings"),
+            messages_content,
+        );
+
+        scrollable(column![messages_section].padding(20)).into()
+    }
+
+    fn view_notifications(&self) -> Element<'_, Message> {
+        let notif_row = row![
+            text("Notifications").size(14),
+            horizontal_space(),
+            toggler(self.settings.notifications_enabled).on_toggle(Message::NotificationsToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let sound_row = row![
+            text("Sound").size(14),
+            horizontal_space(),
+            toggler(self.settings.sound_enabled).on_toggle(Message::SoundToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let notifications_content: Element<Message> =
+            column![notif_row, setting_divider(), sound_row]
+                .spacing(10)
+                .into();
+
+        let notifications_section = settings_section_with_desc(
+            "Notifications",
+            Some("Alerts and sound preferences"),
+            notifications_content,
+        );
+
+        scrollable(column![notifications_section].padding(20)).into()
+    }
+
+    fn view_style(&self) -> Element<'_, Message> {
+        let join_leave_row = row![
+            text("Show join/leave in rooms").size(14),
+            horizontal_space(),
+            toggler(self.settings.show_join_leave).on_toggle(Message::ShowJoinLeaveToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let typing_indicators_row = row![
+            text("Show typing indicators").size(14),
+            horizontal_space(),
+            toggler(self.settings.show_typing_indicators)
+                .on_toggle(Message::ShowTypingIndicatorsToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let compact_layout_row = row![
+            text("Compact message layout").size(14),
+            horizontal_space(),
+            toggler(self.settings.compact_layout).on_toggle(Message::CompactLayoutToggled),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let is_alpha = self.settings.contact_sort == "alphabetical";
+        let sort_row: Element<Message> = row![
+            text("Contact sort").size(14),
+            horizontal_space(),
+            segmented_btn("Alphabetical", is_alpha)
+                .on_press(Message::SortContactsSelected("alphabetical".into())),
+            segmented_btn("Recent", !is_alpha)
+                .on_press(Message::SortContactsSelected("recent".into())),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into();
+
+        let chat_prefs_content: Element<Message> = column![
+            join_leave_row,
+            setting_divider(),
+            typing_indicators_row,
+            setting_divider(),
+            compact_layout_row,
+            setting_divider(),
+            sort_row,
+        ]
+        .spacing(10)
+        .into();
+
+        let chat_prefs_section = settings_section_with_desc(
+            "Chat Preferences",
+            Some("Room events, layout, and contact sorting"),
+            chat_prefs_content,
+        );
+
+        scrollable(column![chat_prefs_section].padding(20)).into()
+    }
+
+    fn view_privacy(&self) -> Element<'_, Message> {
+        let omemo = self.view_omemo_section();
+        let blocklist = self.blocklist.view().map(Message::Blocklist);
+
+        scrollable(column![omemo, blocklist].spacing(20).padding(20)).into()
+    }
+
+    fn view_data(&self) -> Element<'_, Message> {
+        scrollable(column![self.view_data_storage_section()].padding(20)).into()
+    }
+
+    fn view_net(&self) -> Element<'_, Message> {
+        scrollable(column![self.view_network_section()].padding(20)).into()
+    }
+
+    fn view_account(&self) -> Element<'_, Message> {
+        let avatar_row = row![
+            text("Profile avatar").size(14),
+            horizontal_space(),
+            button(text("Upload\u{2026}").size(13))
+                .on_press(Message::OpenAvatarPicker)
+                .padding([4, 12]),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let status_row = row![
+            text("Status message").size(14).width(Length::Fixed(130.0)),
+            text_input("e.g. In a meeting", &self.status_input)
+                .on_input(Message::StatusInputChanged)
+                .width(Length::Fill)
+                .padding([4, 8]),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let edit_profile_btn = button("Edit Profile")
+            .on_press(Message::OpenVCardEditor)
+            .padding([6, 14]);
+
+        let profile_content: Element<Message> = column![
+            avatar_row,
+            setting_divider(),
+            status_row,
+            setting_divider(),
+            edit_profile_btn,
+        ]
+        .spacing(10)
+        .into();
+
+        let profile_section =
+            settings_section_with_desc("Profile", Some("Avatar and status"), profile_content);
+
+        let account_section = self.view_account_details_section();
+
+        scrollable(column![profile_section, account_section].spacing(20).padding(20)).into()
     }
 
     pub fn update(&mut self, msg: Message) -> Action {
@@ -633,366 +1102,34 @@ impl SettingsScreen {
         }
     }
 
+
     pub fn view(&self) -> Element<'_, Message> {
-        // Top bar: back button (left), title (center).
-        // Logout moved to bottom of the settings panel.
-        let back_btn = button("< Back").on_press(Message::Back).padding([6, 14]);
-        let top_bar = row![
-            back_btn,
-            horizontal_space(),
-            text("Settings").size(18),
-            horizontal_space(),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .padding([8, 16]);
+        let header = self.view_header();
+        let sidebar = self.view_sidebar();
 
-        // === Appearance section ===
-        let is_dark = self.settings.theme == Theme::Dark;
-        let theme_row = row![
-            text("Dark theme").size(14),
-            horizontal_space(),
-            toggler(is_dark).on_toggle(|_| Message::ThemeToggled),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
+        let content = match self.active_tab {
+            SettingsTab::General => self.view_general(),
+            SettingsTab::Chats => self.view_chats(),
+            SettingsTab::Notifications => self.view_notifications(),
+            SettingsTab::Style => self.view_style(),
+            SettingsTab::Privacy => self.view_privacy(),
+            SettingsTab::Network => self.view_net(),
+            SettingsTab::Data => self.view_data(),
+            SettingsTab::OMEMO => self.view_privacy(), // Reuse privacy or specific
+            SettingsTab::Account => self.view_account(),
+        };
 
-        let system_theme_row = row![
-            text("Use system theme").size(14),
-            horizontal_space(),
-            toggler(self.settings.use_system_theme).on_toggle(Message::SystemThemeToggled),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-
-        let is_24h = matches!(
-            self.settings.time_format,
-            crate::config::TimeFormat::TwentyFourHour
-        );
-        let time_format_row: Element<Message> = row![
-            text("Time format").size(14),
-            horizontal_space(),
-            segmented_btn("24h", is_24h).on_press(Message::TimeFormatToggled("24h".into())),
-            segmented_btn("12h", !is_24h).on_press(Message::TimeFormatToggled("12h".into())),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into();
-
-        let font_row = row![
-            text(format!("Font size: {}", self.settings.font_size)).size(14),
-            horizontal_space(),
-            button("-")
-                .on_press(Message::FontSizeDecreased)
-                .padding([4, 10]),
-            button("+")
-                .on_press(Message::FontSizeIncreased)
-                .padding([4, 10]),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-
-        let appearance_content: Element<Message> = column![
-            theme_row,
-            setting_divider(),
-            system_theme_row,
-            setting_divider(),
-            time_format_row,
-            setting_divider(),
-            font_row,
-        ]
-        .spacing(10)
-        .into();
-        let appearance_section = settings_section_with_desc(
-            "Appearance",
-            Some("Theme, fonts, and display preferences"),
-            appearance_content,
-        );
-
-        // === Notifications section ===
-        let notif_row = row![
-            text("Notifications").size(14),
-            horizontal_space(),
-            toggler(self.settings.notifications_enabled).on_toggle(Message::NotificationsToggled),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-
-        let sound_row = row![
-            text("Sound").size(14),
-            horizontal_space(),
-            toggler(self.settings.sound_enabled).on_toggle(Message::SoundToggled),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-
-        let notifications_content: Element<Message> =
-            column![notif_row, setting_divider(), sound_row]
-                .spacing(10)
-                .into();
-        let notifications_section = settings_section_with_desc(
-            "Notifications",
-            Some("Alerts and sound preferences"),
-            notifications_content,
-        );
-
-        // === Messages section ===
-        let receipts_row = row![
-            text("Send delivery receipts").size(14),
-            horizontal_space(),
-            toggler(self.settings.send_receipts).on_toggle(Message::SendReceiptsToggled),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-
-        let typing_row = row![
-            text("Send typing indicators").size(14),
-            horizontal_space(),
-            toggler(self.settings.send_typing).on_toggle(Message::SendTypingToggled),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-
-        let read_markers_row = row![
-            text("Send read markers").size(14),
-            horizontal_space(),
-            toggler(self.settings.send_read_markers).on_toggle(Message::SendReadMarkersToggled),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-
-        let mam_current = self
-            .settings
-            .mam_default_mode
-            .as_deref()
-            .unwrap_or("roster");
-        let mam_mode_row: Element<Message> = row![
-            text("MAM archive mode").size(14),
-            horizontal_space(),
-            segmented_btn("roster", mam_current == "roster")
-                .on_press(Message::MamModeSelected("roster".into())),
-            segmented_btn("always", mam_current == "always")
-                .on_press(Message::MamModeSelected("always".into())),
-            segmented_btn("never", mam_current == "never")
-                .on_press(Message::MamModeSelected("never".into())),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into();
-
-        let messages_content: Element<Message> = column![
-            receipts_row,
-            setting_divider(),
-            typing_row,
-            setting_divider(),
-            read_markers_row,
-            setting_divider(),
-            mam_mode_row,
-        ]
-        .spacing(10)
-        .into();
-        let messages_section = settings_section_with_desc(
-            "Messages",
-            Some("Delivery receipts and archive settings"),
-            messages_content,
-        );
-
-        // === Chat Preferences section ===
-        let join_leave_row = row![
-            text("Show join/leave in rooms").size(14),
-            horizontal_space(),
-            toggler(self.settings.show_join_leave).on_toggle(Message::ShowJoinLeaveToggled),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-        let typing_indicators_row = row![
-            text("Show typing indicators").size(14),
-            horizontal_space(),
-            toggler(self.settings.show_typing_indicators)
-                .on_toggle(Message::ShowTypingIndicatorsToggled),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-        let compact_layout_row = row![
-            text("Compact message layout").size(14),
-            horizontal_space(),
-            toggler(self.settings.compact_layout).on_toggle(Message::CompactLayoutToggled),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-        let is_alpha = self.settings.contact_sort == "alphabetical";
-        let sort_row: Element<Message> = row![
-            text("Contact sort").size(14),
-            horizontal_space(),
-            segmented_btn("Alphabetical", is_alpha)
-                .on_press(Message::SortContactsSelected("alphabetical".into())),
-            segmented_btn("Recent", !is_alpha)
-                .on_press(Message::SortContactsSelected("recent".into())),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into();
-        let chat_prefs_content: Element<Message> = column![
-            join_leave_row,
-            setting_divider(),
-            typing_indicators_row,
-            setting_divider(),
-            compact_layout_row,
-            setting_divider(),
-            sort_row,
-        ]
-        .spacing(10)
-        .into();
-        let chat_prefs_section = settings_section_with_desc(
-            "Chat Preferences",
-            Some("Room events, layout, and contact sorting"),
-            chat_prefs_content,
-        );
-
-        // === Profile section ===
-        let avatar_row = row![
-            text("Profile avatar").size(14),
-            horizontal_space(),
-            button(text("Upload\u{2026}").size(13))
-                .on_press(Message::OpenAvatarPicker)
-                .padding([4, 12]),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-        let status_row = row![
-            text("Status message").size(14).width(Length::Fixed(130.0)),
-            text_input("e.g. In a meeting", &self.status_input)
-                .on_input(Message::StatusInputChanged)
-                .width(Length::Fill)
-                .padding([4, 8]),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-        let edit_profile_btn = button("Edit Profile")
-            .on_press(Message::OpenVCardEditor)
-            .padding([6, 14]);
-        let profile_content: Element<Message> = column![
-            avatar_row,
-            setting_divider(),
-            status_row,
-            setting_divider(),
-            edit_profile_btn,
-        ]
-        .spacing(10)
-        .into();
-        let profile_section =
-            settings_section_with_desc("Profile", Some("Avatar and status"), profile_content);
-
-        // === Account section ===
-        let account_section = self.view_account_details();
-
-        // === OMEMO section ===
-        let omemo_section = self.view_omemo();
-
-        // === Blocked Users section ===
-        let blocklist_section = self.blocklist.view().map(Message::Blocklist);
-
-        // === Network section ===
-        let network_section = self.view_network();
-
-        // === Data & Storage section ===
-        let data_section = self.view_data_storage();
-
-        // === Bottom actions: About + Logout ===
-        let about_btn = button("About")
-            .on_press(Message::OpenAbout)
-            .padding([6, 14]);
-        let logout_btn = button("Logout")
-            .on_press(Message::Logout)
-            .padding([6, 14])
-            .style(|theme: &iced::Theme, status| {
-                let palette = theme.extended_palette();
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        palette.danger.strong.color
-                    }
-                    _ => palette.danger.base.color,
-                };
-                button::Style {
-                    background: Some(iced::Background::Color(bg)),
-                    text_color: palette.danger.base.text,
-                    border: iced::Border {
-                        radius: 4.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            });
-        let bottom_row = row![horizontal_space(), about_btn, logout_btn]
-            .spacing(8)
-            .align_y(Alignment::Center);
-
-        // Tab bar: one segmented button per tab
-        let tabs = [
-            SettingsTab::General,
-            SettingsTab::Chats,
-            SettingsTab::Account,
-            SettingsTab::Privacy,
-            SettingsTab::Advanced,
-        ];
-        let tab_bar = tabs.iter().fold(row![].spacing(4), |r, tab| {
-            let active = *tab == self.active_tab;
-            r.push(segmented_btn(tab.label(), active).on_press(Message::TabSelected(tab.clone())))
-        });
-        let tab_bar_row = container(tab_bar).padding([6, 16]).width(Length::Fill);
-
-        // Build tab content: only the sections belonging to the active tab
-        let mut tab_col: iced::widget::Column<Message> =
-            column![].spacing(16).padding(24u16).width(500);
-
-        match self.active_tab {
-            SettingsTab::General => {
-                tab_col = tab_col
-                    .push(category_heading("GENERAL"))
-                    .push(appearance_section)
-                    .push(notifications_section);
-            }
-            SettingsTab::Chats => {
-                tab_col = tab_col
-                    .push(category_heading("COMMUNICATION"))
-                    .push(messages_section)
-                    .push(chat_prefs_section);
-            }
-            SettingsTab::Account => {
-                tab_col = tab_col
-                    .push(category_heading("ACCOUNT & PROFILE"))
-                    .push(profile_section)
-                    .push(account_section);
-            }
-            SettingsTab::Privacy => {
-                tab_col = tab_col
-                    .push(category_heading("PRIVACY & SECURITY"))
-                    .push(omemo_section)
-                    .push(blocklist_section);
-            }
-            SettingsTab::Advanced => {
-                tab_col = tab_col
-                    .push(category_heading("ADVANCED"))
-                    .push(network_section)
-                    .push(data_section);
-            }
-        }
-        tab_col = tab_col.push(bottom_row);
-
-        let inner = column![top_bar, tab_bar_row, scrollable(tab_col)]
-            .width(500)
+        let main_row = row![sidebar, container(content).width(Length::Fill).height(Length::Fill)]
             .height(Length::Fill);
 
-        container(inner)
-            .center_x(Length::Fill)
+        container(column![header, main_row])
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 
-    // M4: Account Details sub-view — rendered inline to avoid borrow/lifetime issues.
-    // UX-5: copyable text fields with copy-to-clipboard buttons.
-    fn view_account_details(&self) -> Element<'_, Message> {
+    // UX-5: account details helper
+    fn view_account_details_section(&self) -> Element<'_, Message> {
         let info = &self.account_info;
 
         let bare_jid = info.bound_jid.split('/').next().unwrap_or("").to_string();
@@ -1059,7 +1196,7 @@ impl SettingsScreen {
     }
 
     // M6: Data & Storage sub-view.
-    fn view_data_storage(&self) -> Element<'_, Message> {
+    fn view_data_storage_section(&self) -> Element<'_, Message> {
         // MAM fetch limit
         let limit_row: Element<Message> = row![
             text("MAM fetch limit").size(14),
@@ -1132,7 +1269,7 @@ impl SettingsScreen {
     }
 
     // MEMO: OMEMO encryption sub-view.
-    fn view_omemo(&self) -> Element<'_, Message> {
+    fn view_omemo_section(&self) -> Element<'_, Message> {
         let body: Element<Message> = if self.omemo_enabled {
             let id_str = self.omemo_device_id.map_or_else(
                 || "Device ID: \u{2014}".to_string(),
@@ -1170,7 +1307,7 @@ impl SettingsScreen {
     }
 
     // M5: Network settings sub-view.
-    fn view_network(&self) -> Element<'_, Message> {
+    fn view_network_section(&self) -> Element<'_, Message> {
         let is_none = self.settings.proxy_type.is_none();
         let is_socks5 = self.settings.proxy_type.as_deref() == Some("socks5");
         let is_http = self.settings.proxy_type.as_deref() == Some("http");
